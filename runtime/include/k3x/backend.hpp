@@ -200,6 +200,14 @@ public:
         return Result<std::vector<std::vector<float>>>::failure(
             ErrorCode::backend_unavailable);
     }
+    virtual Result<std::vector<std::vector<float>>>
+    raw_bf16_situ_mlp_grid_packed(
+        std::span<const float>, std::size_t,
+        std::span<const RawBf16MlpView>, float,
+        std::optional<float>, std::uint32_t, ProfilePhase) {
+        return Result<std::vector<std::vector<float>>>::failure(
+            ErrorCode::backend_unavailable);
+    }
     virtual Result<std::vector<std::vector<float>>> mxfp4_situ_mlp_group(
         std::span<const float> input, std::span<const Mxfp4MlpView> experts,
         float situ_beta, std::optional<float> situ_linear,

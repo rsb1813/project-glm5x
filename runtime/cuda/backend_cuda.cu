@@ -1471,7 +1471,7 @@ public:
         }
         return raw_bf16_situ_mlp_grid_impl(
             inputs, token_count, raw_experts, situ_beta, situ_linear, layer,
-            phase);
+            phase, {});
     }
 
     Result<std::vector<std::vector<float>>> raw_bf16_situ_mlp_grid(
@@ -1481,7 +1481,18 @@ public:
         ProfilePhase phase) override {
         return raw_bf16_situ_mlp_grid_impl(
             inputs, token_count, experts, situ_beta, situ_linear, layer,
-            phase);
+            phase, {});
+    }
+
+    Result<std::vector<std::vector<float>>>
+    raw_bf16_situ_mlp_grid_packed(
+        std::span<const float> expert_inputs, std::size_t token_count,
+        std::span<const RawBf16MlpView> experts, float situ_beta,
+        std::optional<float> situ_linear, std::uint32_t layer,
+        ProfilePhase phase) override {
+        return raw_bf16_situ_mlp_grid_impl(
+            expert_inputs, token_count, experts, situ_beta, situ_linear,
+            layer, phase, expert_inputs);
     }
 
     Result<std::vector<std::vector<float>>> mxfp4_situ_mlp_group(
@@ -3215,7 +3226,7 @@ private:
         std::span<const float> inputs, std::size_t token_count,
         std::span<const RawBf16MlpView> experts, float situ_beta,
         std::optional<float> situ_linear, std::uint32_t layer,
-        ProfilePhase phase) {
+        ProfilePhase phase, std::span<const float> packed_inputs) {
         constexpr auto precision = NumericPrecision::bf16_rounded;
         const auto operation_start = std::chrono::steady_clock::now();
         const bool bf16_output =
@@ -3243,9 +3254,9 @@ private:
         const auto input_width = experts.front().gate.cols;
         const auto intermediate_width = experts.front().gate.rows;
         const auto output_width = experts.front().down.rows;
+        const bool packed_input = !packed_inputs.empty();
         if (input_width == 0 || intermediate_width == 0 || output_width == 0 ||
             !multiply_fits(token_count, input_width) ||
-            inputs.size() != token_count * input_width ||
             !multiply_fits(experts.size(), token_count) ||
             !multiply_fits(experts.size() * token_count, intermediate_width) ||
             !multiply_fits(experts.size() * token_count, output_width)) {
@@ -3338,7 +3349,15 @@ private:
 
         const auto expert_tokens = experts.size() * token_count;
         const auto input_count = token_count * input_width;
-        const auto input_bytes = input_count * sizeof(__nv_bfloat16);
+        const auto total_input_count = packed_input
+            ? expert_tokens * input_width : input_count;
+        if (inputs.size() != total_input_count ||
+            (packed_input && packed_inputs.size() != total_input_count)) {
+            return Result<std::vector<std::vector<float>>>::failure(
+                ErrorCode::invalid_extent);
+        }
+        const auto total_input_bytes = total_input_count *
+            sizeof(__nv_bfloat16);
         const auto intermediate_count = expert_tokens * intermediate_width;
         const auto intermediate_bytes = intermediate_count * sizeof(float);
         const auto intermediate_storage_bytes = intermediate_count *
@@ -3347,11 +3366,12 @@ private:
         const auto output_count = expert_tokens * output_width;
         const auto output_bytes = output_count *
             (bf16_output ? sizeof(__nv_bfloat16) : sizeof(float));
-        std::vector<__nv_bfloat16> host_input(input_count);
-        for (std::size_t index = 0; index < input_count; ++index) {
-            host_input[index] = __float2bfloat16_rn(inputs[index]);
+        std::vector<__nv_bfloat16> host_input(total_input_count);
+        const auto source_inputs = packed_input ? packed_inputs : inputs;
+        for (std::size_t index = 0; index < total_input_count; ++index) {
+            host_input[index] = __float2bfloat16_rn(source_inputs[index]);
         }
-        if (ffn_input_scratch_.reserve(input_bytes) != cudaSuccess ||
+        if (ffn_input_scratch_.reserve(total_input_bytes) != cudaSuccess ||
             ffn_gate_scratch_.reserve(intermediate_storage_bytes) !=
                 cudaSuccess ||
             ffn_up_scratch_.reserve(intermediate_storage_bytes) !=
@@ -3422,7 +3442,7 @@ private:
                     "CUDA BF16 dense grid event creation failed");
             }
         }
-        if (cudaMemcpyAsync(device_input, host_input.data(), input_bytes,
+        if (cudaMemcpyAsync(device_input, host_input.data(), total_input_bytes,
                             cudaMemcpyHostToDevice, stream_) != cudaSuccess) {
             return Result<std::vector<std::vector<float>>>::failure(
                 ErrorCode::backend_unavailable,
@@ -3453,7 +3473,10 @@ private:
                                   static_cast<const std::byte*>(source) +
                                   expert_index * token_count * source_stride *
                                       sizeof(__nv_bfloat16))
-                            : static_cast<const void*>(device_input);
+                            : static_cast<const void*>(
+                                  device_input +
+                                  (packed_input ? expert_index * input_count
+                                                : 0));
                         host_c[expert_index] = static_cast<std::byte*>(output) +
                             expert_index * token_count * rows *
                                 (bf16_output ? sizeof(__nv_bfloat16)
@@ -3503,7 +3526,9 @@ private:
                               static_cast<const std::byte*>(source) +
                               expert_index * token_count * source_stride *
                                   sizeof(__nv_bfloat16))
-                        : static_cast<const void*>(device_input);
+                        : static_cast<const void*>(
+                              device_input +
+                              (packed_input ? expert_index * input_count : 0));
                     if (cublasLtMatmul(
                             handle_, plan->operation.get(), &alpha,
                             member.device, plan->weight_layout.get(),
@@ -3588,7 +3613,7 @@ private:
                 flat_output.begin() + (expert_index + 1) * values_per_expert);
         }
         ++runtime_stats_.stream_synchronization_count;
-        runtime_stats_.activation_h2d_bytes += input_bytes;
+        runtime_stats_.activation_h2d_bytes += total_input_bytes;
         runtime_stats_.weight_h2d_bytes += total_weight_transfer;
         runtime_stats_.device_to_host_bytes += output_bytes;
         ++runtime_stats_.ffn_block_calls;
@@ -3602,7 +3627,7 @@ private:
         runtime_stats_.resident_grid_descriptor_h2d_bytes +=
             use_pointer_batch ? pointer_bytes : 0;
         record(phase, ProfileOperation::activation_host_to_device, precision,
-               layer, operation_start, 0, input_bytes, 0, true);
+               layer, operation_start, 0, total_input_bytes, 0, true);
         record(phase, ProfileOperation::weight_host_to_device, precision,
                layer, operation_start, 0, total_weight_transfer, 0, true);
         record(phase, ProfileOperation::device_to_host, precision, layer,

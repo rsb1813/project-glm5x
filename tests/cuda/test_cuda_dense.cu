@@ -348,6 +348,39 @@ int test_bf16_resident_grid() {
         }
     }
     auto cpu = k3x::make_cpu_backend();
+    const std::vector<float> packed_inputs{
+        input[0], input[1], input[2], input[3], input[4], input[5],
+    };
+    auto packed_backend = k3x::make_cuda_backend(options);
+    if (!packed_backend) return 84;
+    const auto packed_output =
+        packed_backend.value()->raw_bf16_situ_mlp_grid_packed(
+            packed_inputs, 1, raw_experts, 1.0F, std::nullopt, 17,
+            k3x::ProfilePhase::decode);
+    if (!packed_output || packed_output.value().size() != 2 ||
+        packed_output.value()[0].size() != 2 ||
+        packed_output.value()[1].size() != 2) {
+        return 85;
+    }
+    for (std::size_t expert = 0; expert < rounded_experts.size(); ++expert) {
+        const auto expected = cpu->dense_situ_mlp(
+            std::span<const float>(rounded_input).subspan(expert * 3, 3),
+            rounded_experts[expert], 1.0F, std::nullopt, 17,
+            k3x::ProfilePhase::decode);
+        if (!expected) return 86;
+        for (std::size_t value = 0; value < expected.value().size(); ++value) {
+            if (!nearly_equal(packed_output.value()[expert][value],
+                              expected.value()[value], 2.0e-2F)) {
+                return 87;
+            }
+        }
+    }
+    const auto packed_stats = packed_backend.value()->runtime_stats();
+    if (packed_stats.activation_h2d_bytes != 12 ||
+        packed_stats.device_to_host_bytes != 16 ||
+        packed_stats.resident_grid_kernel_launches != 4) {
+        return 88;
+    }
     auto bf16_output_options = options;
     bf16_output_options.cuda_bf16_output = k3x::CudaBf16OutputMode::bf16;
     auto bf16_output_backend = k3x::make_cuda_backend(bf16_output_options);
