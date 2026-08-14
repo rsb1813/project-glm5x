@@ -8,7 +8,7 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 1
 
 ## 2026-08-14 — TurboQuant reference smoke
 
-- Commit: pending until this milestone is committed.
+- Commit: `f50c37e`.
 - Hardware: Windows host CPU reference path; no CUDA.
 - Model/checkpoint: synthetic GLM5X tensors, no GLM-5.2 weights.
 - Mode: TurboQuant reference, Hadamard rotation, 4-bit symmetric cache; separate K6/V4 capacity estimate.
