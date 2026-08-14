@@ -57,6 +57,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - The Python reference bundle/model factories accept an explicit `device` and stage embedding, norms, projections, router tensors, dense tensors, and selected expert payloads on that device. CPU remains the default, and CUDA construction is guarded by CPU-vs-CUDA parity tests; final CUDA logits and asynchronous layer overlap are not implemented yet.
 - `convert-shards --delete-source` and `tools/stream_glm5x_checkpoint.py` implement the local full-checkpoint materialization flow: repository metadata, resumable `.part` download, one safetensors shard, one `.k3x` artifact, strict reader verification, atomic source-deleted marker, then source unlink. Completed artifacts survive interruption and no full source/model residency is required.
 - The final stream bundle assembly can reuse the per-shard strict verification gate with `verify_payloads=False, verify_root=False`; the public converter CLI remains strict by default. This avoids rereading every completed payload after the source-deletion markers already establish the conversion boundary.
+- Local conversion workers may own disjoint half-open shard ranges. Each worker downloads, converts, verifies, and deletes only its assigned shards; `--no-assemble` prevents partial workers from racing on the shared final bundle, and a coordinator assembles the bundle after all ranges finish.
 
 ### In progress
 

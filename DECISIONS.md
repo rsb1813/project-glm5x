@@ -432,3 +432,11 @@
 - Evidence: the regression test covers verified-artifact detection; focused bundle/stream/converter tests passed `7/7`. A live restart showed that the prior implementation began a redundant 2.8 GB shard-1 download, which was stopped before completion; the fixed process retained the partial only for the incomplete shard and did not redownload completed shard payloads.
 - Accepted because: restart correctness remains anchored in the existing marker-aware converter validation, while avoiding needless network and disk traffic after interruption. Public Linux correctness and CodeQL for `db2cf37` passed.
 - Revisit: after a full preemption/resume drill across a completed and an incomplete shard, add a measured restart-latency benchmark and consider lazy marker validation only if the strict restart scan becomes material.
+
+## D-0055 -- Parallelize local shard conversion with disjoint ranges
+
+- Decision: support multiple local stream processes, each owning a non-overlapping half-open shard range and running with `--no-assemble`; assemble the final bundle once after all workers finish.
+- Alternatives: keep one sequential worker, let workers claim a shared queue with lock files, or run concurrent workers over overlapping ranges and rely on artifact skipping.
+- Evidence: on the RTX 5080 PC's WSL2/NTFS workspace, a single worker averaged `232 s/shard` across the first ten artifacts. Three workers started at `04:39:53`; workers completed shards `102` and `193` at `04:44:14/16`, then `103` and `194` at `04:49:36/37`, while worker 0 completed shard 12 at `04:46:52`. This demonstrates overlapping download/conversion and an initial aggregate rate above the sequential baseline, but the sample is still too short for a final speedup claim.
+- Accepted because: independent artifacts and source-deletion markers make range ownership naturally restartable, and the shared final bundle is explicitly serialized. No routing or weight semantics change.
+- Revisit: after at least ten completed shards per worker, record sustained shards/hour, CPU, NVMe traffic, and failure/retry behavior before choosing a default worker count.

@@ -374,3 +374,8 @@
 - `db2cf37` adds a completed-artifact/marker check before download. A restarted process now retains the incomplete shard `.part` and avoids redownloading finalized source-deleted shards.
 - Focused tests passed `7/7`; Linux correctness `31833153961` passed in `2m45s`; CodeQL `31833154040` passed for Python and C++.
 - A redundant shard-1 partial created by the pre-fix process remains as an isolated `.part` file; it is not used by the marker-aware path. Shard 9's large `.part` is the valid resumable input.
+
+## 2026-08-15 -- Three-worker local conversion
+
+- Added disjoint range arguments and launched three `--no-assemble` workers. The first overlap sample finalized 12, 102, 103, 193, and 194 while each worker continued to prefetch its next source.
+- The stream is now a coordinator/worker pipeline: workers never write the shared bundle, and final lazy assembly waits for all 282 source-deleted markers. Sustained throughput and failure recovery still need a longer sample.

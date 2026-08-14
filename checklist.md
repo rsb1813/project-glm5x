@@ -73,4 +73,5 @@
 - [x] Add verified source deletion markers and `convert-shards --delete-source` resume behavior.
 - [x] Add the resumable local GLM-5.2 shard stream driver with one-shard-at-a-time conversion.
 - [x] Reuse strict per-shard verification metadata during final stream bundle indexing instead of rescanning completed payloads.
+- [x] Add disjoint shard-range worker mode and no-assemble coordinator boundary for local parallel conversion.
 - [ ] Finish the 282-shard local stream and assemble the full expert bundle.

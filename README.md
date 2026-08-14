@@ -41,6 +41,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - `glm5x-convert convert-shards` treats every manifest shard as an independently restartable unit, skips already verified artifacts, and leaves completed shards intact when a later shard fails.
 - `glm5x-convert convert-shards --delete-source` verifies each finalized artifact, writes an atomic deletion marker, then removes only the source shard; retries can resume from the marker without retaining the full source checkpoint.
 - `tools/stream_glm5x_checkpoint.py` performs resumable HTTP-range downloads from the public GLM-5.2 repository, converts one shard at a time, deletes only verified source shards, and assembles the bundle after all shards finish. It never requires the full checkpoint in RAM or VRAM.
+- The stream also supports disjoint local workers with `--shard-start`, `--shard-end`, and `--no-assemble`; workers can convert separate ranges concurrently, followed by one final bundle assembly.
 - Stream completion reuses each shard's strict conversion gate for bundle indexing, so final assembly does not rescan every payload. Strict bundle admission is still the runtime default.
 - A GLM-5.2-shaped CUDA expert benchmark for hidden size 6144 and expert intermediate size 2048, including 1/2/4/8-token expert-major batching.
 - Exact resident MXFP4 reuse for CUDA expert-major batches; warm batches avoid re-uploading packed/scales weights.

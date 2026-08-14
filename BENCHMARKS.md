@@ -608,3 +608,11 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Linux correctness run `31833153961`: success in `2m45s`.
 - CodeQL run `31833154040`: success; Python analysis `2m24s`, C++ analysis `3m40s`.
 - These results cover restart semantics only. Decode tok/s, prefill tok/s, TTFT, memory traffic, and quality remain unmeasured.
+
+## 2026-08-15 -- Initial three-worker shard overlap
+
+- Commit: `6cd4e85`.
+- Hardware: RTX 5080 PC, WSL2 Ubuntu-24.04, 1 GbE, C: NVMe workspace; three Python stream workers, no final bundle assembly.
+- Range assignment: worker 0 `10..100`, worker 1 `101..191`, worker 2 `192..281` (half-open indices); first ten artifacts were already complete.
+- Observed: worker 0 finalized shard 12 at `04:46:52`; worker 1 finalized 102 and 103 at `04:44:16` and `04:49:37`; worker 2 finalized 193 and 194 at `04:44:14` and `04:49:36`. Source downloads for the next shard overlapped conversion.
+- Interpretation: the sample is an aggregate overlap signal, not a final sustained shards/hour benchmark. No model tok/s, quality, or runtime latency was measured.

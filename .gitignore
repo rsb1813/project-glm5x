@@ -10,6 +10,7 @@ build-fixtures/
 build-results/
 artifacts/
 build-glm5x-stream.log
+build-glm5x-worker-*.log
 *.k3x.partial
 *.k3x.resume.json
 *.gmlxact

@@ -168,3 +168,9 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - `db2cf37` checks for a finalized `.k3x` plus source-deleted marker before downloading. Existing `.part` files for incomplete shards are still resumed with HTTP Range.
 - Focused bundle/stream/converter tests passed `7/7`. Public correctness `31833153961` and CodeQL `31833154040` passed for the implementation.
 - The running stream was safely restarted from 8/282 completed shards; shard 9's `.part` is retained. No full-model logits or tok/s result exists.
+
+## 2026-08-15 -- Parallel local shard workers
+
+- Commit `6cd4e85` adds `--shard-start`, `--shard-end`, and `--no-assemble` to the stream driver. Three workers now own ranges `10..100`, `101..191`, and `192..281` while the first ten shards remain complete.
+- At the first measurement point, 16 artifacts existed. Workers 1 and 2 completed new shards 102/193 at `04:44:14/16` and 103/194 at `04:49:36/37`; worker 0 completed shard 12 at `04:46:52`. The aggregate sample shows download/conversion overlap; sustained throughput is still being measured.
+- Public correctness and CodeQL for `6cd4e85` are green. The full bundle, final logits, and tok/s remain open.
