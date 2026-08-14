@@ -582,3 +582,4 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Real layer-0 gate: factory setup `0.066806 s`; layer-0 dense admission `4.278880 s`; one-token layer forward `0.036846 s`; output shape `[1,1,6144]`; DSA Top-K shape `[1,1,1]`; MoE routing shape `[1,1,0]` because layer 0 is dense.
 - Performance/traffic: no full-model decode tok/s, prefill tok/s, TTFT, quality score, full VRAM, full RAM, NVMe GB/token, H2D GB/token, or final-token result was measured. These are real-layer admission/reference timings only.
 - Interpretation: the next bottleneck is complete all-layer payload availability and exact final-head state, followed by CUDA hidden-state handoff and asynchronous layer overlap.
+- Public verification: correctness `31828512721` and CodeQL `31828512789` passed for the implementation plus documentation HEAD `3a86ca3`.

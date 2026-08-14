@@ -4,7 +4,7 @@
 
 GLM5X is a correctness-first runtime and storage project for running GLM-5.x on a machine with a 16 GB consumer GPU, large system RAM, and NVMe storage. It is designed around the model's sparse MoE routing, DSA/MLA attention, MTP speculative decoding, and expert-major verification rather than treating the workload as a dense model with a generic cache.
 
-> **Status:** GLM-5.2 shape/manifest, exact layer-10 q-residual/MLA/DSA/MoE reference, a multi-layer CPU reference with final logits/greedy incremental parity, an out-of-core layer-loader boundary with opt-in trunk-layer caching, the first-three-layer dense MLP reference path, and a learned-router-aware raw-BF16 MoE sublayer CUDA boundary are implemented. The opt-in device-side expert accumulator is parity-tested but remains experimental. No GLM weights are bundled and no end-to-end tok/s number is claimed. The latest local WSL gate is host CTest 15/15, CUDA CTest 27/27, and Python 306 passed/124 skipped.
+> **Status:** GLM-5.2 shape/manifest, exact layer-10 q-residual/MLA/DSA/MoE reference, a multi-layer CPU reference with final logits/greedy incremental parity, an out-of-core layer-loader boundary with opt-in trunk-layer caching, the first-three-layer dense MLP reference path, and a learned-router-aware raw-BF16 MoE sublayer CUDA boundary are implemented. The opt-in device-side expert accumulator is parity-tested but remains experimental. No GLM weights are bundled and no end-to-end tok/s number is claimed. The latest local WSL gate is host CTest 15/15, CUDA CTest 27/27, and Python 307 passed/124 skipped.
 
 ## What is here now
 

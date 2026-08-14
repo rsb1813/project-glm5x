@@ -342,6 +342,11 @@
 - A synthetic three-layer bundle exercised dense/dense/sparse selection, shared indexer reuse, sparse expert loading, and full-vs-incremental logits. Full WSL Python passed `307 passed, 124 skipped`; host CTest passed `15/15`.
 - On the five bounded real artifacts, lazy factory setup took `0.066806 s`, layer-0 admission took `4.278880 s`, and a one-token real layer-0 CPU forward took `0.036846 s` with `[1,1,6144]` output. This is not full-model throughput.
 
+## 2026-08-15 -- Bundle factory public verification
+
+- The factory implementation plus documentation was pushed as `3a86ca3`. GitHub correctness `31828512721` and CodeQL `31828512789` both passed.
+- The implementation is now the verified model-level starting point for complete shard coverage. Full checkpoint materialization, CUDA final logits, MTP, and end-to-end tok/s remain open.
+
 ## 2026-08-15 -- Dense-layer public verification
 
 - Pushed implementation commit `fb3aa7d`. GitHub correctness `31826654966` passed C++ configure/build/CTest and the full Python/cross-language suite; CodeQL `31826655082` also passed.
