@@ -70,8 +70,8 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 
 - No full GLM-5.2 checkpoint is present; five bounded probe shards are available, so full checkpoint correctness and local TPS are not measured.
 - No full checkpoint download or Cloud Run conversion has been authorized or attempted; only five bounded probe shards are present.
-- Current Dependabot state: PRs 1-4 remain open update proposals, but the same setup-python, checkout, numpy, and setuptools bumps are already present on `1514d11`; their replacement checks are green. The repository Dependabot security-alert endpoint is disabled, so no CVE alert was verified.
-- Dependabot PRs #1–#4 are open for action/setup-python, action/checkout, numpy, and setuptools updates. Their first Linux checks failed with 50 `FileNotFoundError` cases because the bot branches were stale; all four branches were rebased onto `main`, and the replacement Linux/CodeQL checks are green (`#1` runs `31805879968`/`31805879919`, `#2` `31805884019`/`31805884008`, `#3` `31805888033`/`31805888023`, `#4` `31805890586`/`31805890614`). Repository Dependabot and vulnerability-alert APIs are disabled, so no CVE alert is confirmed.
+- Current Dependabot state: PRs 1-4 were closed after their setup-python, checkout, numpy, and setuptools bumps were integrated and verified on `a3fb8a8`; the repository Dependabot security-alert endpoint is disabled, so no CVE alert was verified.
+- Historical Dependabot note: the original PR branches first failed with 50 `FileNotFoundError` cases from absent migrated K3X evidence; their rebased replacement checks were green before the exact updates were integrated on main and the PRs were closed. Repository Dependabot and vulnerability-alert APIs are disabled, so no CVE alert is confirmed.
 - The migrated C++ runtime still has K3-oriented names and graph assumptions in several files.
 - CUDA build and bounded RTX 5080 kernel measurements are validated in WSL; native Linux end-to-end throughput has not been measured.
 - The TurboQuant implementation is CPU/reference only; it does not yet contain a packed CUDA kernel or full PolarQuant/QJL production path.
