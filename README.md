@@ -16,6 +16,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - A GLM-5.2-shaped CUDA expert benchmark for hidden size 6144 and expert intermediate size 2048, including 1/2/4/8-token expert-major batching.
 - Exact resident MXFP4 reuse for CUDA expert-major batches; warm batches avoid re-uploading packed/scales weights.
 - Opt-in resident BF16 dequantized expert-grid path using cublasLt; the native exact MXFP4 path remains the default. The bounded 8-expert/4-token sample measured 2.58 ms/block versus 5.39 ms native, while using about 604 MB instead of 160 MB for resident selected weights.
+- The shaped benchmark can compare a deterministic nonzero packed pattern against a native GPU reference with `--pattern nonzero`; this is numerical parity evidence, not a GLM quality score.
 - CPU/reference TurboQuant-style KV cache with asymmetric K/V bits and 600k–1M capacity arithmetic. This does not compress model weights and is not yet a CUDA performance path.
 - A `glm5x-convert` entry point that wraps the proven storage converter while model-specific extent roles are completed.
 - Strict separation between implemented code, experiments, proposals, and measurements.
@@ -65,6 +66,19 @@ The converter CLI is intentionally data-free in this milestone.
 ```bash
 python -m glm5x_converter.cli --help
 ```
+
+On the RTX 5080 WSL build, the bounded expert-grid comparison is explicit about its execution mode.
+
+```bash
+./build-glm5x-cuda-wsl/k3x_cuda_glm5x_moe_bench \
+  --mode grid --execution native --experts 8 --tokens 4 \
+  --warmup 20 --iterations 100
+./build-glm5x-cuda-wsl/k3x_cuda_glm5x_moe_bench \
+  --mode grid --execution dequantized-bf16 --pattern nonzero \
+  --experts 8 --tokens 4 --warmup 10 --iterations 30
+```
+
+The BF16 mode is experimental and can fall back to native MXFP4 when the configured resident budget cannot hold the dense trunk plus the selected BF16 experts.
 
 ## Roadmap
 
