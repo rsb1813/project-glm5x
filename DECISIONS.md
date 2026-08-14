@@ -240,3 +240,11 @@
 - Evidence: the RTX 5080 two-shard probe measured 1,040,559 ns warm median for common 8-expert/2-token input and 965,550 ns for sparse-packed one-token slabs per expert (about 7.2% lower block latency). CPU relative differences were 0.1777% and 0.1663%, respectively. BF16-output sparse-packed measured 995,611 ns with 0.3967% relative difference.
 - Accepted because: the mode measures the new packed-addressing contract with real payload bytes while labeling the route pattern as deterministic and non-learned. It cannot alter the default benchmark or quality claims.
 - Revisit: replace the deterministic pattern with exact GLM router assignments once DSA/MLA/trunk state is connected, then report real assignment-count distributions.
+
+## D-0031 -- Bucket ragged expert-major slabs before CUDA dispatch
+
+- Decision: add `bucket_expert_major_packed_plan` as a model-neutral CPU scheduler boundary. It groups packed expert records by assignment count in stable first-use order, concatenates each group's existing `[assignment][hidden]` slab without padding, and retains source group indices for later raw-BF16 view assembly and route scatter.
+- Alternatives: pad every expert to the largest assignment count, issue one CUDA call per expert, or make the CUDA backend infer ragged lengths and route metadata.
+- Evidence: `test_expert_major` covers separate assignment-count buckets, repeated-shape grouping, exact slab concatenation, and malformed payload rejection. The WSL CTest suite passed 26/26 and the focused GLM Python suite passed 35/35 at commit `46f2e8e`.
+- Accepted because: the existing packed CUDA API is rectangular by construction, while real MoE routes are ragged. Keeping bucketing and scatter explicit avoids hidden padding cost and preserves exact routing/audit metadata.
+- Revisit: when exact GLM router scores are connected and a real ragged assignment distribution can be executed through the bucket list with output scatter and full-layer parity.

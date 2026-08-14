@@ -4,7 +4,7 @@ No end-to-end GLM-5.2 throughput or quality benchmark has been run yet. The boun
 
 The first benchmark record must include the commit, hardware, model/checkpoint identity, mode, context length, decode and prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, quality result, and enabled optimizations.
 
-The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 31 passing tests. It is not a performance measurement.
+The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 26 passing WSL CTest cases plus 35 focused GLM Python tests. It is not a performance measurement.
 
 ## 2026-08-14 -- Cross-shard expert bundle index
 
@@ -350,3 +350,13 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Result: one expert received one `[hidden]` slab and another received two slabs in route order; the test verified hidden values, expert IDs, assignment count, and contributions metadata.
 - Decode tok/s, prefill tok/s, TTFT, VRAM, H2D/NVMe traffic, cache hit rate, Top-K quality, speculative acceptance, and task quality: not measured.
 - Caveat: this is scheduler preparation correctness, not a CUDA or end-to-end throughput result.
+
+## 2026-08-14 -- Ragged expert-major packed-batch bucketing gate
+
+- Commit: `46f2e8e`.
+- Hardware: host C++ reference path; no CUDA execution and no checkpoint.
+- Model/checkpoint: tiny synthetic hidden-state slab and route metadata only.
+- Mode: `bucket_expert_major_packed_plan`, stable first-use assignment-count buckets, source group-index retention, no padding.
+- Result: the C++ gate verified separate one- and two-assignment batches, repeated-shape concatenation, exact packed input order, and malformed payload rejection. WSL CTest passed 26/26 and the focused GLM Python suite passed 35/35.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D traffic, cache hit rate, natural Top-K, speculative acceptance, and task quality: not measured.
+- Caveat: this is a scheduler-shape correctness boundary. No GLM router, CUDA dispatch, output scatter, full layer, or end-to-end throughput is connected yet.
