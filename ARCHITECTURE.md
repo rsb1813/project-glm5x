@@ -10,6 +10,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - Portable C++20 reader, cache, prefetch, routing-policy, speculative, and expert-major interfaces.
 - GLM descriptor validation for DSA, Top-8, 256 routed experts, shared experts, and MTP metadata.
 - GLM-5.2 tensor-manifest validation for `config.json`, safetensors `weight_map`, shard names, tensor count, and source byte total without opening a weight shard.
+- Manifest role resolution for the official indexer's `wk`, `wq_b`, `weights_proj`, and `k_norm` tensors, including nearest-previous `full` source resolution for `shared` indexer layers.
 - A bounded RTX 5080 CUDA benchmark for GLM-5.2 expert dimensions (`hidden=6144`, `expert_intermediate=2048`, `group=32`) using the resident expert-grid backend.
 - Resident expert-major batch execution now admits packed/scales through the shared `ResidentWeightTable`; repeated candidate batches can reuse exact MXFP4 weights without another weight H2D upload.
 - Experimental resident BF16 expert-grid execution dequantizes exact MXFP4 values once per tensor and uses cublasLt BF16-input/FP32-output projections; native MXFP4 remains the default. A preflight budget check accounts for dense resident weights and warm BF16 keys before admission, then falls back to native without partial mixed-representation residency when the budget is insufficient.
@@ -22,7 +23,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - GLM model-specific extent roles and streaming conversion from the validated manifest.
 - GLM-5.2 reference graph with exact DSA/MLA and MoE routing.
 - Synthetic GLM-5.2 checkpoint round-trip.
-- Official GLM-5.2 indexer tensor mapping, exact DSA/MLA graph, and learned projection calibration.
+- Opening bounded official GLM-5.2 shards to validate tensor shapes/dtypes, then the exact DSA/MLA graph and learned projection calibration.
 - Wiring GLM DSA/MTP state and exact routing around the existing expert-major batch path.
 
 ### Experimental

@@ -4,7 +4,7 @@ No end-to-end GLM-5.2 throughput or quality benchmark has been run yet. The boun
 
 The first benchmark record must include the commit, hardware, model/checkpoint identity, mode, context length, decode and prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, quality result, and enabled optimizations.
 
-The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 21 passing tests. It is not a performance measurement.
+The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 22 passing tests. It is not a performance measurement.
 
 ## 2026-08-14 — TurboQuant reference smoke
 
@@ -36,7 +36,17 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Correctness result: 4 DSA tests passed, covering descriptor wiring, explicit query/key projection, exact top-k/attention selection, refresh cadence, and capacity arithmetic.
 - Formula-only capacity: with BF16 index keys, K6/V4 compressed KV, index width 4096, and key/value widths 256, the state estimate is 201,637,504 bytes at 600,000 tokens and 336,062,512 bytes at 1,000,000 tokens.
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality score: not measured.
-- Caveat: the projection API is exercised with synthetic matrices; official GLM indexer tensor mapping, DSA CUDA kernels, MLA latent projections, and full-model quality remain unimplemented.
+- Caveat: the projection API is exercised with synthetic matrices; official GLM tensor shapes/values, DSA CUDA kernels, MLA latent projections, and full-model quality remain unimplemented.
+
+## 2026-08-14 -- Official GLM-5.2 manifest role probe
+
+- Commit: `9def853`.
+- Hardware: Windows metadata-only read; no shard opened and no CUDA.
+- Model/checkpoint: `zai-org/GLM-5.2` config and `model.safetensors.index.json` from the local HF metadata cache; no weight payload downloaded.
+- Result: 59,585 tensor entries across 282 safetensors shards; descriptor `indexer_types` has 78 entries. The role resolver maps shared layers to the nearest previous full indexer source, for example layer 3 -> layer 2, layer 7 -> layer 6, and layer 77 -> layer 74.
+- Verified roles: `model.layers.{source}.self_attn.indexer.wk.weight` resolves to the expected shard for each probe layer.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality score: not measured.
+- Caveat: the index contains names and shard placement only. Tensor shapes, dtypes, learned projection values, and full-model parity still require opening bounded real shards.
 
 ## 2026-08-14 -- GLM-5.2-shaped resident expert grid
 

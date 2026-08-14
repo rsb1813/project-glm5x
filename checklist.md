@@ -18,6 +18,7 @@
 - [x] Connect descriptor DSA metadata to a CPU/reference index-key plus compressed-KV state.
 - [x] Add exact top-k refresh and separately marked stale fast refresh tests.
 - [x] Add explicit descriptor-shaped DSA query/key projection boundary.
+- [x] Resolve official GLM indexer full/shared tensor roles from the safetensors index.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [ ] Validate BF16 dequantized execution against nonzero real GLM shard data and quality metrics.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.

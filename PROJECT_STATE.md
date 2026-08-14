@@ -15,7 +15,7 @@ GLM-5.2 shape/manifest boundary, DSA/indexer CPU reference state, and RTX 5080 r
 - Added `TurboQuantConfig`, `QuantizedVector`, and `TurboQuantKVCache` with Hadamard rotation, 2/2.5/3/3.5/4/6/8/16-bit schedules, asymmetric K/V settings, incremental attention, and logical 1M-token capacity estimation.
 - Added six focused TurboQuant correctness/capacity tests.
 - Added GLM-5.2 descriptor fields for MoE intermediate width, DSA index shape, MTP sharing, and maximum position length.
-- Added `GLM5XTensorManifest` validation for safetensors weight maps, shard names, tensor count, and source byte totals.
+- Added `GLM5XTensorManifest` validation for safetensors weight maps, shard names, tensor count, source byte totals, and official indexer role resolution across `full/shared` layers.
 - Added and measured `k3x_cuda_glm5x_moe_bench` on the real RTX 5080 at GLM-5.2 expert dimensions.
 - Added an expert-major candidate-token benchmark mode for 1/2/4/8 tokens.
 - Added resident exact MXFP4 reuse to the CUDA expert-major batch backend and allowed resident weights in the CLI validation contract.
@@ -27,7 +27,7 @@ GLM-5.2 shape/manifest boundary, DSA/indexer CPU reference state, and RTX 5080 r
 - Replace synthetic K3 source assumptions in the converter with model-specific GLM manifest extent roles.
 - Build the tiny GLM-5.2-compatible reference graph and greedy parity tests.
 - Rename user-facing runtime and benchmark commands where that does not break the inherited storage ABI.
-- Map official GLM indexer tensor names and validate learned projection/reference parity.
+- Open bounded official shards to validate indexer tensor shapes/dtypes, then validate learned projection/reference parity.
 - Connect the now-resident expert-major batch backend to exact GLM DSA/MTP state and retain strict natural Top-8 verification.
 - Validate the dequantized resident-GEMM path against nonzero GLM shard data and measure VRAM-bank pressure before considering a default.
 
@@ -49,7 +49,7 @@ GLM-5.2 shape/manifest boundary, DSA/indexer CPU reference state, and RTX 5080 r
 
 ## Latest verified state
 
-- Focused GLM descriptor, manifest, CLI, toy reference, TurboQuant, and DSA tests: 21 passed, 1 CUDA Python test skipped on Windows because the WSL ELF binary is not a Windows executable.
+- Focused GLM descriptor, manifest, CLI, toy reference, TurboQuant, and DSA tests: 22 passed, 1 CUDA Python test skipped on Windows because the WSL ELF binary is not a Windows executable.
 - CUDA CMake build: successful in WSL with CUDA 13.3 and RTX 5080 compute capability 12.0.
 - CTest: 26/26 tests passed in WSL.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
@@ -59,5 +59,6 @@ GLM-5.2 shape/manifest boundary, DSA/indexer CPU reference state, and RTX 5080 r
 - Resident BF16 grid result: 8 experts x 4 candidates, 2,582,527 ns/block versus native 5,394,131 ns/block; BF16 resident weight bytes 603,979,776 versus native 160,432,128; maximum absolute error 0 on the zero-weight fixture.
 - Latest rerun: native zero-pattern grid 5,510,632 ns/block; BF16 zero-pattern grid 4,386,083 ns/block; nonzero BF16 grid 4,044,675 ns/block with 0.9505% maximum relative difference versus the native GPU reference. These remain bounded synthetic measurements only.
 - DSA reference capacity estimate: 201,637,504 bytes at 600,000 tokens and 336,062,512 bytes at 1,000,000 tokens for BF16 index keys plus K6/V4 KV with index width 4096; this is formula-only.
-- Last known-good code HEAD: `02b9916` (`feat: add GLM DSA indexer projection`).
+- Official manifest metadata probe: 59,585 tensors across 282 shards; shared indexer layer mapping is resolved without opening payloads.
+- Last known-good code HEAD: `9def853` (`feat: resolve GLM indexer tensor roles`).
 - Next bottleneck: learned DSA/indexer projections, nonzero GLM shard parity, variable-union expert grouping, and VRAM-pressure-aware choice between native MXFP4 and BF16 resident execution; full weights remain intentionally absent.

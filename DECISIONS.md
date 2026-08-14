@@ -80,3 +80,11 @@
 - Evidence: the projection test passes exact projected-key top-k selection with a synthetic matrix, while the manifest still reports no downloaded GLM shard.
 - Accepted because: the runtime contract can be tested now and swapped to official tensors later without changing cache or refresh semantics.
 - Revisit: when the official GLM indexer tensor map and a nonzero shard are available.
+
+## D-0011 -- Resolve shared indexer roles from the official metadata index
+
+- Decision: parse `indexer_types` from the GLM descriptor and resolve a `shared` layer's indexer tensors to the nearest preceding `full` layer in `GLM5XTensorManifest`; accept only the observed `wk`, `wq_b`, `weights_proj`, and `k_norm` components.
+- Alternatives: duplicate shared tensors into every layer, assume a fixed four-layer pattern, or postpone role resolution until payload download.
+- Evidence: the local official metadata reports 59,585 tensors across 282 shards and the observed full/shared pattern resolves layer 3 -> 2, layer 7 -> 6, and layer 77 -> 74 with concrete shard names.
+- Accepted because: role and shard selection can be verified from the small index file without downloading 1.5 TB, while tensor shapes remain a separate bounded-shard gate.
+- Revisit: if opened shard headers or official loader code show a different sharing rule.

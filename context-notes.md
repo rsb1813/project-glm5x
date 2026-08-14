@@ -53,5 +53,12 @@
 
 - Added `GLM5XDSAConfig`, `GLM5XDSAIndexer`, and `GLM5XDSAState` instead of pretending the standalone TurboQuant cache was already a GLM DSA graph. Descriptor metadata now determines index width/top-k policy, and explicit query/key matrices project hidden states into index keys.
 - The correctness path (`reference_mode=True`) refreshes index top-k on every query. The experimental fast path reuses the previous selection until `index_topk_freq` new tokens arrive; the distinction is explicit in the API and tests.
-- The state stores projected synthetic index keys plus the existing TurboQuant KV cache. Official tensor mapping, MLA latent transforms, and CUDA storage are still absent, so 600k/1M numbers remain arithmetic estimates.
-- Focused GLM Python coverage is now 21 passing tests. The next implementation boundary is official tensor mapping and DSA/MLA reference parity, not a speculative end-to-end TPS claim.
+- The state stores projected synthetic index keys plus the existing TurboQuant KV cache. Official role mapping is now present, while tensor shapes/values, MLA latent transforms, and CUDA storage are still absent, so 600k/1M numbers remain arithmetic estimates.
+- Focused GLM Python coverage was 21 passing tests before the role-resolution regression. The next implementation boundary is official tensor shape/value parity and DSA/MLA reference parity, not a speculative end-to-end TPS claim.
+
+## 2026-08-14 Official manifest role probe
+
+- The local HF metadata cache identifies `zai-org/GLM-5.2`; `hf download --dry-run` reports 295 files totaling about 1.5 TB. No shard payload was downloaded. XET support is installed and enabled.
+- The official index contains 59,585 tensors across 282 shards and a 78-entry `indexer_types` list. `GLM5XTensorManifest` now resolves shared indexer layers to the nearest preceding full layer and validates the observed component names.
+- Example metadata-only resolutions: layer 3 uses layer 2's indexer tensors, layer 7 uses layer 6's, and layer 77 uses layer 74's. Shape/dtype parity still requires a bounded real shard.
+- Focused GLM Python coverage becomes 22 passing tests after the role-resolution regression.
