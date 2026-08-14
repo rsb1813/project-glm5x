@@ -200,3 +200,8 @@
 
 - The packed CUDA grid returns one output slab per expert group, but exact MoE semantics require contribution-weighted accumulation back into token order. The next bounded helper will consume group-order output slabs and perform explicit validation and scatter on the CPU reference side.
 - `scatter_expert_major_outputs` now validates group-output shape and assignment totals, then accumulates each group slab by its retained token index and router contribution. The route scatter remains outside CUDA so the same helper can verify future packed dispatch against the CPU reference.
+
+## 2026-08-14 Latest bounded sparse-packed rerun
+
+- On the latest pushed HEAD, the same two-shard layer-10 probe measured common 927,744 ns/block and sparse-packed 939,149 ns/block, with zero warm weight H2D and 603,979,776 resident bytes in both runs.
+- The earlier sample showed sparse-packed lower latency, but this rerun reversed the direction. Treat packed input as a correctness/scheduling contract until a larger repeated sweep explains the variance; do not enable it as a universal speed optimization.

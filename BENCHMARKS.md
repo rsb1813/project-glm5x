@@ -370,3 +370,14 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Result: the C++ gate reconstructed token 0 as `[6.4, 12.8]` and token 1 as `[3.0, 4.0]` from two routed expert groups, and rejected a short output slab. WSL CTest passed 26/26 and the focused GLM Python suite passed 35/35.
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D traffic, cache hit rate, natural Top-K, speculative acceptance, and task quality: not measured.
 - Caveat: this validates contribution semantics only. It is not a CUDA launch, real GLM layer, learned routing, or end-to-end throughput result.
+
+## 2026-08-14 -- Latest sparse-packed real-shard rerun
+
+- Commit: `1f43e1a` (runtime behavior from `b777b1b`).
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: the same two bounded GLM-5.2 probe artifacts, layer 10, selected experts 0-15, exact raw BF16 payloads; no full checkpoint.
+- Mode: 10 warmups, 30 measured iterations, FP32 output, synchronous raw-BF16 resident pointer-array grid. `common` used a 2-token slab for every expert; `sparse-packed` used the existing deterministic alternating two-token assignment pattern. Neither is learned GLM routing.
+- Common result: 927,744 ns warm median/block, 160,786,678 ns cold latency, 603,979,776 cold weight H2D bytes, 603,979,776 resident bytes, 0 warm weight H2D, and 0.00177719456 maximum CPU-relative difference. Host payload load was 4,241,858,678 ns.
+- Sparse-packed result: 939,149 ns warm median/block, 175,614,990 ns cold latency, 603,979,776 cold weight H2D bytes, 603,979,776 resident bytes, 0 warm weight H2D, and 0.001662744442 maximum CPU-relative difference. Host payload load was 3,906,998,594 ns.
+- Relative result: sparse-packed was approximately 1.2% slower in this rerun, reversing the earlier 7.2% lower sample. This confirms the mode is shape/addressing evidence only; no stable speedup or tok/s claim follows.
+- Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, natural Top-K, speculative acceptance, and task quality: not measured.
