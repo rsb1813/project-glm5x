@@ -63,6 +63,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and an exac
 
 - No full GLM-5.2 checkpoint is present; five bounded probe shards are available, so full checkpoint correctness and local TPS are not measured.
 - No full checkpoint download or Cloud Run conversion has been authorized or attempted.
+- Dependabot PRs #1–#4 are open for action/setup-python, action/checkout, numpy, and setuptools updates. Their Linux checks fail only because the stale bot branches reference absent historical K3X artifacts; CodeQL passes. Repository Dependabot and vulnerability-alert APIs are disabled, so no CVE alert is confirmed.
 - The migrated C++ runtime still has K3-oriented names and graph assumptions in several files.
 - CUDA build and bounded RTX 5080 kernel measurements are validated in WSL; native Linux end-to-end throughput has not been measured.
 - The TurboQuant implementation is CPU/reference only; it does not yet contain a packed CUDA kernel or full PolarQuant/QJL production path.
