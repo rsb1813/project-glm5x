@@ -457,3 +457,16 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Mode: portable `GLM5XACT` v1 BF16 activation writer/loader, fixed 40-byte header, atomic Python write, C++ shape/extent/CRC validation, `GLM5XDecoderLayerForward.moe_input` exposure, and optional benchmark `--input-bf16`/`--expected-bf16` boundary.
 - Correctness result: WSL CUDA build passed; CTest `27/27` passed in `5.98 s`; public correctness workflow `31806277016` and CodeQL workflow `31806277022` passed, including the focused Python producer test. The Windows interpreter still lacks pytest, so no local Python rerun is claimed.
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality: not measured. This is an artifact-boundary test, not model execution.
+
+## 2026-08-15 -- Real layer-10 GLM SiLU and GLM5XACT parity boundary
+
+- Commit: working tree after the GLM SiLU activation change; commit pending.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL2 Ubuntu-24.04. The target CPU/RAM/NVMe were not independently sampled by this benchmark.
+- Model/checkpoint: five bounded `zai-org/GLM-5.2` `.k3x` probe artifacts, complete layer 10 only; no full checkpoint.
+- Mode: `learned-moe-layer`, official natural Top-8 sigmoid router with routed scale 2.5, 16 routed experts plus one shared expert, raw-BF16 resident expert-major/grid CUDA, explicit GLM SiLU, FP32 output, BF16-rounded input, 5 warmups, 20 measured iterations, 2 tokens.
+- Route: 16 unique routed experts and 16 assignments, average Top-K `8.0`; the Python and C++ route IDs/contributions matched for both tokens. Speculative acceptance, adaptive-K changes, and task/session profiles were not active.
+- Latency: host payload/router/shared load `10,690,416,182 ns`; cold execution `229,905,390 ns`; warm median `2,091,698 ns` per two-token MoE sublayer block. This is not decode tok/s, prefill tok/s, TTFT, or a complete decoder-layer measurement.
+- Memory/traffic: resident expert bytes `1,283,457,024`; cold H2D `1,283,457,024 bytes` (`641,728,512 bytes/token`); warm H2D `0`; router payload `3,146,752 bytes`; shared payload `75,497,472 bytes`. Process peak VRAM, system RAM, NVMe GB/token, and cache-hit rate were not instrumented; zero warm H2D is the observable resident-table reuse signal.
+- Correctness: GPU-versus-C++ CPU maximum absolute error `0.000018091101083` and relative error `0.000452667358331`. The expected GLM5XACT artifact is compared after the actual FP32 output is rounded to BF16: maximum absolute error `0.00006103515625`, relative error `0.00152439018711`. The separate unrounded CPU-versus-Python diagnostic is `0.000105291604996` absolute / `0.00262972200289` relative and reflects accumulation-order plus BF16 storage precision, not routing divergence.
+- Tests: WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the full WSL Python suite `301 passed, 124 skipped` after building the CI-compatible `build/k3x_run` executable. No end-to-end quality score, token generation, or full-model throughput was measured.
+- Interpretation: this closes the GLM MoE activation and bounded real-output handoff boundary. The next bottleneck is exact q-residual/MLA/DSA hidden-state export and full-layer parity; the repository must not claim a GLM tok/s number from this record.
