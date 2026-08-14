@@ -15,13 +15,14 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - Experimental resident BF16 expert-grid execution dequantizes exact MXFP4 values once per tensor and uses cublasLt BF16-input/FP32-output projections; native MXFP4 remains the default. A preflight budget check accounts for dense resident weights and warm BF16 keys before admission, then falls back to native without partial mixed-representation residency when the budget is insufficient.
 - GLM5X converter CLI wrapper.
 - CPU/reference TurboQuant-inspired KV cache with Hadamard rotation, integer and half-bit schedules, asymmetric K/V policy, incremental attention, and capacity estimation.
+- CPU/reference `GLM5XDSAState` that connects descriptor index metadata to an index-key store, compressed KV blocks, exact top-k refresh, and an explicitly stale fast refresh policy. Its 600k/1M capacity numbers are allocation-free estimates.
 
 ### In progress
 
 - GLM model-specific extent roles and streaming conversion from the validated manifest.
 - GLM-5.2 reference graph with exact DSA/MLA and MoE routing.
 - Synthetic GLM-5.2 checkpoint round-trip.
-- Connecting compressed KV blocks to the GLM DSA/indexer state instead of the standalone reference cache.
+- Exact GLM-5.2 DSA/MLA graph and learned indexer projection weights.
 - Wiring GLM DSA/MTP state and exact routing around the existing expert-major batch path.
 
 ### Experimental
@@ -44,7 +45,7 @@ The converter reads bounded source shards, validates identity, emits execution-o
 
 For speculative verification, GLM5X computes candidate routing first, forms a per-layer unique expert union, fetches each exact expert once, and batches candidate-token work by expert. Natural Top-8 routing remains the correctness reference.
 
-For long context, the planned path is paged DSA state with a recent high-precision window and compressed historical KV blocks. `TurboQuantKVCache` is currently a CPU/reference implementation only. Its storage estimate is a logical bit budget plus per-row scale metadata; it is not yet a packed CUDA storage format and must not be used as a throughput claim.
+For long context, the current reference path stores descriptor-shaped index keys beside compressed historical KV blocks in `GLM5XDSAState`. `reference_mode=True` recomputes exact top-k for every query. The experimental fast path reuses the last selection until `index_topk_freq` new tokens arrive; this is a scheduling contract, not a claim about the learned production indexer. `TurboQuantKVCache` and the DSA state are CPU/reference implementations only. Their storage estimates are logical byte budgets, not a packed CUDA storage format, and must not be used as a throughput claim.
 
 ## Model boundary
 

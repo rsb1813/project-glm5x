@@ -64,3 +64,11 @@
 - Accepted because: the measured speedup is material and the exact native path remains available; the memory multiplier and missing quality benchmark make a default switch unjustified.
 - Accepted guardrail: BF16 capacity is preflighted before admission, warm resident keys are excluded from the remaining-byte calculation, and insufficient capacity falls back to native before any partial BF16 admission. The released-dimension check reproduced a 14,319,240 ns fallback versus 6,333,866 ns native with zero oracle error.
 - Revisit: after nonzero GLM shard parity, VRAM-bank pressure measurements, and end-to-end DSA/MoE quality tests.
+
+## D-0009 -- Bind descriptor DSA metadata to a CPU reference state first
+
+- Decision: add `GLM5XDSAConfig` and `GLM5XDSAState` as a CPU/reference bridge between descriptor index metadata, index keys, and the existing compressed KV cache. Keep exact per-query top-k refresh as the correctness path and expose stale refresh cadence only as an explicit experiment.
+- Alternatives: leave TurboQuant as a standalone cache, implement a CUDA DSA kernel before a state contract, or infer the learned indexer from the model name without metadata validation.
+- Evidence: the new tests pass exact top-k/attention selection with lossless KV, verify the `index_topk_freq` refresh boundary, and compute allocation-free 600k/1M state estimates of 201,637,504 and 336,062,512 bytes for the documented BF16-index/K6/V4 shape.
+- Accepted because: it creates a testable state boundary without claiming that synthetic index keys are the learned GLM indexer. The reference and fast refresh semantics are visible and reversible.
+- Revisit: when a real GLM shard or official indexer projection is available, before enabling any CUDA or stale-selection path by default.

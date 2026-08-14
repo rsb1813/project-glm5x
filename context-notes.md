@@ -48,3 +48,10 @@
 - Re-ran the bounded GLM-5.2-shaped 8-expert/4-token grid on the RTX 5080 after the capacity guard was committed. Native zero-pattern median was 5,510,632 ns/block and resident BF16 median was 4,386,083 ns/block.
 - Re-ran the nonzero BF16 comparison at 4,044,675 ns/block. The maximum relative difference against the native GPU reference was 0.0095046479255 (0.9505%).
 - Recorded the new values as an additional benchmark entry rather than overwriting prior samples. The benchmark remains a layer/kernel measurement; no model tok/s or quality conclusion is permitted.
+
+## 2026-08-14 DSA/indexer reference state
+
+- Added `GLM5XDSAConfig` and `GLM5XDSAState` instead of pretending the standalone TurboQuant cache was already a GLM DSA graph. Descriptor metadata now determines index width and top-k policy.
+- The correctness path (`reference_mode=True`) refreshes index top-k on every query. The experimental fast path reuses the previous selection until `index_topk_freq` new tokens arrive; the distinction is explicit in the API and tests.
+- The state stores synthetic index keys plus the existing TurboQuant KV cache. It does not implement learned indexer projections, MLA latent transforms, or CUDA storage, so 600k/1M numbers remain arithmetic estimates.
+- Focused GLM Python coverage is now 20 passing tests. The next implementation boundary is the learned/indexer-compatible reference graph, not a speculative end-to-end TPS claim.

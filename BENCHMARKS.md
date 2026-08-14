@@ -4,7 +4,7 @@ No end-to-end GLM-5.2 throughput or quality benchmark has been run yet. The boun
 
 The first benchmark record must include the commit, hardware, model/checkpoint identity, mode, context length, decode and prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, quality result, and enabled optimizations.
 
-The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 13 passing tests. It is not a performance measurement.
+The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 20 passing tests. It is not a performance measurement.
 
 ## 2026-08-14 — TurboQuant reference smoke
 
@@ -26,6 +26,17 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 1
 - Quality result: six tests passed, including lossless round-trip, compressed shape/size, fractional schedule, incremental attention parity, invalid configuration, and 1M-token capacity arithmetic.
 - Enabled optimizations: CPU reference quantization only.
 - Caveat: this record validates a contract and arithmetic, not full-model quality or throughput.
+
+## 2026-08-14 -- GLM-5.2 DSA/indexer reference state smoke
+
+- Commit: `68e0e21`.
+- Hardware: Windows CPU reference path; no CUDA and no checkpoint.
+- Model/checkpoint: descriptor-only synthetic GLM-5.2 metadata with index width `2 x 2 = 4`, `index_topk=3`, and `index_topk_freq=2`.
+- Mode: `GLM5XDSAState` with lossless 16-bit KV for selection parity; reference mode refreshes top-k for every query, while fast mode reuses the selection until two new tokens arrive.
+- Correctness result: 3 DSA tests passed, covering descriptor wiring, exact top-k/attention selection, refresh cadence, and capacity arithmetic.
+- Formula-only capacity: with BF16 index keys, K6/V4 compressed KV, index width 4096, and key/value widths 256, the state estimate is 201,637,504 bytes at 600,000 tokens and 336,062,512 bytes at 1,000,000 tokens.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality score: not measured.
+- Caveat: this state uses synthetic index keys and does not implement the learned GLM indexer projections, DSA CUDA kernels, MLA latent projections, or full-model quality.
 
 ## 2026-08-14 -- GLM-5.2-shaped resident expert grid
 

@@ -15,6 +15,9 @@
 - [x] Add opt-in resident BF16 dequantized expert-batch/grid execution with exact native fallback and parity tests.
 - [x] Measure native versus BF16 resident grid latency and VRAM on the RTX 5080 shaped fixture.
 - [x] Validate BF16 dequantized execution against a nonzero synthetic packed MXFP4 native reference.
+- [x] Connect descriptor DSA metadata to a CPU/reference index-key plus compressed-KV state.
+- [x] Add exact top-k refresh and separately marked stale fast refresh tests.
+- [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [ ] Validate BF16 dequantized execution against nonzero real GLM shard data and quality metrics.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.
 - [ ] Add MTP/DSpark expert-major verification to the GLM path.
