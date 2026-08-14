@@ -216,6 +216,7 @@ class GLM5XDecoderModelReference:
         layer_cache_capacity: int = 0,
         device: torch.device | str | None = None,
         execution_mode: str = "loop",
+        use_sparse_topk: bool = False,
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache_capacity_bytes: int = 0,
@@ -317,6 +318,7 @@ class GLM5XDecoderModelReference:
                 indexer_rope_interleave=indexer_rope_interleave,
                 device=target,
                 execution_mode=execution_mode,
+                use_sparse_topk=use_sparse_topk,
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
             )

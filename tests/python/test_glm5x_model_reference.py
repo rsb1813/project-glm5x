@@ -234,6 +234,14 @@ def test_model_reference_factory_loads_dense_sparse_and_shared_indexer_layers(tm
         layer_cache_capacity=3,
     )
     forward = model.forward_tokens(torch.tensor([1, 2]))
+    sparse_model = GLM5XDecoderModelReference.from_bundle(
+        bundle_path,
+        config=config,
+        layer_cache_capacity=3,
+        use_sparse_topk=True,
+    )
+    sparse_forward = sparse_model.forward_tokens(torch.tensor([1, 2]))
+    torch.testing.assert_close(sparse_forward.logits, forward.logits, rtol=1e-5, atol=1e-5)
 
     assert isinstance(model._load_layer(0).moe, GLM5XDenseMlpReference)
     assert isinstance(model._load_layer(1).moe, GLM5XDenseMlpReference)

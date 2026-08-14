@@ -157,6 +157,61 @@ def test_glm5x_mla_reuses_precomputed_q_residual_without_output_drift() -> None:
     torch.testing.assert_close(reused.state.kv_nope, baseline.state.kv_nope)
 
 
+def test_glm5x_mla_sparse_topk_matches_dense_masked_attention() -> None:
+    sample = _synthetic_mla()
+    dense = GLM5XMLAReference(sample.weights)
+    sparse = GLM5XMLAReference(sample.weights, use_sparse_topk=True)
+    topk = torch.tensor(
+        [[[0, 1], [0, 2], [1, 3], [2, 3]]], dtype=torch.int32
+    )
+    kwargs = {
+        "position_ids": torch.arange(4).view(1, 4),
+        "topk_indices": topk,
+    }
+    dense_result = dense(sample.hidden, (sample.cos, sample.sin), **kwargs)
+    sparse_result = sparse(sample.hidden, (sample.cos, sample.sin), **kwargs)
+    torch.testing.assert_close(sparse_result.output, dense_result.output, rtol=1e-5, atol=1e-5)
+    torch.testing.assert_close(sparse_result.state.kv_nope, dense_result.state.kv_nope)
+
+
+def test_glm5x_mla_sparse_topk_incremental_matches_dense_state() -> None:
+    sample = _synthetic_mla()
+    dense = GLM5XMLAReference(sample.weights)
+    sparse = GLM5XMLAReference(sample.weights, use_sparse_topk=True)
+    first_kwargs = {
+        "position_ids": torch.arange(3).view(1, 3),
+        "topk_indices": torch.tensor([[[0, 1], [0, 2], [1, 2]]], dtype=torch.int32),
+    }
+    dense_first = dense(
+        sample.hidden[:, :3],
+        (sample.cos[:, :3], sample.sin[:, :3]),
+        **first_kwargs,
+    )
+    sparse_first = sparse(
+        sample.hidden[:, :3],
+        (sample.cos[:, :3], sample.sin[:, :3]),
+        **first_kwargs,
+    )
+    last_kwargs = {
+        "position_ids": torch.tensor([[3]]),
+        "topk_indices": torch.tensor([[[0, 2]]], dtype=torch.int32),
+    }
+    dense_last = dense(
+        sample.hidden[:, 3:],
+        (sample.cos[:, 3:], sample.sin[:, 3:]),
+        state=dense_first.state,
+        **last_kwargs,
+    )
+    sparse_last = sparse(
+        sample.hidden[:, 3:],
+        (sample.cos[:, 3:], sample.sin[:, 3:]),
+        state=sparse_first.state,
+        **last_kwargs,
+    )
+    torch.testing.assert_close(sparse_last.output, dense_last.output, rtol=1e-5, atol=1e-5)
+    torch.testing.assert_close(sparse_last.state.kv_nope, dense_last.state.kv_nope)
+
+
 def _synthetic_indexer() -> GLM5XOfficialDSAIndexer:
     torch.manual_seed(23)
     return GLM5XOfficialDSAIndexer(

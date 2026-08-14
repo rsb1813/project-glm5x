@@ -42,6 +42,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--execution-mode", choices=("loop", "expert_major"), default="loop"
     )
     parser.add_argument(
+        "--sparse-topk-attention",
+        action="store_true",
+        help="use only DSA-selected key/value positions in the MLA attention path",
+    )
+    parser.add_argument(
         "--expert-load-workers",
         type=int,
         default=1,
@@ -94,6 +99,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         layer_cache_capacity=arguments.layer_cache_capacity,
         device=device,
         execution_mode=arguments.execution_mode,
+        use_sparse_topk=arguments.sparse_topk_attention,
         expert_load_workers=arguments.expert_load_workers,
         expert_cache_capacity_bytes=arguments.expert_cache_bytes,
         expert_device_cache_capacity_bytes=arguments.expert_device_cache_bytes,
@@ -153,6 +159,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         "cache_experts": arguments.cache_experts,
         "layer_cache_capacity": arguments.layer_cache_capacity,
         "execution_mode": arguments.execution_mode,
+        "sparse_topk_attention": arguments.sparse_topk_attention,
         "expert_load_workers": arguments.expert_load_workers,
         "expert_cache_bytes": arguments.expert_cache_bytes,
         "expert_device_cache_bytes": arguments.expert_device_cache_bytes,

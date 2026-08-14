@@ -84,6 +84,7 @@ class GLM5XDecoderLayerReference:
         indexer_rope_interleave: bool = True,
         device: torch.device | str | None = None,
         execution_mode: str = "loop",
+        use_sparse_topk: bool = False,
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
@@ -114,6 +115,7 @@ class GLM5XDecoderLayerReference:
             indexer_rope_interleave=indexer_rope_interleave,
             device=device,
             execution_mode=execution_mode,
+            use_sparse_topk=use_sparse_topk,
             expert_load_workers=expert_load_workers,
             expert_device_cache=expert_device_cache,
         )
@@ -141,6 +143,7 @@ class GLM5XDecoderLayerReference:
         indexer_rope_interleave: bool = True,
         device: torch.device | str | None = None,
         execution_mode: str = "loop",
+        use_sparse_topk: bool = False,
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
@@ -175,6 +178,7 @@ class GLM5XDecoderLayerReference:
                 indexer_rope_interleave=indexer_rope_interleave,
                 device=device,
                 execution_mode=execution_mode,
+                use_sparse_topk=use_sparse_topk,
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
             )
@@ -204,6 +208,7 @@ class GLM5XDecoderLayerReference:
         indexer_rope_interleave: bool = True,
         device: torch.device | str | None = None,
         execution_mode: str = "loop",
+        use_sparse_topk: bool = False,
         expert_load_workers: int = 1,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
     ) -> "GLM5XDecoderLayerReference":
@@ -231,7 +236,8 @@ class GLM5XDecoderLayerReference:
                 qk_rope_head_dim=qk_rope_head_dim,
                 v_head_dim=v_head_dim,
                 rms_norm_eps=rms_norm_eps,
-            )
+            ),
+            use_sparse_topk=use_sparse_topk,
         )
         indexer_layer = layer_id if indexer_source_layer is None else indexer_source_layer
         indexer_prefix = f"model.layers.{indexer_layer}.self_attn.indexer"

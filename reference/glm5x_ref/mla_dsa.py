@@ -146,8 +146,11 @@ class GLM5XMLAForward:
 class GLM5XMLAReference:
     """Exact eager MLA reference with optional DSA-selected attention positions."""
 
-    def __init__(self, weights: GLM5XMLAWeights) -> None:
+    def __init__(self, weights: GLM5XMLAWeights, *, use_sparse_topk: bool = False) -> None:
+        if not isinstance(use_sparse_topk, bool):
+            raise ValueError("GLM5X_MLA_SPARSE_TOPK_FLAG")
         self.weights = weights
+        self.use_sparse_topk = use_sparse_topk
 
     def _linear(
         self, values: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None
@@ -167,6 +170,68 @@ class GLM5XMLAReference:
             self._linear(hidden_states, self.weights.q_a_proj, self.weights.q_a_bias),
             self.weights.q_a_norm,
             self.weights.rms_norm_eps,
+        )
+
+    def _sparse_topk_attention(
+        self,
+        q_pass: torch.Tensor,
+        q_rot: torch.Tensor,
+        all_kv_nope: torch.Tensor,
+        all_k_rot: torch.Tensor,
+        key_positions: torch.Tensor,
+        position_ids: torch.Tensor,
+        topk_indices: torch.Tensor,
+        qk_head_dim: int,
+    ) -> torch.Tensor:
+        batch_size = q_pass.shape[0]
+        seq_length = q_pass.shape[2]
+        topk = topk_indices.shape[-1]
+        if topk <= 0:
+            raise ValueError("GLM5X_MLA_TOPK_SHAPE")
+        indices = topk_indices.to(torch.long)
+        compressed = all_kv_nope[:, 0]
+        selected_compressed = torch.gather(
+            compressed.unsqueeze(1).expand(-1, seq_length, -1, -1),
+            2,
+            indices.unsqueeze(-1).expand(-1, -1, -1, compressed.shape[-1]),
+        )
+        expanded = self._linear(selected_compressed, self.weights.kv_b_proj, None).view(
+            batch_size,
+            seq_length,
+            topk,
+            self.weights.num_heads,
+            self.weights.qk_nope_head_dim + self.weights.v_head_dim,
+        ).permute(0, 3, 1, 2, 4)
+        k_nope, values = expanded.split(
+            (self.weights.qk_nope_head_dim, self.weights.v_head_dim), dim=-1
+        )
+        rotated = all_k_rot[:, 0]
+        selected_rotated = torch.gather(
+            rotated.unsqueeze(1).expand(-1, seq_length, -1, -1),
+            2,
+            indices.unsqueeze(-1).expand(-1, -1, -1, rotated.shape[-1]),
+        )
+        keys = torch.cat(
+            (k_nope, selected_rotated.unsqueeze(1).expand(-1, self.weights.num_heads, -1, -1, -1)),
+            dim=-1,
+        )
+        queries = torch.cat((q_pass, q_rot), dim=-1)
+        scores = torch.matmul(
+            queries.to(torch.float32).unsqueeze(-2),
+            keys.to(torch.float32).transpose(-1, -2),
+        ).squeeze(-2)
+        scores = scores * (qk_head_dim ** -0.5)
+        selected_positions = torch.gather(
+            key_positions.unsqueeze(1).expand(-1, seq_length, -1), 2, indices
+        )
+        causal = selected_positions > position_ids.unsqueeze(-1)
+        scores = scores.masked_fill(
+            causal[:, None, :, :], torch.finfo(scores.dtype).min
+        )
+        probabilities = torch.softmax(scores, dim=-1).to(values.dtype)
+        attended = torch.matmul(probabilities.unsqueeze(-2), values).squeeze(-2)
+        return attended.transpose(1, 2).reshape(
+            batch_size, seq_length, self.weights.num_heads * self.weights.v_head_dim
         )
 
     def __call__(
@@ -227,6 +292,27 @@ class GLM5XMLAReference:
             all_k_rot = torch.cat((state.k_rot, k_rot), dim=2)
             key_positions = torch.cat((state.positions, position_ids), dim=1)
 
+        if topk_indices is not None:
+            topk_indices = torch.as_tensor(topk_indices, device=hidden_states.device)
+            if topk_indices.ndim != 3 or topk_indices.shape[:2] != (batch_size, seq_length):
+                raise ValueError("GLM5X_MLA_TOPK_SHAPE")
+            if torch.any(topk_indices < 0) or torch.any(topk_indices >= key_positions.shape[1]):
+                raise ValueError("GLM5X_MLA_TOPK_RANGE")
+        if self.use_sparse_topk and topk_indices is not None:
+            attended = self._sparse_topk_attention(
+                q_pass,
+                q_rot,
+                all_kv_nope,
+                all_k_rot,
+                key_positions,
+                position_ids,
+                topk_indices,
+                qk_head_dim,
+            )
+            output = self._linear(attended, self.weights.o_proj, self.weights.o_bias)
+            next_state = GLM5XMLAState(all_kv_nope, all_k_rot, key_positions)
+            return GLM5XMLAForward(output, q_resid, next_state, topk_indices)
+
         expanded = self._linear(all_kv_nope, self.weights.kv_b_proj, None).view(
             batch_size, -1, self.weights.num_heads, self.weights.qk_nope_head_dim + self.weights.v_head_dim
         ).transpose(1, 2)
@@ -238,11 +324,6 @@ class GLM5XMLAReference:
         causal = key_positions[:, None, :] > position_ids[:, :, None]
         scores = scores.masked_fill(causal[:, None, :, :], torch.finfo(scores.dtype).min)
         if topk_indices is not None:
-            topk_indices = torch.as_tensor(topk_indices, device=hidden_states.device)
-            if topk_indices.ndim != 3 or topk_indices.shape[:2] != (batch_size, seq_length):
-                raise ValueError("GLM5X_MLA_TOPK_SHAPE")
-            if torch.any(topk_indices < 0) or torch.any(topk_indices >= key_positions.shape[1]):
-                raise ValueError("GLM5X_MLA_TOPK_RANGE")
             selected = torch.zeros(
                 (batch_size, seq_length, key_positions.shape[1]), dtype=torch.bool, device=hidden_states.device
             )
