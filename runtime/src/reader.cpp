@@ -532,7 +532,7 @@ Result<Reader> Reader::open(const std::filesystem::path& path,
     for (std::size_t index = 0; index < *tensor_count; ++index) {
         const auto raw_record = directory.subspan(16 + index * tensor_record_bytes, tensor_record_bytes);
         auto record = decode_tensor(raw_record);
-        if (record.rank > 4 || (record.dtype != 1 && record.dtype != 2) ||
+        if (record.rank > 4 || (record.dtype != 1 && record.dtype != 2 && record.dtype != 3) ||
             record.quantization > 1 || little<std::uint32_t>(raw_record, 8) != 0 ||
             little<std::uint8_t>(raw_record, 17) != 0 ||
             little<std::uint16_t>(raw_record, 18) != 0 ||
@@ -545,7 +545,7 @@ Result<Reader> Reader::open(const std::filesystem::path& path,
                 return Result<Reader>::failure(ErrorCode::invalid_directory);
             }
         }
-        const bool plain = record.dtype == 1 && record.quantization == 0 &&
+        const bool plain = (record.dtype == 1 || record.dtype == 3) && record.quantization == 0 &&
                            record.auxiliary_length == 0 && record.auxiliary_offset == 0 &&
                            record.auxiliary_crc32c == 0;
         const bool mxfp4 = record.dtype == 2 && record.quantization == 1 &&

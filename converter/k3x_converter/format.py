@@ -32,6 +32,7 @@ class K3XError(ValueError):
 class DType(enum.IntEnum):
     FP32 = 1
     UINT8 = 2
+    BF16 = 3
 
 
 class Quantization(enum.IntEnum):
