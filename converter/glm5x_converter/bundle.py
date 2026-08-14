@@ -7,6 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 from k3x_converter.format import K3XError, TensorRecord
 from k3x_converter.reader import K3XReader
@@ -26,6 +27,112 @@ class GLM5XExpertBundleReport:
     tensor_count: int
     complete_expert_count: int
     incomplete_expert_count: int
+
+
+@dataclass(frozen=True)
+class GLM5XExpertBundle:
+    """검증된 cross-shard expert 인덱스와 payload reader 묶음입니다."""
+
+    path: Path
+    metadata: Mapping[str, object]
+    artifact_paths: Mapping[str, Path]
+    readers: Mapping[str, K3XReader]
+    experts: Mapping[tuple[int, int], Mapping[str, Mapping[str, object]]]
+
+    @classmethod
+    def open(cls, path: str | Path) -> "GLM5XExpertBundle":
+        path = Path(path)
+        try:
+            metadata = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise K3XError("EXPERT_BUNDLE_INVALID", str(path)) from exc
+        if metadata.get("format") != "glm5x-expert-bundle-v1":
+            raise K3XError("EXPERT_BUNDLE_FORMAT", str(path))
+        artifacts = metadata.get("artifacts")
+        if not isinstance(artifacts, list) or not artifacts:
+            raise K3XError("EXPERT_BUNDLE_ARTIFACTS", str(path))
+        artifact_paths: dict[str, Path] = {}
+        readers: dict[str, K3XReader] = {}
+        for item in artifacts:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                raise K3XError("EXPERT_BUNDLE_ARTIFACT_METADATA", str(path))
+            relative = item["path"]
+            if relative in artifact_paths:
+                raise K3XError("EXPERT_BUNDLE_DUPLICATE_ARTIFACT", relative)
+            artifact = (path.parent / relative).resolve()
+            if not artifact.is_file():
+                raise K3XError("EXPERT_BUNDLE_ARTIFACT_MISSING", str(artifact))
+            reader = K3XReader.open(artifact)
+            if (
+                item.get("file_uuid") != reader.superblock.file_uuid.hex()
+                or item.get("root_sha256") != reader.superblock.root_sha256.hex()
+                or item.get("source_sha256") != reader.superblock.source_sha256.hex()
+                or item.get("tensor_count") != len(reader.tensor_records)
+            ):
+                raise K3XError("EXPERT_BUNDLE_ARTIFACT_MISMATCH", relative)
+            artifact_paths[relative] = artifact
+            readers[relative] = reader
+        raw_experts = metadata.get("experts")
+        if not isinstance(raw_experts, list):
+            raise K3XError("EXPERT_BUNDLE_EXPERTS", str(path))
+        experts: dict[tuple[int, int], Mapping[str, Mapping[str, object]]] = {}
+        for item in raw_experts:
+            if not isinstance(item, dict) or not isinstance(item.get("roles"), dict):
+                raise K3XError("EXPERT_BUNDLE_EXPERT_METADATA", str(path))
+            layer_id, expert_id = item.get("layer_id"), item.get("expert_id")
+            if not isinstance(layer_id, int) or not isinstance(expert_id, int):
+                raise K3XError("EXPERT_BUNDLE_EXPERT_METADATA", str(path))
+            key = (layer_id, expert_id)
+            if key in experts:
+                raise K3XError("EXPERT_BUNDLE_DUPLICATE_EXPERT", f"{layer_id}:{expert_id}")
+            roles = item["roles"]
+            if set(roles) != set(_ROLES):
+                raise K3XError("EXPERT_BUNDLE_INCOMPLETE_EXPERT", f"{layer_id}:{expert_id}")
+            experts[key] = roles
+        return cls(path, metadata, artifact_paths, readers, experts)
+
+    def read_expert(self, layer_id: int, expert_id: int) -> dict[str, bytes]:
+        roles = self.experts.get((layer_id, expert_id))
+        if roles is None:
+            raise K3XError("EXPERT_BUNDLE_EXPERT_NOT_FOUND", f"{layer_id}:{expert_id}")
+        result: dict[str, bytes] = {}
+        for role in _ROLES:
+            item = roles[role]
+            ref = item.get("ref")
+            if not isinstance(ref, dict) or not isinstance(ref.get("artifact"), str):
+                raise K3XError("EXPERT_BUNDLE_REFERENCE_METADATA", role)
+            artifact_key = ref["artifact"]
+            reader = self.readers.get(artifact_key)
+            if reader is None or not isinstance(ref.get("tensor_id"), int):
+                raise K3XError("EXPERT_BUNDLE_REFERENCE_ARTIFACT", artifact_key)
+            record = next(
+                (record for record in reader.tensor_records if record.tensor_id == ref["tensor_id"]),
+                None,
+            )
+            if record is None:
+                raise K3XError("EXPERT_BUNDLE_REFERENCE_TENSOR", role)
+            expected = {
+                "dtype": record.dtype.name,
+                "quantization": record.quantization.name,
+                "shape": list(record.dimensions),
+                "data_offset": record.data_offset,
+                "data_length": record.data_length,
+                "logical_length": record.logical_length,
+                "data_crc32c": record.data_crc32c,
+            }
+            if any(ref.get(key) != value for key, value in expected.items()):
+                raise K3XError("EXPERT_BUNDLE_REFERENCE_MISMATCH", role)
+            if (
+                record.dtype.name != "BF16"
+                or record.quantization.name != "NONE"
+                or record.auxiliary_length != 0
+            ):
+                raise K3XError("EXPERT_BUNDLE_UNSUPPORTED_PAYLOAD", role)
+            data, auxiliary = reader.read_tensor_extents(record)
+            if auxiliary:
+                raise K3XError("EXPERT_BUNDLE_AUXILIARY_PAYLOAD", role)
+            result[role] = data
+        return result
 
 
 def _relative_artifact(path: Path, output: Path) -> str:

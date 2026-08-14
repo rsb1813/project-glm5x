@@ -6,7 +6,7 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
-from glm5x_converter.bundle import assemble_glm5x_expert_bundle
+from glm5x_converter.bundle import GLM5XExpertBundle, assemble_glm5x_expert_bundle
 from glm5x_converter.shard import convert_glm5x_shard
 from glm5x_ref.manifest import GLM5XTensorManifest
 from k3x_converter.format import K3XError
@@ -75,6 +75,33 @@ def test_expert_bundle_joins_roles_from_independent_artifacts(tmp_path) -> None:
     assert expert["roles"]["gate_proj"]["ref"]["artifact"] == "a.k3x"
     assert expert["roles"]["down_proj"]["ref"]["artifact"] == "b.k3x"
     assert not (artifact_dir / "experts.json.partial").exists()
+    payload = GLM5XExpertBundle.open(artifact_dir / "experts.json").read_expert(0, 0)
+    assert set(payload) == {"gate_proj", "up_proj", "down_proj"}
+    assert all(len(value) == 16 for value in payload.values())
+
+
+def test_expert_bundle_rejects_reference_offset_tampering(tmp_path) -> None:
+    source = tmp_path / "source.safetensors"
+    name = "model.layers.0.mlp.experts.0.gate_proj.weight"
+    save_file({name: torch.ones((2, 4), dtype=torch.bfloat16)}, str(source))
+    manifest = _make_manifest([source.name], [name], source.stat().st_size)
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    convert_glm5x_shard(source, artifact_dir / "a.k3x", manifest, source.name)
+    # Complete the bundle with synthetic role metadata so the loader reaches the offset check.
+    for role in ("up_proj", "down_proj"):
+        role_source = tmp_path / f"{role}.safetensors"
+        role_name = f"model.layers.0.mlp.experts.0.{role}.weight"
+        save_file({role_name: torch.ones((2, 4), dtype=torch.bfloat16)}, str(role_source))
+        role_manifest = _make_manifest([role_source.name], [role_name], role_source.stat().st_size)
+        convert_glm5x_shard(role_source, artifact_dir / f"{role}.k3x", role_manifest, role_source.name)
+    bundle_path = artifact_dir / "experts.json"
+    assemble_glm5x_expert_bundle(artifact_dir, bundle_path)
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    bundle["experts"][0]["roles"]["gate_proj"]["ref"]["data_offset"] += 4096
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+    with pytest.raises(K3XError, match="EXPERT_BUNDLE_REFERENCE_MISMATCH"):
+        GLM5XExpertBundle.open(bundle_path).read_expert(0, 0)
 
 
 def test_expert_bundle_rejects_duplicate_role(tmp_path) -> None:

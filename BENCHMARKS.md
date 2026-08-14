@@ -16,6 +16,16 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
 - Interpretation: this measures metadata/index construction only. It does not copy payloads, load BF16 experts into CUDA, or establish end-to-end throughput.
 
+## 2026-08-14 -- Real raw-BF16 bundle payload parity
+
+- Commit: working tree after `a42425a`; code change pending commit.
+- Hardware: Windows Python reference loader; no CUDA execution and no full-model load.
+- Model/checkpoint: `zai-org/GLM-5.2`, `model-00002-of-00282.safetensors` and its converted `second-shard.k3x` artifact.
+- Mode: `GLM5XExpertBundle.open(...).read_expert(layer=10, expert=0)` with artifact identity and extent metadata checks.
+- Result: `gate_proj`, `up_proj`, and `down_proj` each returned 25,165,824 bytes and matched the source safetensors bytes exactly. The loader rejected a tampered offset in the regression test. Focused GLM tests: 35/35 passed.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
+- Interpretation: this validates exact cross-shard raw-BF16 payload retrieval only. It is not a CUDA expert-kernel or model-throughput result.
+
 ## 2026-08-14 -- Raw-BF16 expert directory C++ reader gate
 
 - Commit: working tree after `1b22bcb`; code change pending commit.

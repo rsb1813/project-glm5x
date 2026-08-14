@@ -25,6 +25,7 @@
 - [x] Add resumable multi-shard GLM conversion and complete same-shard expert-role directories.
 - [x] Make the C++ reader accept validated raw-BF16 expert directories while keeping the MXFP4 storage loader strict.
 - [x] Build a copy-free cross-shard expert bundle index with duplicate-role and incomplete-group validation.
+- [x] Add exact BF16 bundle-loader reads with artifact identity, extent, dtype, and CRC validation.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [ ] Validate BF16 dequantized execution against nonzero real GLM shard data and quality metrics.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.

@@ -103,3 +103,10 @@
 - Each complete `(layer, expert)` record contains the three role names plus artifact-relative path, tensor ID, dtype, quantization, aligned data offset, byte length, logical length, and data CRC. Duplicate roles are rejected and incomplete role groups are listed separately.
 - The two downloaded GLM probe artifacts were indexed in about 12 seconds on the Windows host. The result covers 2 artifacts, 247 tensors, and 70 complete experts with no incomplete groups. This is storage/indexer evidence, not a model execution or throughput result.
 - The bundle does not copy or quantize payload bytes. The next runtime boundary is a bounded exact BF16 expert loader that consumes these references, followed by cross-shard nonzero numerical parity.
+
+## 2026-08-14 Exact bundle BF16 payload parity
+
+- Added `GLM5XExpertBundle.open/read_expert`. It reopens every referenced `.k3x`, checks file UUID/root/source digests and tensor counts, then checks role tensor IDs, dtype, quantization, shape, aligned offset, length, logical length, and CRC before returning bytes.
+- The loader intentionally accepts only raw BF16/no-auxiliary payloads for this GLM staging path. Native MXFP4 remains a separate exact storage-slice path.
+- A real nonzero gate on layer 10 expert 0 matched all three 25,165,824-byte role tensors byte-for-byte against `model-00002-of-00282.safetensors`; the printed role SHA-256 values were `d2e72bbf...`, `39ebf198...`, and `601b9d1f...`.
+- Focused GLM coverage is now 35 passing tests. This is exact payload/reference evidence, not CUDA execution or end-to-end model throughput.

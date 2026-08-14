@@ -136,3 +136,11 @@
 - Evidence: the two downloaded probe artifacts index in about 12 seconds and yield 70 complete experts across 247 tensors without a payload copy. Duplicate roles are rejected and incomplete groups are explicit.
 - Accepted because: it preserves restartable shard ownership and avoids another multi-gigabyte write while giving the future runtime deterministic random access to all three roles.
 - Revisit: when object-store URLs, bundle relocation, cross-process locking, and exact BF16 expert loading are implemented.
+
+## D-0018 -- Validate bundle references before returning BF16 expert bytes
+
+- Decision: make the reference bundle loader recheck artifact identity and every referenced tensor's dtype, quantization, shape, offset, length, logical length, and CRC before returning a role payload. The initial GLM path accepts raw BF16 with no auxiliary extent only.
+- Alternatives: trust the JSON bundle after assembly, validate only the artifact root digest, or concatenate all three role payloads into a new file.
+- Evidence: layer 10 expert 0 from the second real shard matched all three source safetensors role tensors byte-for-byte at 25,165,824 bytes per role. A tampered offset is rejected before payload return.
+- Accepted because: the runtime can use copy-free random access while stale or manually edited bundle metadata cannot silently feed the model.
+- Revisit: when a native C++/CUDA bundle reader exists and its validation cost is measured against prefetch deadlines.
