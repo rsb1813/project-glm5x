@@ -256,3 +256,19 @@
 - Evidence: `test_expert_major` verifies two groups with one- and two-assignment slabs, expected weighted token outputs, and short-output rejection. The WSL CTest suite passed 26/26 and the focused GLM Python suite passed 35/35 at commit `b777b1b`.
 - Accepted because: explicit scatter preserves exact Top-K semantics and makes CPU/GPU parity inspectable. It also allows future ragged buckets to run independently without coupling router metadata to a kernel output layout.
 - Revisit: after a real GLM router and CUDA bucket loop exist; a fused scatter can be evaluated only against the explicit reference result and its measured H2D/launch cost.
+
+## D-0033 -- Gate migrated historical evidence without weakening new correctness tests
+
+- Decision: when a test is explicitly tied to a historical B-0006 through B-0024 result artifact that is not shipped in GLM5X, skip that evidence check with a visible reason. Keep all synthetic, GLM5X, build, and cross-language tests active.
+- Alternatives: copy the old K3X `results/` tree into the public repository, delete the historical tests, or mark the whole Python suite optional.
+- Evidence: the first GLM5X push passed C++ and CodeQL but failed 50 Python tests with `FileNotFoundError` for absent historical JSON. After the targeted collection/fixture gate, GitHub Actions correctness passed on commit `a00beec` in 3m21s; CodeQL also passed.
+- Accepted because: the repository does not contain the old benchmark artifacts by design, and copying them would mix K3X evidence into the GLM5X product. The skip is narrow, explicit, and reversible when artifacts are restored.
+- Revisit: when GLM5X owns replacement benchmark artifacts, remove each historical skip and require the new raw/summary parity checks.
+
+## D-0034 -- Keep the first real MoE reference layer lazy and exact
+
+- Decision: add `GLM5XLayer10MoEReference` over the copy-free expert bundle. Load router/shared weights eagerly, load only selected expert raw-BF16 role triples on demand, cache them by `(layer, expert)`, and retain an uncached path for parity.
+- Alternatives: materialize all layer-10 experts, decode every expert to FP32 before routing, or connect CUDA before the q-residual/MLA/DSA reference boundary exists.
+- Evidence: the five-shard bundle contains 277 complete expert groups and a complete layer 10. A real layer-10 smoke selected 15 unique experts; cold and cached forwards produced identical `[2,6144]` BF16 outputs. No quality or tok/s claim is inferred.
+- Accepted because: it proves the official sigmoid router/shared-SwiGLU boundary without requiring the full checkpoint in RAM/VRAM and provides the exact selected-expert set needed by the next packed CUDA integration.
+- Revisit: after q-residual plus exact MLA/DSA and full-layer parity are connected; only then compare the lazy reference with the resident CUDA scheduler.

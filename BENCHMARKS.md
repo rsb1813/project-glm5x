@@ -381,3 +381,21 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Sparse-packed result: 939,149 ns warm median/block, 175,614,990 ns cold latency, 603,979,776 cold weight H2D bytes, 603,979,776 resident bytes, 0 warm weight H2D, and 0.001662744442 maximum CPU-relative difference. Host payload load was 3,906,998,594 ns.
 - Relative result: sparse-packed was approximately 1.2% slower in this rerun, reversing the earlier 7.2% lower sample. This confirms the mode is shape/addressing evidence only; no stable speedup or tok/s claim follows.
 - Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, natural Top-K, speculative acceptance, and task quality: not measured.
+
+## 2026-08-14 -- Lazy real layer-10 MoE reference smoke
+
+- Commit: `b94c8b8`.
+- Hardware: Windows Python reference runtime; no CUDA execution and no full-model load.
+- Model/checkpoint: five bounded `zai-org/GLM-5.2` probe artifacts; complete layer-10 expert bundle with 277 complete groups overall.
+- Mode: official sigmoid router, exact Top-8 selection, shared SwiGLU, lazy raw-BF16 expert loads, two random BF16 hidden tokens.
+- Result: bundle validation/open took `30.662874 s`; the cold forward took `0.482775 s`; the cached repeat took `0.059090 s`; 15 unique layer-10 experts were selected; cold/cached output maximum absolute difference was `0.0`; output shape was `[2,6144]` BF16.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, speculative acceptance, and task quality: not measured.
+- Caveat: this is a reference MoE-layer and cache-reuse gate. It is not a full-layer, full-model, or end-to-end throughput result.
+
+## 2026-08-14 -- Public Linux correctness gate after evidence-boundary fix
+
+- Commit: `a00beec`.
+- Hardware: GitHub Actions Ubuntu runner; C++ CPU build, no CUDA and no checkpoint.
+- Mode: CMake configure/build, CTest, Python/cross-language suite with explicit skips only for absent migrated B-0006 through B-0024 historical artifacts.
+- Result: correctness workflow `31795971197` passed in `3m21s`; CodeQL workflow `31795971207` passed. The previous 50 `FileNotFoundError` failures were eliminated without skipping new GLM5X tests.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality: not measured.

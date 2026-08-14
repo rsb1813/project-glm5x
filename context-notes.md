@@ -205,3 +205,9 @@
 
 - On the latest pushed HEAD, the same two-shard layer-10 probe measured common 927,744 ns/block and sparse-packed 939,149 ns/block, with zero warm weight H2D and 603,979,776 resident bytes in both runs.
 - The earlier sample showed sparse-packed lower latency, but this rerun reversed the direction. Treat packed input as a correctness/scheduling contract until a larger repeated sweep explains the variance; do not enable it as a universal speed optimization.
+
+## 2026-08-14 CI evidence boundary and lazy real MoE reference
+
+- The public `correctness` workflow failed on `b94c8b8` because migrated K3X tests referenced historical `results/b0006` through `b0024` artifacts that are intentionally not in the GLM5X repository. The actual C++ build/tests passed; CodeQL also passed.
+- Commit `a00beec` marks only those historical evidence/manifest tests as skipped when their recorded artifacts are absent and skips old-baseline-dependent ablations with an explicit reason. New GLM5X tests remain active. GitHub Actions correctness and CodeQL both passed on the pushed commit.
+- Added `GLM5XLayer10MoEReference` with official sigmoid router, exact Top-8 normalization/routed scale, shared SwiGLU, and lazy exact raw-BF16 bundle reads. A five-shard real bundle smoke selected 15 unique layer-10 experts and returned identical cold/cached outputs; this is reference correctness evidence only.

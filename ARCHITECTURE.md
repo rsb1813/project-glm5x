@@ -37,6 +37,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - CPU/reference TurboQuant-inspired KV cache with Hadamard rotation, integer and half-bit schedules, asymmetric K/V policy, incremental attention, and capacity estimation.
 - CPU/reference `GLM5XDSAState` and `GLM5XDSAIndexer` that connect descriptor index metadata, explicit query/key projection matrices, an index-key store, compressed KV blocks, exact top-k refresh, and an explicitly stale fast refresh policy. Its 600k/1M capacity numbers are allocation-free estimates.
 - Official-shape CPU/reference `GLM5XOfficialDSAIndexer` with `wq_b` query projection, `wk` + LayerNorm key projection, interleaved/non-interleaved indexer RoPE, `weights_proj` head weights, ReLU aggregation, causal masking, and Top-K selection. The loader reads only the five indexer tensors needed from a source shard.
+- CPU/reference `GLM5XLayer10MoEReference` with the official GLM router contract (float32 sigmoid scores, group selection, exact Top-8 normalization and routed scale), shared SwiGLU, and explicit token-major expert scatter. `from_bundle()` maps the copy-free cross-shard bundle to lazy exact raw-BF16 expert role loads, so a forward materializes only the selected experts.
 
 ### In progress
 
@@ -44,6 +45,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - Synthetic GLM-5.2 checkpoint round-trip.
 - Exact DSA/MLA graph around the official indexer, q-residual production projection, nonzero real-shard parity, quantization/calibration, and runtime consumption of the cross-shard expert bundle.
 - Wiring GLM DSA/MTP state and exact routing around the existing expert-major batch path.
+- Replace the layer-10 reference expert loop with the packed CUDA path after q-residual and MLA/DSA outputs are connected.
 
 ### Experimental
 
