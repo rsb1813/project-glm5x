@@ -59,3 +59,17 @@ reference mode는 항상 유지합니다. 최적화 경로는 greedy token, laye
 - Experimental: MTP scheduling, expert-major batching, mixed quantization
 - Proposed: GLM-5.3 checkpoint adapter와 full CUDA fast path
 
+## TurboQuant 및 장문맥 추가 설계
+
+TurboQuant는 모델 가중치가 아니라 KV cache를 줄이는 경로로 분리합니다. 현재 구현된 reference 계약은 Hadamard rotation, 2/2.5/3/3.5/4/6/8/16-bit schedule, row scale, lossless mode, incremental attention, logical storage estimate입니다.
+
+초기 Balanced 후보는 K6/V4입니다. 3.5-bit와 2.5-bit는 별도 실험 모드로 유지하며 GLM-5.2 long-context retrieval, coding trace, greedy/logit parity를 통과하기 전 기본값으로 승격하지 않습니다. 최근 토큰과 민감한 경계 layer는 고정밀로 유지하고, 오래된 block만 압축합니다.
+
+600k–1M context는 다음 순서로 검증합니다.
+
+1. 실제 GLM descriptor에서 DSA/indexer/KV shape을 읽습니다.
+2. 1M block allocation과 restore를 RAM-only synthetic trace로 검증합니다.
+3. 128k, 600k, 1M에서 needle/retrieval 및 coding-agent quality를 BF16 reference와 비교합니다.
+4. 그 뒤에만 RTX 5080 packed CUDA kernel과 NVMe spill을 연결합니다.
+
+UltraQuant의 asymmetric K/V와 block-scale 아이디어는 experimental input으로 참고하지만, AMD CDNA4 전용 FP4 kernel 성능을 RTX 5080 결과로 전이하지 않습니다. MTP/DSpark, expert-major verification, expert weight streaming은 KV 압축과 별도의 throughput 경로로 측정합니다.

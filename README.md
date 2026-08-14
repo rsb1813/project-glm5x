@@ -12,6 +12,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - Three-tier residency interfaces for VRAM, system RAM, and NVMe.
 - Deadline-aware prefetch, task/session profiles, expert cache policies, and benchmark schemas inherited from K3X.
 - GLM descriptor validation for DSA, 256 routed experts, Top-8 routing, shared experts, and MTP metadata.
+- CPU/reference TurboQuant-style KV cache with asymmetric K/V bits and 600k–1M capacity arithmetic. This does not compress model weights and is not yet a CUDA performance path.
 - A `glm5x-convert` entry point that currently wraps the proven storage converter while the GLM tensor manifest is being added.
 - Strict separation between implemented code, experiments, proposals, and measurements.
 
@@ -19,7 +20,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 
 - GLM-5.2 or GLM-5.3 weights are not included.
 - The GLM reference graph and CUDA fast path are not complete.
-- DSpark/MTP, expert-major batching, proxy routing, or adaptive quality modes are not yet measured on the target PC.
+- DSpark/MTP, expert-major batching, proxy routing, adaptive quality modes, and RTX 5080 throughput are not yet measured on the target PC.
 - Synthetic or bounded fixtures are not evidence of full-model throughput.
 
 ## Design
@@ -64,13 +65,14 @@ python -m glm5x_converter.cli --help
 ## Roadmap
 
 1. GLM-5.2 descriptor, manifest, and tiny reference graph.
-2. GLM-5.2 synthetic checkpoint round-trip and greedy token parity.
-3. Exact CPU runtime and profiler.
-4. CUDA DSA/MLA and Top-8 MoE backend.
-5. Three-tier asynchronous expert pipeline.
-6. MTP/AURORA and DSpark-compatible expert-major verification.
-7. Mixed quantization, calibration, and quality modes.
-8. GLM-5.3 checkpoint swap validation when the official weights are released.
+2. TurboQuant reference KV parity and packed paged-KV contract.
+3. GLM-5.2 DSA/indexer state and 600k/1M capacity smoke.
+4. Exact CPU runtime and profiler.
+5. CUDA DSA/MLA, Top-8 MoE, and compressed-KV kernels.
+6. Three-tier asynchronous expert pipeline.
+7. MTP/AURORA and DSpark-compatible expert-major verification.
+8. Mixed weight quantization, calibration, and quality modes.
+9. GLM-5.3 checkpoint swap validation when the official weights are released.
 
 ## Evidence policy
 
@@ -81,6 +83,7 @@ Every optimization keeps a reference mode. Every performance result records the 
 | Path | Role |
 | --- | --- |
 | `reference/glm5x_ref` | GLM descriptor and reference graph boundary |
+| `reference/glm5x_ref/turboquant.py` | CPU/reference compressed KV contract and capacity estimator |
 | `converter/k3x_converter` | Reused storage-format implementation |
 | `converter/glm5x_converter` | GLM5X-facing converter CLI |
 | `runtime/` | C++20 portable runtime and optional CUDA backend |
@@ -93,4 +96,3 @@ Every optimization keeps a reference mode. Every performance result records the 
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
-
