@@ -519,3 +519,14 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Correctness: one focused test matched each incremental prompt logit against the corresponding prefill output and matched greedy generation against an explicit loop. Full WSL Python suite passed `302 passed, 124 skipped` in `69.41 s`.
 - Performance/traffic: decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, and quality benchmark were not measured. This is a correctness boundary, not a throughput result.
 - Interpretation: final-logit/state ownership is now explicit for the synthetic graph. The next bottleneck is real all-layer tensor loading and exact MLA/DSA-to-CUDA hidden-state parity.
+
+## 2026-08-15 -- Out-of-core reference layer-loader contract
+
+- Date: 2026-08-15.
+- Commit: `a33b25b`.
+- Hardware: WSL2 Ubuntu-24.04 CPU reference; no full checkpoint and no new CUDA kernel path.
+- Model/checkpoint: synthetic GLM5X-compatible two-layer graph built from the existing tiny MLA/DSA/MoE fixture.
+- Mode: `GLM5XDecoderModelReference.from_layer_loader`, two layer IDs, prompt prefill, final logits, and recurrent state enabled.
+- Correctness: the loader was called exactly in order `[0, 1]`; output contains both layer forwards. Full WSL Python passed `303 passed, 124 skipped` in `70.47 s`; WSL host CTest `15/15` and CUDA CTest `27/27` passed.
+- Performance/traffic: no tok/s, VRAM, RAM, NVMe, H2D, or quality result was measured. The test proves the residency contract only.
+- Interpretation: layer weights can now be supplied lazily without changing model-level state semantics. A real-shard provider and async transfer overlap are the next measurable boundaries.

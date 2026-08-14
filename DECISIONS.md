@@ -360,3 +360,11 @@
 - Evidence: the new synthetic two-layer test matched every incremental prompt logit to the corresponding prefill slice and matched an explicit greedy loop. WSL full Python passed `302 passed, 124 skipped` after the export.
 - Accepted because: it gives CUDA, MTP, prefix/KDA caching, and quality comparisons one unambiguous model-level state boundary while preserving the existing exact layer reference.
 - Revisit: when real all-layer GLM tensors and MTP metadata are available; batch support, tied embeddings, and CUDA final-logit placement must then be validated against the official checkpoint.
+
+## D-0046 -- Keep decoder layer weights loadable per layer in the reference path
+
+- Decision: add `GLM5XDecoderModelReference.from_layer_loader` with an explicit layer count and callable provider. The provider is invoked in layer order for each forward; only recurrent MLA/DSA states survive the call.
+- Alternatives: materialize every decoder layer in a Python tuple, cache the entire model after first use, or make the CUDA benchmark own a separate untested layer order.
+- Evidence: the two-layer loader test observed exactly `[0, 1]` requests and returned the same logits/state contract as the eager model. WSL passed `303 passed, 124 skipped`, host CTest `15/15`, and CUDA CTest `27/27`.
+- Accepted because: a full GLM-5.2 checkpoint cannot be assumed to fit a single resident tier, and the loader boundary makes layer-at-a-time conversion/admission testable without changing natural routing.
+- Revisit: when real all-layer tensors are available; add bounded layer cache, pinned staging, transfer deadlines, and a CUDA provider only after measurements show they reduce stalls without changing logits.

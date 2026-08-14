@@ -296,3 +296,9 @@
 - Added `GLM5XDecoderModelReference` with per-layer MLA/DSA state tuples, final RMSNorm, LM-head logits, prompt prefill, one-token incremental forward, and greedy generation.
 - The focused parity test compares every incremental prompt logit against the multi-token prefill and compares generated tokens with an explicit greedy loop. WSL full Python passed `302 passed, 124 skipped`; no real full-checkpoint or tok/s claim is made.
 - The next implementation boundary is loading all real GLM layers into this state contract and exporting the exact hidden handoff to CUDA without changing natural routing.
+
+## 2026-08-15 -- Out-of-core reference layer loader
+
+- Added `GLM5XDecoderModelReference.from_layer_loader`. The model keeps embedding/final-logit tensors plus recurrent per-layer MLA/DSA state, while requesting a decoder layer by ID only during a forward.
+- The focused loader test verifies a two-layer forward calls IDs `[0, 1]` and returns both layer records. WSL full Python passed `303 passed, 124 skipped`; WSL host/CUDA CTest remained `15/15` and `27/27`.
+- This is a residency contract, not a performance claim. The next step is a real-shard layer provider that reads only the selected layer and its routed expert union, then overlaps its transfer with the preceding layer.
