@@ -408,3 +408,11 @@
 - Evidence: the synthetic three-layer bundle test exercised dense layer 0, dense layer 1 with a shared indexer from layer 0, and sparse layer 2 with exact incremental-logit parity. Full WSL Python passed `307 passed, 124 skipped`; host CTest passed `15/15`. On five real probe artifacts, lazy factory setup took `0.0668 s`, real layer-0 admission took `4.2789 s`, and one-token CPU layer forward took `0.03685 s` with output `[1,1,6144]`.
 - Accepted because: this is the first model-level boundary that can request real GLM layers in execution order without loading all decoder weights. Partial-head overrides are explicit and cannot silently be used for a full checkpoint.
 - Revisit: when all 78 layers and final head tensors are available, replace probe overrides with exact bundle tensors, compare full logits, and hand the provider to CUDA/pinned staging.
+
+## D-0052 -- Stage the reference on CUDA and materialize the checkpoint one shard at a time
+
+- Decision: add an explicit `device` parameter to the Python reference bundle/model factories and use a resumable local stream that downloads, converts, verifies, and deletes one source shard before moving to the next.
+- Alternatives: keep all reference tensors on CPU until the full checkpoint exists, download the entire safetensors repository before conversion, or keep source shards after conversion to simplify retries.
+- Evidence: CPU-vs-CUDA layer/model parity tests passed; the complete WSL Python suite passed `311 passed, 124 skipped`, host CTest passed `15/15`, and the first two real GLM-5.2 shards finalized as `5,342,863,616` and `5,351,993,600` byte `.k3x` artifacts with source-deleted markers. The stream retains `.part` files for interruption-safe HTTP Range resume.
+- Accepted because: direct device staging removes an unnecessary host-to-device copy at the reference boundary, while one-shard conversion keeps peak source residency bounded and makes local full-checkpoint progress durable without paid cloud resources. The CUDA path and stream are correctness/operational boundaries, not throughput claims.
+- Revisit: after all 282 shards assemble into a verified bundle, exact final-head tensors and full-layer logits are available, and end-to-end CUDA decode measurements show whether direct staging and source deletion improve the actual bottleneck.

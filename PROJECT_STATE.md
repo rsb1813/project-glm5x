@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a multi-layer CPU reference with final logits and greedy incremental parity, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, an explicit GLM SiLU path, on-demand model layer loading, shared bundle readers, opt-in lazy payload validation, opt-in bounded trunk-layer caching, an explicit dense-MLP path for the first three GLM-5.2 layers, and a configuration-driven all-layer bundle factory are implemented over five bounded real shards. The current verified HEAD is `3a86ca3`; public correctness `31828512721` and CodeQL `31828512789` are green. Full real-checkpoint execution, MTP, CUDA final logits, and end-to-end tok/s remain unmeasured.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a multi-layer CPU reference with final logits and greedy incremental parity, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, an explicit GLM SiLU path, on-demand model layer loading, shared bundle readers, opt-in lazy payload validation, opt-in bounded trunk-layer caching, an explicit dense-MLP path for the first three GLM-5.2 layers, a configuration-driven all-layer bundle factory, CUDA device staging/parity, and resumable local full-checkpoint streaming are implemented. The current verified source baseline is `a6f0cb0`; the new working tree changes are awaiting commit and public verification. Two of 282 real shards have been converted to verified `.k3x` artifacts with their source files deleted. Full real-checkpoint execution, MTP, CUDA final logits, and end-to-end tok/s remain unmeasured.
 
 ## Completed
 
@@ -75,8 +75,8 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 
 ## Known blockers
 
-- No full GLM-5.2 checkpoint is present; five bounded probe shards are available, so full checkpoint correctness and local TPS are not measured.
-- No full checkpoint download or Cloud Run conversion has been authorized or attempted; only five bounded probe shards are present.
+- Full GLM-5.2 local materialization is in progress. Two of 282 shards are finalized as verified `.k3x` artifacts and their source shards have been deleted; full checkpoint correctness and local TPS are not measured yet.
+- No Cloud Run conversion or paid resource has been authorized or attempted. The active stream is local and uses resumable HTTP-range downloads with one-shard-at-a-time conversion.
 - Current Dependabot state: PRs 1-4 were closed after their setup-python, checkout, numpy, and setuptools bumps were integrated and verified on `a3fb8a8`; the repository Dependabot security-alert endpoint is disabled, so no CVE alert was verified.
 - Historical Dependabot note: the original PR branches first failed with 50 `FileNotFoundError` cases from absent migrated K3X evidence; their rebased replacement checks were green before the exact updates were integrated on main and the PRs were closed. Repository Dependabot and vulnerability-alert APIs are disabled, so no CVE alert is confirmed.
 - The migrated C++ runtime still has K3-oriented names and graph assumptions in several files.
@@ -94,7 +94,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 
 ## Latest verified state
 
-- Focused GLM descriptor, manifest, CLI, toy/reference graph, TurboQuant, DSA, official indexer, shard-converter, bundle loader, exact MLA/DSA layer/model reference, dense first-three-layer path, configuration-driven bundle factory, lazy layer/bundle admission, bounded trunk-layer caching, and multi-shard tests: `307 passed, 124 skipped` in WSL Python (`71.86 s`). Host CTest is `15/15`. The Windows Python interpreter still lacks pytest; the CUDA Python test remains skipped on Windows because the WSL ELF binary is not a Windows executable.
+- Focused GLM descriptor, manifest, CLI, toy/reference graph, TurboQuant, DSA, official indexer, shard-converter, bundle loader, exact MLA/DSA layer/model reference, dense first-three-layer path, configuration-driven bundle factory, lazy layer/bundle admission, bounded trunk-layer caching, device staging, source-deletion resume, and multi-shard tests: `311 passed, 124 skipped` in WSL Python (`79.98 s`). Host CTest is `15/15`. CUDA layer/model parity tests pass in WSL; the Windows Python interpreter still lacks pytest.
 - CUDA CMake build: successful in WSL with CUDA 13.3 and RTX 5080 compute capability 12.0.
 - CTest: 27/27 tests passed in WSL, including `glm5x_activation`.
 - CPU WSL CTest: 15/15 tests passed after the expert-major CUDA API change.
@@ -141,4 +141,12 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Last known-good implementation/docs HEAD: `761b881` (`test: cover trunk cache eviction`). WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the complete WSL Python suite `305 passed, 124 skipped` are green. Public correctness `31825623428` and CodeQL `31825623418` also passed.
 - Last known-good implementation/docs HEAD: `fb3aa7d` (`feat: support dense GLM MLP layers`). WSL focused tests passed `3/3`, the complete Python suite passed `306/124`, and public correctness `31826654966` plus CodeQL `31826655082` passed. The Linux job took about 7 minutes 10 seconds because the hosted Python step ran for about 5 minutes 19 seconds; this is a successful run, not a timeout failure.
 - Latest verified implementation/docs HEAD: `3a86ca3` (`docs: record bundle factory gate`, including implementation `1f123ca`). WSL model-reference tests passed `4/4`, full Python passed `307/124`, host CTest passed `15/15`, real layer-0 admission measured `4.278880 s` plus `0.036846 s` one-token CPU forward, and public correctness `31828512721` plus CodeQL `31828512789` passed. No full-model tok/s is claimed.
-- Next bottleneck: load the real all-layer tensors into the new model reference, export the exact layer-10 q-residual/MLA/DSA hidden state into `GLM5XACT`, verify nonzero full-layer parity, then add pinned/asynchronous raw H2D, direct tensor-core selection, MTP, and VRAM-pressure-aware residency. Full weights remain intentionally absent, so no end-to-end tok/s is claimed.
+- Next bottleneck: finish the local 282-shard stream, assemble the complete bundle, load all real layers into the model reference, export the exact q-residual/MLA/DSA hidden state into `GLM5XACT`, verify nonzero full-layer parity, then add pinned/asynchronous raw H2D, direct tensor-core selection, MTP, and VRAM-pressure-aware residency. No end-to-end tok/s is claimed until those gates run.
+
+## 2026-08-15 -- Device staging and resumable local materialization
+
+- Added explicit `device="cuda"` staging to the Python reference bundle/model path. CUDA layer and model factory parity tests passed against CPU reference outputs; this is not a complete CUDA decoder.
+- Added `convert-shards --delete-source` with an atomic source-deleted marker. A finalized artifact is strict-reader verified before its source shard is removed, and a retry can recover from the marker without redownloading the shard.
+- Added `tools/stream_glm5x_checkpoint.py` with public repository metadata discovery, HTTP Range `.part` resume, one-shard conversion, source deletion, and final bundle assembly.
+- The local stream has finalized `model-00001-of-00282.k3x` (`5,342,863,616` bytes) and `model-00002-of-00282.k3x` (`5,351,993,600` bytes); the third source shard is downloading. No quality, final-token, or tok/s result exists yet.
+- WSL verification after the changes: Python `311 passed, 124 skipped` in `79.98 s`, host CTest `15/15`, and CUDA-only layer/model parity tests passed. The working tree is pending commit and public CI verification.

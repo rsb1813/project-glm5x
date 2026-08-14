@@ -207,6 +207,7 @@ class GLM5XDecoderModelReference:
         verify_payloads: bool = True,
         verify_root: bool = True,
         layer_cache_capacity: int = 0,
+        device: torch.device | str | None = None,
     ) -> "GLM5XDecoderModelReference":
         """Build an out-of-core model factory from one validated GLM bundle.
 
@@ -254,12 +255,17 @@ class GLM5XDecoderModelReference:
         )
         tensor_refs = _collect_tensor_refs(bundle)
         read = lambda name: GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)  # noqa: E731
+        target = None if device is None else torch.device(device)
         if embedding is None:
             embedding = read("model.embed_tokens.weight")
         if final_norm is None:
             final_norm = read("model.norm.weight")
         if lm_head is None:
             lm_head = read("lm_head.weight")
+        if target is not None:
+            embedding = embedding.to(device=target)
+            final_norm = final_norm.to(device=target)
+            lm_head = lm_head.to(device=target)
 
         def load_layer(layer_id: int) -> GLM5XDecoderLayerReference:
             if not isinstance(layer_id, int) or isinstance(layer_id, bool):
@@ -284,6 +290,7 @@ class GLM5XDecoderModelReference:
                 mlp_type=mlp_types[layer_id],
                 indexer_source_layer=indexer_sources[layer_id],
                 indexer_rope_interleave=indexer_rope_interleave,
+                device=target,
             )
 
         return cls.from_layer_loader(
@@ -394,7 +401,9 @@ class GLM5XDecoderModelReference:
         normalized = current
         squares = normalized.to(torch.float32).square().mean(dim=-1, keepdim=True)
         normalized = normalized * torch.rsqrt(squares + 1e-5)
-        normalized = normalized * self.final_norm.to(device=normalized.device, dtype=normalized.dtype)
+        normalized = normalized * self.final_norm.to(
+            device=normalized.device, dtype=normalized.dtype
+        )
         logits = torch.matmul(
             normalized.to(torch.float32), self.lm_head.to(device=normalized.device, dtype=torch.float32).t()
         )
@@ -410,7 +419,7 @@ class GLM5XDecoderModelReference:
         tokens: torch.Tensor,
         state: GLM5XDecoderState | None = None,
     ) -> GLM5XModelForward:
-        tokens = torch.as_tensor(tokens, dtype=torch.long)
+        tokens = torch.as_tensor(tokens, dtype=torch.long, device=self.embedding.device)
         if tokens.ndim != 1 or tokens.numel() == 0:
             raise ValueError("GLM5X_MODEL_TOKEN_SHAPE")
         if torch.any(tokens < 0) or torch.any(tokens >= self.vocab_size):
@@ -419,7 +428,7 @@ class GLM5XDecoderModelReference:
         start = 0
         if state.attention and state.attention[0] is not None:
             start = state.attention[0].length
-        hidden = self.embedding.to(device=tokens.device)[tokens].unsqueeze(0)
+        hidden = self.embedding[tokens].unsqueeze(0)
         return self._forward_hidden(hidden, state, position_start=start)
 
     def forward_token(

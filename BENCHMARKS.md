@@ -583,3 +583,13 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Performance/traffic: no full-model decode tok/s, prefill tok/s, TTFT, quality score, full VRAM, full RAM, NVMe GB/token, H2D GB/token, or final-token result was measured. These are real-layer admission/reference timings only.
 - Interpretation: the next bottleneck is complete all-layer payload availability and exact final-head state, followed by CUDA hidden-state handoff and asynchronous layer overlap.
 - Public verification: correctness `31828512721` and CodeQL `31828512789` passed for the implementation plus documentation HEAD `3a86ca3`.
+
+## 2026-08-15 -- CUDA staging and local shard-stream gate
+
+- Date: 2026-08-15.
+- Commit: working tree based on `a6f0cb0`; public commit/CI verification is pending.
+- Hardware/model: WSL2 Ubuntu-24.04 with CUDA 13.3 and RTX 5080; official `zai-org/GLM-5.2`; no quality benchmark.
+- Correctness: CUDA-only layer parity and model-factory parity passed; the complete WSL Python suite passed `311 passed, 124 skipped` in `79.98 s`; host CTest passed `15/15`.
+- Device timing: a four-token synthetic layer smoke measured `5.717097 ms` on CUDA versus `1.321640 ms` on CPU. This fixture is intentionally tiny and is not decode tok/s or a full-model estimate.
+- Materialization: `model-00001-of-00282.k3x` finalized at `5,342,863,616` bytes and `model-00002-of-00282.k3x` at `5,351,993,600` bytes. Both artifacts passed strict reader verification and their source shards were removed after atomic deletion markers. Shard 3 was downloading at the time of recording.
+- Throughput/quality: decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, adaptive Top-K, speculation acceptance, and quality were not measured. The active stream is a progress/traffic gate only.

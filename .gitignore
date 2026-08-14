@@ -9,6 +9,7 @@ build-*/
 build-fixtures/
 build-results/
 artifacts/
+build-glm5x-stream.log
 *.k3x.partial
 *.k3x.resume.json
 *.gmlxact

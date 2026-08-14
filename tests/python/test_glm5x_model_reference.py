@@ -253,3 +253,18 @@ def test_model_reference_factory_loads_dense_sparse_and_shared_indexer_layers(tm
             atol=1e-5,
         )
         state = step.state
+
+    if torch.cuda.is_available():
+        cuda_model = GLM5XDecoderModelReference.from_bundle(
+            bundle_path,
+            config=config,
+            device="cuda",
+            verify_payloads=False,
+            verify_root=False,
+            layer_cache_capacity=3,
+        )
+        cuda_forward = cuda_model.forward_tokens(torch.tensor([1, 2]))
+        assert cuda_forward.logits.device.type == "cuda"
+        torch.testing.assert_close(
+            cuda_forward.logits.cpu(), forward.logits, rtol=2e-3, atol=2e-3
+        )

@@ -137,19 +137,23 @@ class GLM5XOfficialDSAIndexer:
         q_resid = torch.as_tensor(q_resid)
         if q_resid.ndim == 0 or q_resid.shape[-1] != self.q_lora_rank:
             raise ValueError("DSA_Q_RESID_WIDTH_MISMATCH")
-        projected = q_resid.to(torch.as_tensor(self.wq_b).dtype) @ torch.as_tensor(self.wq_b).T
+        weight = torch.as_tensor(self.wq_b).to(device=q_resid.device)
+        projected = q_resid.to(weight.dtype) @ weight.T
         return projected.reshape(*q_resid.shape[:-1], self.index_n_heads, self.index_head_dim)
 
     def project_keys(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states = torch.as_tensor(hidden_states)
         if hidden_states.ndim == 0 or hidden_states.shape[-1] != self.hidden_size:
             raise ValueError("DSA_INDEXER_HIDDEN_WIDTH_MISMATCH")
-        projected = hidden_states.to(torch.as_tensor(self.wk).dtype) @ torch.as_tensor(self.wk).T
+        weight = torch.as_tensor(self.wk).to(device=hidden_states.device)
+        projected = hidden_states.to(weight.dtype) @ weight.T
+        norm_weight = torch.as_tensor(self.k_norm_weight).to(device=hidden_states.device)
+        norm_bias = torch.as_tensor(self.k_norm_bias).to(device=hidden_states.device)
         return torch.nn.functional.layer_norm(
             projected,
             (self.index_head_dim,),
-            torch.as_tensor(self.k_norm_weight),
-            torch.as_tensor(self.k_norm_bias),
+            norm_weight,
+            norm_bias,
             self.k_norm_eps,
         )
 
@@ -211,7 +215,7 @@ class GLM5XOfficialDSAIndexer:
         k = torch.cat((k_rot, k_pass), dim=-1).squeeze(2)
         scores = torch.matmul(q.float(), k.transpose(-1, -2).float().unsqueeze(1))
         scores = torch.relu(scores) * (self.index_head_dim**-0.5)
-        weights = self.weights_proj.to(torch.as_tensor(hidden_states).dtype)
+        weights = self.weights_proj.to(device=hidden_states.device, dtype=hidden_states.dtype)
         weights = (hidden_states.to(weights.dtype) @ weights.T).float() * (self.index_n_heads**-0.5)
         index_scores = torch.matmul(weights.unsqueeze(-2), scores).squeeze(-2)
         if attention_mask is not None:
@@ -289,7 +293,7 @@ class GLM5XOfficialDSAIndexer:
             q.to(torch.float32), keys.to(torch.float32).transpose(-1, -2).unsqueeze(1)
         )
         scores = torch.relu(scores) * (self.index_head_dim**-0.5)
-        weights = self.weights_proj.to(hidden_states.dtype)
+        weights = self.weights_proj.to(device=hidden_states.device, dtype=hidden_states.dtype)
         weights = (hidden_states.to(weights.dtype) @ weights.T).float() * (self.index_n_heads**-0.5)
         index_scores = torch.matmul(weights.unsqueeze(-2), scores).squeeze(-2)
         causal = key_positions[:, None, :] > position_ids[:, :, None]

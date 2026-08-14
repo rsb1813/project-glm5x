@@ -351,3 +351,10 @@
 
 - Pushed implementation commit `fb3aa7d`. GitHub correctness `31826654966` passed C++ configure/build/CTest and the full Python/cross-language suite; CodeQL `31826655082` also passed.
 - The hosted Linux job took about 7 minutes 10 seconds, with the Python step taking about 5 minutes 19 seconds. This is a hosted CI wall-time observation and does not change the local 73.57-second WSL test measurement or imply a runtime timeout.
+
+## 2026-08-15 -- CUDA staging and local full-checkpoint stream
+
+- The Python reference bundle/model factories now accept `device="cuda"`. Embedding, norms, projections, dense tensors, router tensors, and selected expert payloads are staged on the target device; CPU remains the default. CUDA layer/model parity passed in WSL.
+- `convert-shards --delete-source` writes a source-deleted marker only after strict artifact verification and before unlinking the source shard. The marker lets a retry trust the completed artifact without redownloading a shard.
+- `tools/stream_glm5x_checkpoint.py` uses public HF metadata and resumable HTTP Range downloads. The first two official GLM-5.2 shards converted successfully to `.k3x` and their source files were deleted; the third shard is currently downloading. No full model has been assembled and no TPS claim is permitted yet.
+- Current local gates after the change are Python `311 passed, 124 skipped` in `79.98 s`, host CTest `15/15`, and CUDA-only layer/model parity. The next bottleneck is completing the 282-shard bundle and then proving full-layer hidden-state/final-logit parity before optimizing CUDA scheduling.

@@ -4,7 +4,7 @@
 
 GLM5X is a correctness-first runtime and storage project for running GLM-5.x on a machine with a 16 GB consumer GPU, large system RAM, and NVMe storage. It is designed around the model's sparse MoE routing, DSA/MLA attention, MTP speculative decoding, and expert-major verification rather than treating the workload as a dense model with a generic cache.
 
-> **Status:** GLM-5.2 shape/manifest, exact layer-10 q-residual/MLA/DSA/MoE reference, a multi-layer CPU reference with final logits/greedy incremental parity, an out-of-core layer-loader boundary with opt-in trunk-layer caching, the first-three-layer dense MLP reference path, and a learned-router-aware raw-BF16 MoE sublayer CUDA boundary are implemented. The opt-in device-side expert accumulator is parity-tested but remains experimental. No GLM weights are bundled and no end-to-end tok/s number is claimed. The latest local WSL gate is host CTest 15/15, CUDA CTest 27/27, and Python 307 passed/124 skipped.
+> **Status:** GLM-5.2 shape/manifest, exact layer-10 q-residual/MLA/DSA/MoE reference, a multi-layer CPU reference with final logits/greedy incremental parity, an out-of-core layer-loader boundary with opt-in trunk-layer caching, the first-three-layer dense MLP reference path, and a learned-router-aware raw-BF16 MoE sublayer CUDA boundary are implemented. The reference model now stages bundle tensors directly on CUDA and has CPU-vs-CUDA parity gates. The opt-in device-side expert accumulator is parity-tested but remains experimental. No GLM weights are committed and no end-to-end tok/s number is claimed. A resumable local full-checkpoint stream is active; 2 of 282 shards have been converted and their verified source files deleted. The latest local WSL gate is host CTest 15/15, CUDA CTest 27/27, and Python 311 passed/124 skipped.
 
 ## What is here now
 
@@ -39,6 +39,8 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - The real-shard probe can compare `--input-mode common` with a deterministic `--input-mode sparse-packed` assignment pattern. The latter measured 0.966 ms/block versus 1.041 ms for common 2-token input in one 8-expert rerun; this is not learned routing or end-to-end tok/s.
 - The portable C++ reader validates raw-BF16 `EXPT` staging records as well as native MXFP4 records. The bounded real-shard CUDA bridge now consumes those payloads; full-layer routing and quality validation are still pending.
 - `glm5x-convert convert-shards` treats every manifest shard as an independently restartable unit, skips already verified artifacts, and leaves completed shards intact when a later shard fails.
+- `glm5x-convert convert-shards --delete-source` verifies each finalized artifact, writes an atomic deletion marker, then removes only the source shard; retries can resume from the marker without retaining the full source checkpoint.
+- `tools/stream_glm5x_checkpoint.py` performs resumable HTTP-range downloads from the public GLM-5.2 repository, converts one shard at a time, deletes only verified source shards, and assembles the bundle after all shards finish. It never requires the full checkpoint in RAM or VRAM.
 - A GLM-5.2-shaped CUDA expert benchmark for hidden size 6144 and expert intermediate size 2048, including 1/2/4/8-token expert-major batching.
 - Exact resident MXFP4 reuse for CUDA expert-major batches; warm batches avoid re-uploading packed/scales weights.
 - Opt-in resident BF16 dequantized expert-grid path using cublasLt; the native exact MXFP4 path remains the default. Historical bounded samples measured 2.58 ms/block versus 5.39 ms native, and the latest rerun measured 4.386 ms versus 5.511 ms native. Both used about 604 MB instead of 160 MB for resident selected weights; neither is an end-to-end tok/s claim.
@@ -119,6 +121,17 @@ python -m glm5x_converter.cli convert-shards \
   --config /data/glm-5.2/config.json \
   --index /data/glm-5.2/model.safetensors.index.json
 ```
+
+For a local full-checkpoint materialization, use the resumable one-shard-at-a-time driver. Keep the source and output directories separate. `--dry-run` only queries repository metadata.
+
+```bash
+PYTHONPATH=reference:converter:. python tools/stream_glm5x_checkpoint.py \
+  --source-dir /data/glm-5.2-source \
+  --output-dir /data/glm-5.2-k3x \
+  --bundle /data/glm-5.2-k3x/glm5x-experts-full.json
+```
+
+The reference bundle/model factories accept `device="cuda"` when CUDA is available. This is a device-staging and parity boundary, not yet a complete CUDA decoder or throughput claim.
 
 Each shard writes `<output>.partial` and `<output>.resume.json` while it is active. A retry validates the source SHA-256, converter/configuration fingerprint, canonical extent order, source CRC, and partial-file CRC before reusing completed extents. `--stop-after-tensors N` is available on `convert-shard` for crash/restart testing; it is not a production performance mode.
 

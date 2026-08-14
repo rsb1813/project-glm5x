@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import torch
+import pytest
 from safetensors.torch import save_file
 
 from glm5x_converter.bundle import GLM5XExpertBundle, assemble_glm5x_expert_bundle
@@ -108,6 +109,24 @@ def test_decoder_layer_incremental_matches_prefill_with_dsa_state() -> None:
     torch.testing.assert_close(last.topk_indices, full.topk_indices[:, 3:])
     assert last.attention_state.length == 4
     assert last.dsa_state is not None and last.dsa_state.length == 4
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
+def test_decoder_layer_cuda_matches_cpu_reference() -> None:
+    layer, hidden, position_embeddings = _make_layer()
+    cpu = layer(
+        hidden,
+        position_embeddings,
+        position_ids=torch.arange(4).view(1, 4),
+    )
+    device = torch.device("cuda")
+    cuda = layer(
+        hidden.to(device),
+        tuple(item.to(device) for item in position_embeddings),
+        position_ids=torch.arange(4, device=device).view(1, 4),
+    )
+    torch.testing.assert_close(cuda.output.cpu(), cpu.output, rtol=2e-4, atol=2e-4)
+    torch.testing.assert_close(cuda.moe.output.cpu(), cpu.moe.output, rtol=2e-4, atol=2e-4)
 
 
 def test_dense_mlp_matches_swiglu_and_empty_routing_contract() -> None:

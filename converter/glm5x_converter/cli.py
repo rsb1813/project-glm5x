@@ -40,6 +40,11 @@ def _parser() -> argparse.ArgumentParser:
     shards.add_argument("--index", type=Path, required=True)
     shards.add_argument("--chunk-bytes", type=int, default=8 * 1024 * 1024)
     shards.add_argument("--dry-run", action="store_true")
+    shards.add_argument(
+        "--delete-source",
+        action="store_true",
+        help="delete each source shard only after its finalized K3X artifact is verified",
+    )
     bundle = subcommands.add_parser("assemble-experts")
     bundle.add_argument("artifact_dir", type=Path)
     bundle.add_argument("output", type=Path)
@@ -112,6 +117,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             manifest,
             chunk_bytes=args.chunk_bytes,
             dry_run=args.dry_run,
+            delete_source=args.delete_source,
         )
         print(
             json.dumps(
@@ -121,6 +127,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     "maximum_source_read_bytes": report.maximum_source_read_bytes,
                     "output_count": len(report.output_paths),
                     "skipped_shards": list(report.skipped_shards),
+                    "deleted_shards": list(report.deleted_shards),
                 },
                 sort_keys=True,
                 separators=(",", ":"),

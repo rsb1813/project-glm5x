@@ -81,6 +81,7 @@ class GLM5XDecoderLayerReference:
         mlp_type: str = "sparse",
         indexer_source_layer: int | None = None,
         indexer_rope_interleave: bool = True,
+        device: torch.device | str | None = None,
     ) -> "GLM5XDecoderLayerReference":
         bundle = GLM5XExpertBundle.open(
             bundle_path, verify_payloads=verify_payloads, verify_root=verify_root
@@ -103,6 +104,7 @@ class GLM5XDecoderLayerReference:
             mlp_type=mlp_type,
             indexer_source_layer=indexer_source_layer,
             indexer_rope_interleave=indexer_rope_interleave,
+            device=device,
         )
 
     @classmethod
@@ -126,6 +128,7 @@ class GLM5XDecoderLayerReference:
         mlp_type: str = "sparse",
         indexer_source_layer: int | None = None,
         indexer_rope_interleave: bool = True,
+        device: torch.device | str | None = None,
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
         """Open and validate one bundle once, then provide individual layers."""
         bundle = GLM5XExpertBundle.open(
@@ -152,6 +155,7 @@ class GLM5XDecoderLayerReference:
                 mlp_type=mlp_type,
                 indexer_source_layer=indexer_source_layer,
                 indexer_rope_interleave=indexer_rope_interleave,
+                device=device,
             )
 
         return load
@@ -177,10 +181,16 @@ class GLM5XDecoderLayerReference:
         mlp_type: str = "sparse",
         indexer_source_layer: int | None = None,
         indexer_rope_interleave: bool = True,
+        device: torch.device | str | None = None,
     ) -> "GLM5XDecoderLayerReference":
         if mlp_type not in {"dense", "sparse"}:
             raise ValueError("GLM5X_LAYER_MLP_TYPE")
-        read = lambda name: GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)  # noqa: E731
+        target = None if device is None else torch.device(device)
+
+        def read(name: str) -> torch.Tensor:
+            value = GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)
+            return value if target is None else value.to(device=target)
+
         prefix = f"model.layers.{layer_id}"
         attention_prefix = f"{prefix}.self_attn"
         attention = GLM5XMLAReference(
@@ -229,6 +239,7 @@ class GLM5XDecoderLayerReference:
                 routed_scaling_factor=routed_scaling_factor,
                 expert_intermediate_size=expert_intermediate_size,
                 hidden_size=hidden_size,
+                device=target,
             )
         return cls(
             input_layernorm=read(f"{prefix}.input_layernorm.weight"),

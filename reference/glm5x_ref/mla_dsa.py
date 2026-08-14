@@ -10,7 +10,7 @@ import torch.nn.functional as F
 def _rms_norm(values: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
     work = values.to(torch.float32)
     normalized = work * torch.rsqrt(work.square().mean(dim=-1, keepdim=True) + eps)
-    return normalized.to(values.dtype) * weight.to(values.dtype)
+    return normalized.to(values.dtype) * weight.to(device=values.device, dtype=values.dtype)
 
 
 def _apply_interleaved_rope(
@@ -152,11 +152,11 @@ class GLM5XMLAReference:
     def _linear(
         self, values: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None
     ) -> torch.Tensor:
-        weight = torch.as_tensor(weight)
+        weight = torch.as_tensor(weight).to(device=values.device)
         if values.dtype != weight.dtype:
             values = values.to(weight.dtype)
         if bias is not None:
-            bias = torch.as_tensor(bias).to(weight.dtype)
+            bias = torch.as_tensor(bias).to(device=values.device, dtype=weight.dtype)
         return F.linear(values, weight, bias)
 
     def q_residual(self, hidden_states: torch.Tensor) -> torch.Tensor:

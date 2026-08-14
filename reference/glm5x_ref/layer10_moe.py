@@ -66,10 +66,13 @@ class GLM5XDenseMlpReference:
             raise ValueError("GLM5X_DENSE_MLP_HIDDEN_SHAPE")
         original_shape = hidden_states.shape
         flat = hidden_states.reshape(-1, self.hidden_size)
-        work = flat.to(dtype=self.weights.gate_proj.dtype)
-        gate = F.linear(work, self.weights.gate_proj)
-        up = F.linear(work, self.weights.up_proj)
-        output = F.linear(F.silu(gate) * up, self.weights.down_proj)
+        gate_weight = self.weights.gate_proj.to(device=flat.device)
+        up_weight = self.weights.up_proj.to(device=flat.device)
+        down_weight = self.weights.down_proj.to(device=flat.device)
+        work = flat.to(dtype=gate_weight.dtype)
+        gate = F.linear(work, gate_weight)
+        up = F.linear(work, up_weight)
+        output = F.linear(F.silu(gate) * up, down_weight)
         empty_router = torch.empty(
             (*original_shape[:-1], 0), dtype=torch.float32, device=output.device
         )
@@ -162,15 +165,20 @@ class GLM5XLayer10MoEReference:
 
     @staticmethod
     def _mlp(hidden: torch.Tensor, expert: GLM5XExpertWeights) -> torch.Tensor:
-        work = hidden.to(dtype=expert.gate_proj.dtype)
-        gate = F.linear(work, expert.gate_proj)
-        up = F.linear(work, expert.up_proj)
-        return F.linear(F.silu(gate) * up, expert.down_proj)
+        gate_weight = expert.gate_proj.to(device=hidden.device)
+        up_weight = expert.up_proj.to(device=hidden.device)
+        down_weight = expert.down_proj.to(device=hidden.device)
+        work = hidden.to(dtype=gate_weight.dtype)
+        gate = F.linear(work, gate_weight)
+        up = F.linear(work, up_weight)
+        return F.linear(F.silu(gate) * up, down_weight)
 
     def _route(self, hidden: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        logits = F.linear(hidden.to(torch.float32), self.router_weight.to(torch.float32))
+        router = self.router_weight.to(device=hidden.device, dtype=torch.float32)
+        bias = self.correction_bias.to(device=hidden.device, dtype=torch.float32)
+        logits = F.linear(hidden.to(torch.float32), router)
         scores = torch.sigmoid(logits)
-        choice = scores + self.correction_bias.to(device=scores.device)
+        choice = scores + bias
         group_scores = choice.view(-1, self.n_group, self.num_experts // self.n_group).topk(
             2, dim=-1
         ).values.sum(dim=-1)
@@ -269,19 +277,31 @@ class GLM5XLayer10MoEReference:
         norm_topk_prob: bool = True,
         expert_intermediate_size: int = 2048,
         hidden_size: int = 6144,
+        device: torch.device | str | None = None,
     ) -> "GLM5XLayer10MoEReference":
 
         prefix = f"model.layers.{layer_id}.mlp"
-        router_weight = cls._read_tensor(tensor_refs, f"{prefix}.gate.weight").to(torch.float32)
+        target = None if device is None else torch.device(device)
+        router_weight = cls._read_tensor(tensor_refs, f"{prefix}.gate.weight").to(
+            device=target, dtype=torch.float32
+        )
         correction_bias = cls._read_tensor(
             tensor_refs, f"{prefix}.gate.e_score_correction_bias"
-        ).to(torch.float32)
+        ).to(device=target, dtype=torch.float32)
         shared = cls._read_expert(
             tensor_refs,
             f"{prefix}.shared_experts.gate_proj.weight",
             f"{prefix}.shared_experts.up_proj.weight",
             f"{prefix}.shared_experts.down_proj.weight",
         )
+        if target is not None:
+            shared = GLM5XExpertWeights(
+                *(tensor.to(device=target) for tensor in (
+                    shared.gate_proj,
+                    shared.up_proj,
+                    shared.down_proj,
+                ))
+            )
 
         def load_expert(expert_id: int) -> GLM5XExpertWeights:
             try:
@@ -292,6 +312,7 @@ class GLM5XLayer10MoEReference:
                 payload,
                 (expert_intermediate_size, hidden_size),
                 (hidden_size, expert_intermediate_size),
+                device=target,
             )
 
         return cls(
@@ -351,12 +372,17 @@ class GLM5XLayer10MoEReference:
         payload: Mapping[str, bytes],
         intermediate_hidden: tuple[int, int],
         down_shape: tuple[int, int],
+        *,
+        device: torch.device | str | None = None,
     ) -> GLM5XExpertWeights:
+        target = None if device is None else torch.device(device)
+
         def decode(role: str, shape: tuple[int, int]) -> torch.Tensor:
             data = payload.get(role)
             if data is None or len(data) != shape[0] * shape[1] * 2:
                 raise K3XError("GLM5X_LAYER_EXPERT_PAYLOAD", role)
-            return torch.frombuffer(bytearray(data), dtype=torch.int16).view(torch.bfloat16).reshape(shape)
+            value = torch.frombuffer(bytearray(data), dtype=torch.int16).view(torch.bfloat16).reshape(shape)
+            return value if target is None else value.to(device=target)
 
         return GLM5XExpertWeights(
             gate_proj=decode("gate_proj", intermediate_hidden),

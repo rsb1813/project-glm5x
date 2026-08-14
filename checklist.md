@@ -69,3 +69,7 @@
 - [x] Add an opt-in bounded LRU for validated reference trunk layers; keep capacity zero as the default until real 78-layer RAM pressure is measured.
 - [x] Add the GLM-5.2 first-three-layer dense MLP reference path and bundle-backed empty-routing regression.
 - [x] Add a configuration-driven model-level bundle factory with dense/sparse selection and shared-indexer source mapping.
+- [x] Add explicit CPU/CUDA device staging to the reference bundle/model factories and CPU-vs-CUDA parity gates.
+- [x] Add verified source deletion markers and `convert-shards --delete-source` resume behavior.
+- [x] Add the resumable local GLM-5.2 shard stream driver with one-shard-at-a-time conversion.
+- [ ] Finish the 282-shard local stream and assemble the full expert bundle.
