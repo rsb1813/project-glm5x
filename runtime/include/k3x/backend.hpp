@@ -40,6 +40,7 @@ struct BackendOptions {
     CudaWeightValidationMode cuda_weight_validation{
         CudaWeightValidationMode::per_call};
     std::uint64_t cuda_resident_bytes{};
+    std::uint64_t cuda_cublas_workspace_bytes{};
     std::uint64_t cuda_pinned_bytes{};
 };
 

@@ -169,6 +169,7 @@ public:
           ffn_activation_scratch_(&memory_stats_, &runtime_stats_),
           ffn_output_scratch_(&memory_stats_, &runtime_stats_),
           ffn_pointer_scratch_(&memory_stats_, &runtime_stats_),
+          ffn_cublas_workspace_(&memory_stats_, &runtime_stats_),
           mxfp4_input_scratch_(&memory_stats_, &runtime_stats_),
           mxfp4_packed_scratch_(&memory_stats_, &runtime_stats_),
           mxfp4_scales_scratch_(&memory_stats_, &runtime_stats_),
@@ -3402,6 +3403,18 @@ private:
             }
             pointer_base = static_cast<std::byte*>(ffn_pointer_scratch_.get());
         }
+        void* cublas_workspace = nullptr;
+        if (options_.cuda_cublas_workspace_bytes != 0) {
+            if (ffn_cublas_workspace_.reserve(
+                    static_cast<std::size_t>(
+                        options_.cuda_cublas_workspace_bytes)) !=
+                cudaSuccess) {
+                return Result<std::vector<std::vector<float>>>::failure(
+                    ErrorCode::backend_unavailable,
+                    "CUDA BF16 dense grid workspace allocation failed");
+            }
+            cublas_workspace = ffn_cublas_workspace_.get();
+        }
         for (auto& event : resident_grid_events_) {
             if (event.ensure() != cudaSuccess) {
                 return Result<std::vector<std::vector<float>>>::failure(
@@ -3471,7 +3484,9 @@ private:
                             plan->input_layout.get(), &beta, device_c,
                             plan->output_layout.get(), device_c,
                             plan->output_layout.get(), &plan->heuristic.algo,
-                            nullptr, 0, stream_) != CUBLAS_STATUS_SUCCESS) {
+                            cublas_workspace,
+                            options_.cuda_cublas_workspace_bytes,
+                            stream_) != CUBLAS_STATUS_SUCCESS) {
                         return false;
                     }
                     return cudaEventRecord(end.get(), stream_) == cudaSuccess;
@@ -3495,7 +3510,8 @@ private:
                             member_source, plan->input_layout.get(), &beta,
                             member_output, plan->output_layout.get(),
                             member_output, plan->output_layout.get(),
-                            &plan->heuristic.algo, nullptr, 0, stream_) !=
+                            &plan->heuristic.algo, cublas_workspace,
+                            options_.cuda_cublas_workspace_bytes, stream_) !=
                         CUBLAS_STATUS_SUCCESS) {
                         return false;
                     }
@@ -4328,6 +4344,17 @@ private:
             CUBLAS_STATUS_SUCCESS) {
             return false;
         }
+        if (options_.cuda_cublas_workspace_bytes != 0) {
+            const auto workspace_bytes = static_cast<std::size_t>(
+                options_.cuda_cublas_workspace_bytes);
+            if (cublasLtMatmulPreferenceSetAttribute(
+                    plan.preference.get(),
+                    CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                    &workspace_bytes, sizeof(workspace_bytes)) !=
+                CUBLAS_STATUS_SUCCESS) {
+                return false;
+            }
+        }
         int returned_results = 0;
         return cublasLtMatmulAlgoGetHeuristic(
                    handle_, plan.operation.get(), plan.weight_layout.get(),
@@ -4562,6 +4589,7 @@ private:
     cuda::ScratchBuffer ffn_activation_scratch_;
     cuda::ScratchBuffer ffn_output_scratch_;
     cuda::ScratchBuffer ffn_pointer_scratch_;
+    cuda::ScratchBuffer ffn_cublas_workspace_;
     cuda::ScratchBuffer mxfp4_input_scratch_;
     cuda::ScratchBuffer mxfp4_packed_scratch_;
     cuda::ScratchBuffer mxfp4_scales_scratch_;

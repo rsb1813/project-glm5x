@@ -35,6 +35,7 @@ struct Arguments {
     std::size_t tokens{1};
     std::size_t warmup{2};
     std::size_t iterations{10};
+    std::size_t workspace_bytes{};
     std::string precision{"fp32"};
     std::string output{"fp32"};
 };
@@ -90,6 +91,10 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             const auto parsed = parse_size(value);
             if (!parsed || *parsed == 0) return std::nullopt;
             result.iterations = *parsed;
+        } else if (key == "--workspace-bytes") {
+            const auto parsed = parse_size(value);
+            if (!parsed) return std::nullopt;
+            result.workspace_bytes = *parsed;
         } else if (key == "--precision") {
             result.precision = value;
         } else if (key == "--output") {
@@ -192,7 +197,8 @@ int main(int argc, char** argv) {
     if (!arguments || !std::filesystem::is_directory(arguments->artifact_dir)) {
         std::cerr << "usage: --artifact-dir DIR --layer N --expert N "
                      "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
-                     "[--precision fp32|bf16-rounded] [--output fp32|bf16]\n";
+                     "[--workspace-bytes N] [--precision fp32|bf16-rounded] "
+                     "[--output fp32|bf16]\n";
         return 2;
     }
     const auto paths = artifact_paths(arguments->artifact_dir);
@@ -308,6 +314,7 @@ int main(int argc, char** argv) {
         ? k3x::CudaBatchingMode::resident_grid : k3x::CudaBatchingMode::scalar;
     options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
     options.cuda_transfer = k3x::CudaTransferMode::synchronous;
+    options.cuda_cublas_workspace_bytes = arguments->workspace_bytes;
     options.cuda_bf16_output = arguments->output == "bf16"
         ? k3x::CudaBf16OutputMode::bf16 : k3x::CudaBf16OutputMode::fp32;
     options.cuda_weight_validation = k3x::CudaWeightValidationMode::admission;
@@ -402,6 +409,8 @@ int main(int argc, char** argv) {
               << ",\"shard_count\":" << paths.size()
               << ",\"precision\":\"" << arguments->precision << "\""
               << ",\"output\":\"" << arguments->output << "\""
+              << ",\"cublas_workspace_bytes\":"
+              << arguments->workspace_bytes
               << ",\"host_payload_bytes\":" << host_payload_bytes
               << ",\"host_load_nanoseconds\":" << host_load_ns
               << ",\"cold_latency_nanoseconds\":" << cold_ns
