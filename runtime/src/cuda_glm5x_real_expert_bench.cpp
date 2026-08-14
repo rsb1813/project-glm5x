@@ -38,6 +38,7 @@ struct Arguments {
     std::size_t workspace_bytes{};
     std::string precision{"fp32"};
     std::string output{"fp32"};
+    std::string input_mode{"common"};
 };
 
 std::optional<std::size_t> parse_size(std::string_view text) {
@@ -99,6 +100,8 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             result.precision = value;
         } else if (key == "--output") {
             result.output = value;
+        } else if (key == "--input-mode") {
+            result.input_mode = value;
         } else {
             return std::nullopt;
         }
@@ -109,6 +112,10 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
         return std::nullopt;
     }
     if (result.output != "fp32" && result.output != "bf16") {
+        return std::nullopt;
+    }
+    if (result.input_mode != "common" &&
+        result.input_mode != "sparse-packed") {
         return std::nullopt;
     }
     if (result.precision != "bf16-rounded" && result.output != "fp32") {
@@ -198,7 +205,7 @@ int main(int argc, char** argv) {
         std::cerr << "usage: --artifact-dir DIR --layer N --expert N "
                      "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
                      "[--workspace-bytes N] [--precision fp32|bf16-rounded] "
-                     "[--output fp32|bf16]\n";
+                     "[--output fp32|bf16] [--input-mode common|sparse-packed]\n";
         return 2;
     }
     const auto paths = artifact_paths(arguments->artifact_dir);
@@ -292,7 +299,15 @@ int main(int argc, char** argv) {
     const auto host_load_ns = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - host_start).count());
-    const auto input_value_count = arguments->tokens * kHiddenSize;
+    const bool sparse_packed = arguments->input_mode == "sparse-packed";
+    if (sparse_packed &&
+        (arguments->precision != "bf16-rounded" || arguments->tokens != 2)) {
+        std::cerr << "sparse-packed requires --precision bf16-rounded --tokens 2\n";
+        return 7;
+    }
+    const auto logical_token_count = arguments->tokens;
+    const auto grid_token_count = sparse_packed ? 1 : arguments->tokens;
+    const auto input_value_count = logical_token_count * kHiddenSize;
     std::vector<float> input(input_value_count);
     for (std::size_t index = 0; index < input.size(); ++index) {
         input[index] = static_cast<float>(static_cast<int>(index % 29) - 14) * 0.01F;
@@ -302,6 +317,15 @@ int main(int argc, char** argv) {
     raw_views.reserve(fixtures.size());
     for (const auto& fixture : fixtures) {
         raw_views.push_back(fixture.raw);
+    }
+    std::vector<float> packed_input;
+    if (sparse_packed) {
+        packed_input.resize(fixtures.size() * kHiddenSize);
+        for (std::size_t expert = 0; expert < fixtures.size(); ++expert) {
+            const auto token = expert % logical_token_count;
+            std::copy_n(input.begin() + token * kHiddenSize, kHiddenSize,
+                        packed_input.begin() + expert * kHiddenSize);
+        }
     }
     k3x::BackendOptions options;
     options.kind = k3x::BackendKind::cuda_custom;
@@ -327,10 +351,13 @@ int main(int argc, char** argv) {
     }
     auto cpu = k3x::make_cpu_backend();
     std::vector<float> cpu_reference;
-    cpu_reference.reserve(arguments->tokens * kHiddenSize);
-    for (std::size_t token = 0; token < arguments->tokens; ++token) {
+    cpu_reference.reserve(grid_token_count * kHiddenSize);
+    const auto reference_token_count = sparse_packed ? 1 : arguments->tokens;
+    for (std::size_t token = 0; token < reference_token_count; ++token) {
+        const auto logical_token = sparse_packed
+            ? ((fixtures.size() - 1) % logical_token_count) : token;
         const auto token_input = std::span<const float>(input).subspan(
-            token * kHiddenSize, kHiddenSize);
+            logical_token * kHiddenSize, kHiddenSize);
         const auto reference = cpu->dense_situ_mlp(
             token_input, fixtures.back().dense, 1.0F, std::nullopt,
             arguments->layer, k3x::ProfilePhase::decode);
@@ -340,9 +367,14 @@ int main(int argc, char** argv) {
     }
     const auto execute = [&]() {
         if (use_grid) {
-            auto outputs = cuda.value()->raw_bf16_situ_mlp_grid(
-                input, arguments->tokens, raw_views, 1.0F, std::nullopt,
-                arguments->layer, k3x::ProfilePhase::decode);
+            auto outputs = sparse_packed
+                ? cuda.value()->raw_bf16_situ_mlp_grid_packed(
+                      packed_input, grid_token_count, raw_views, 1.0F,
+                      std::nullopt, arguments->layer,
+                      k3x::ProfilePhase::decode)
+                : cuda.value()->raw_bf16_situ_mlp_grid(
+                      input, grid_token_count, raw_views, 1.0F, std::nullopt,
+                      arguments->layer, k3x::ProfilePhase::decode);
             if (!outputs) {
                 return k3x::Result<std::vector<float>>::failure(
                     outputs.error(), outputs.message());
@@ -409,6 +441,8 @@ int main(int argc, char** argv) {
               << ",\"shard_count\":" << paths.size()
               << ",\"precision\":\"" << arguments->precision << "\""
               << ",\"output\":\"" << arguments->output << "\""
+              << ",\"input_mode\":\"" << arguments->input_mode << "\""
+              << ",\"grid_token_count\":" << grid_token_count
               << ",\"cublas_workspace_bytes\":"
               << arguments->workspace_bytes
               << ",\"host_payload_bytes\":" << host_payload_bytes
