@@ -30,6 +30,23 @@ struct ExpertMajorPlan {
     std::size_t assignment_count{};
 };
 
+struct ExpertMajorPackedGroup {
+    std::uint32_t expert_id{};
+    std::vector<ExpertMajorAssignment> assignments;
+    std::vector<float> inputs;
+};
+
+struct ExpertMajorPackedPlan {
+    std::size_t hidden_size{};
+    std::size_t assignment_count{};
+    std::vector<ExpertMajorPackedGroup> groups;
+};
+
 Result<ExpertMajorPlan> build_expert_major_plan(
+    std::span<const ExpertMajorTokenRoute> routes);
+
+Result<ExpertMajorPackedPlan> build_expert_major_packed_plan(
+    std::span<const float> token_hidden, std::size_t token_count,
+    std::size_t hidden_size,
     std::span<const ExpertMajorTokenRoute> routes);
 }

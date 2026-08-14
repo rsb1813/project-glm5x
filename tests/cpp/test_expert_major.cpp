@@ -19,6 +19,7 @@
 
 int main() {
     using k3x::ErrorCode;
+    using k3x::ExpertMajorPackedPlan;
     using k3x::ExpertMajorTokenRoute;
 
     {
@@ -97,5 +98,27 @@ int main() {
                 {{1}, {std::numeric_limits<float>::infinity()}}});
         assert(!result);
         assert(result.error() == ErrorCode::invalid_state);
+    }
+    {
+        const std::vector<float> hidden{
+            1.0F, 2.0F, 3.0F,
+            4.0F, 5.0F, 6.0F,
+        };
+        const std::vector<ExpertMajorTokenRoute> routes{
+            {{2, 1}, {0.6F, 0.4F}},
+            {{1}, {1.0F}},
+        };
+        const auto result = k3x::build_expert_major_packed_plan(
+            hidden, 2, 3, routes);
+        assert(result);
+        const ExpertMajorPackedPlan& packed = result.value();
+        assert(packed.hidden_size == 3);
+        assert(packed.assignment_count == 3);
+        assert(packed.groups.size() == 2);
+        assert(packed.groups[0].expert_id == 2);
+        assert(packed.groups[0].inputs == std::vector<float>({1.0F, 2.0F, 3.0F}));
+        assert(packed.groups[1].expert_id == 1);
+        assert(packed.groups[1].inputs ==
+               std::vector<float>({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F}));
     }
 }
