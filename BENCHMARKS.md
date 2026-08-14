@@ -628,3 +628,15 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Range assignment: worker 0 `10..100`, worker 1 `101..191`, worker 2 `192..281` (half-open indices); first ten artifacts were already complete.
 - Observed: worker 0 finalized shard 12 at `04:46:52`; worker 1 finalized 102 and 103 at `04:44:16` and `04:49:37`; worker 2 finalized 193 and 194 at `04:44:14` and `04:49:36`. Source downloads for the next shard overlapped conversion.
 - Interpretation: the sample is an aggregate overlap signal, not a final sustained shards/hour benchmark. No model tok/s, quality, or runtime latency was measured.
+
+## 2026-08-15 -- Real layer-10 four-token CUDA fusion comparison
+
+- Date: 2026-08-15.
+- Commit: `280f330` working tree measurement; no source-code change in this run.
+- Hardware: RTX 5080, WSL2 Ubuntu-24.04, CUDA 13.3; official `zai-org/GLM-5.2` layer-10 real BF16 expert payloads.
+- Mode: `learned-moe-layer`, four candidate tokens, 29 routed experts plus one shared expert, 4 GB resident budget, 10 warmup iterations and 100 measured iterations. Baseline used host accumulation/shared path; fused used device accumulation plus fused shared path.
+- Baseline: warm median `4,317,561 ns/block`, host-load `32,058,777,747 ns`, cold latency `564,445,113 ns`, cold H2D `2,415,919,104 B`, resident expert bytes `2,415,919,104 B`, warm H2D `0 B`.
+- Fused: warm median `3,741,291 ns/block`, host-load `31,820,005,590 ns`, cold latency `873,953,647 ns`, cold H2D `2,415,919,104 B`, resident expert bytes `2,415,919,104 B`, warm H2D `0 B`.
+- Difference: the fused/device-accumulate warm median is approximately `13.3%` lower in this paired bounded sublayer sample. Cold latency was higher in the fused run, so this does not establish an end-to-end speedup or a default policy.
+- Correctness: both modes reported GPU-vs-CPU maximum relative error `0.000643727718852` and CPU-expected maximum relative error `0.00484962016344`; route IDs/contributions were identical. No decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, or quality score was measured.
+- Interpretation: this is a real-weight, real-routing CUDA kernel boundary only. The next bottleneck remains all-layer hidden-state/final-head parity and full-model scheduling; the result must not be converted into a model tok/s claim.
