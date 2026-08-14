@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, and an explicit GLM SiLU path are implemented over five bounded real shards. The current local implementation is `1514d11`; public checks for this commit are pending. Full checkpoint execution, final logits, incremental generation, and end-to-end tok/s remain unmeasured.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, and an explicit GLM SiLU path are implemented over five bounded real shards. The current verified HEAD is `b5754b3`; public correctness `31819731885` and CodeQL `31819731942` are green. Full checkpoint execution, final logits, incremental generation, and end-to-end tok/s remain unmeasured.
 
 ## Completed
 
@@ -127,5 +127,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
 - Last known-good implementation HEAD: `f07d78c` (`feat: align GLM MoE activation with SiLU`). WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the complete WSL Python suite `301 passed, 124 skipped in 71.25 s` are green. Public Linux correctness `31812923197` and CodeQL `31812923191` also passed.
-- Last known-good local implementation HEAD: `1514d11` (`feat: add opt-in device expert accumulation`). WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the complete WSL Python suite `301 passed, 124 skipped` are green. Public checks for this commit are pending the push.
+- Last known-good implementation HEAD: `b5754b3` (`docs: close integrated dependabot record`). WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the complete WSL Python suite `301 passed, 124 skipped` are green. Public correctness `31819731885` and CodeQL `31819731942` also passed.
 - Next bottleneck: export the exact layer-10 q-residual/MLA/DSA hidden state into `GLM5XACT`, verify complete nonzero full-layer parity, then add pinned/asynchronous raw H2D, direct tensor-core algorithm selection, all-layer exact state, final logits, incremental generation, and VRAM-pressure-aware residency. Full weights remain intentionally absent, so no end-to-end tok/s is claimed.
