@@ -194,27 +194,45 @@ class GLM5XLayer10MoEReference:
         *,
         layer_id: int = 10,
         cache_experts: bool = False,
+        top_k: int = 8,
+        routed_scaling_factor: float = 2.5,
+        n_group: int = 1,
+        topk_group: int = 1,
+        norm_topk_prob: bool = True,
+        expert_intermediate_size: int = 2048,
+        hidden_size: int = 6144,
     ) -> "GLM5XLayer10MoEReference":
         bundle = GLM5XExpertBundle.open(bundle_path)
-        tensor_refs: dict[str, tuple[K3XReader, object]] = {}
-        for artifact_key, artifact_path in bundle.artifact_paths.items():
-            sidecar_path = artifact_path.with_suffix(artifact_path.suffix + ".manifest.json")
-            try:
-                sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-            except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise K3XError("GLM5X_LAYER_SIDECAR_INVALID", str(sidecar_path)) from exc
-            records = {record.tensor_id: record for record in bundle.readers[artifact_key].tensor_records}
-            for item in sidecar.get("tensors", []):
-                name = item.get("name") if isinstance(item, dict) else None
-                tensor_id = item.get("tensor_id") if isinstance(item, dict) else None
-                if not isinstance(name, str) or not isinstance(tensor_id, int):
-                    raise K3XError("GLM5X_LAYER_TENSOR_METADATA", str(sidecar_path))
-                record = records.get(tensor_id)
-                if record is None:
-                    raise K3XError("GLM5X_LAYER_TENSOR_ID_MISMATCH", name)
-                if name in tensor_refs:
-                    raise K3XError("GLM5X_LAYER_DUPLICATE_TENSOR", name)
-                tensor_refs[name] = (bundle.readers[artifact_key], record)
+        return cls._from_open_bundle(
+            bundle,
+            tensor_refs=_collect_tensor_refs(bundle),
+            layer_id=layer_id,
+            cache_experts=cache_experts,
+            top_k=top_k,
+            routed_scaling_factor=routed_scaling_factor,
+            n_group=n_group,
+            topk_group=topk_group,
+            norm_topk_prob=norm_topk_prob,
+            expert_intermediate_size=expert_intermediate_size,
+            hidden_size=hidden_size,
+        )
+
+    @classmethod
+    def _from_open_bundle(
+        cls,
+        bundle: GLM5XExpertBundle,
+        *,
+        tensor_refs: Mapping[str, tuple[K3XReader, object]],
+        layer_id: int = 10,
+        cache_experts: bool = False,
+        top_k: int = 8,
+        routed_scaling_factor: float = 2.5,
+        n_group: int = 1,
+        topk_group: int = 1,
+        norm_topk_prob: bool = True,
+        expert_intermediate_size: int = 2048,
+        hidden_size: int = 6144,
+    ) -> "GLM5XLayer10MoEReference":
 
         prefix = f"model.layers.{layer_id}.mlp"
         router_weight = cls._read_tensor(tensor_refs, f"{prefix}.gate.weight").to(torch.float32)
@@ -233,18 +251,22 @@ class GLM5XLayer10MoEReference:
                 payload = bundle.read_expert(layer_id, expert_id)
             except (KeyError, K3XError) as exc:
                 raise K3XError("GLM5X_LAYER_EXPERT_NOT_FOUND", f"{layer_id}:{expert_id}") from exc
-            return cls._expert_from_payload(payload, (2048, 6144), (6144, 2048))
+            return cls._expert_from_payload(
+                payload,
+                (expert_intermediate_size, hidden_size),
+                (hidden_size, expert_intermediate_size),
+            )
 
         return cls(
             router_weight=router_weight,
             correction_bias=correction_bias,
             expert_loader=load_expert,
             shared_expert=shared,
-            top_k=8,
-            routed_scaling_factor=2.5,
-            n_group=1,
-            topk_group=1,
-            norm_topk_prob=True,
+            top_k=top_k,
+            routed_scaling_factor=routed_scaling_factor,
+            n_group=n_group,
+            topk_group=topk_group,
+            norm_topk_prob=norm_topk_prob,
             cache_experts=cache_experts,
         )
 
@@ -304,3 +326,28 @@ class GLM5XLayer10MoEReference:
             up_proj=decode("up_proj", intermediate_hidden),
             down_proj=decode("down_proj", down_shape),
         )
+
+
+def _collect_tensor_refs(
+    bundle: GLM5XExpertBundle,
+) -> dict[str, tuple[K3XReader, object]]:
+    refs: dict[str, tuple[K3XReader, object]] = {}
+    for artifact_key, artifact_path in bundle.artifact_paths.items():
+        sidecar_path = artifact_path.with_suffix(artifact_path.suffix + ".manifest.json")
+        try:
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise K3XError("GLM5X_LAYER_SIDECAR_INVALID", str(sidecar_path)) from exc
+        records = {record.tensor_id: record for record in bundle.readers[artifact_key].tensor_records}
+        for item in sidecar.get("tensors", []):
+            name = item.get("name") if isinstance(item, dict) else None
+            tensor_id = item.get("tensor_id") if isinstance(item, dict) else None
+            if not isinstance(name, str) or not isinstance(tensor_id, int):
+                raise K3XError("GLM5X_LAYER_TENSOR_METADATA", str(sidecar_path))
+            record = records.get(tensor_id)
+            if record is None:
+                raise K3XError("GLM5X_LAYER_TENSOR_ID_MISMATCH", name)
+            if name in refs:
+                raise K3XError("GLM5X_LAYER_DUPLICATE_TENSOR", name)
+            refs[name] = (bundle.readers[artifact_key], record)
+    return refs

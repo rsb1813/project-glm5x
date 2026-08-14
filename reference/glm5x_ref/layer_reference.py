@@ -2,11 +2,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
-from .layer10_moe import GLM5XLayer10MoEReference, GLM5XMoEForward
-from .mla_dsa import GLM5XMLAForward, GLM5XMLAReference, GLM5XMLAState, _rms_norm
+from glm5x_converter.bundle import GLM5XExpertBundle
+
+from .layer10_moe import (
+    GLM5XLayer10MoEReference,
+    GLM5XMoEForward,
+    _collect_tensor_refs,
+)
+from .mla_dsa import GLM5XMLAForward, GLM5XMLAReference, GLM5XMLAState, GLM5XMLAWeights, _rms_norm
 from .official_dsa import GLM5XOfficialDSAIndexer, GLM5XOfficialDSAState
 
 
@@ -47,6 +54,74 @@ class GLM5XDecoderLayerReference:
         self.post_attention_layernorm = post_attention_layernorm
         self.moe = moe
         self.dsa_indexer = dsa_indexer
+
+    @classmethod
+    def from_bundle(
+        cls,
+        bundle_path: str | Path,
+        *,
+        layer_id: int = 10,
+        cache_experts: bool = False,
+        num_heads: int = 64,
+        qk_nope_head_dim: int = 192,
+        qk_rope_head_dim: int = 64,
+        v_head_dim: int = 256,
+        index_topk: int = 2048,
+        top_k: int = 8,
+        routed_scaling_factor: float = 2.5,
+        expert_intermediate_size: int = 2048,
+        hidden_size: int = 6144,
+        rms_norm_eps: float = 1e-5,
+    ) -> "GLM5XDecoderLayerReference":
+        bundle = GLM5XExpertBundle.open(bundle_path)
+        refs = _collect_tensor_refs(bundle)
+        read = lambda name: GLM5XLayer10MoEReference._read_tensor(refs, name)  # noqa: E731
+        prefix = f"model.layers.{layer_id}"
+        attention_prefix = f"{prefix}.self_attn"
+        attention = GLM5XMLAReference(
+            GLM5XMLAWeights(
+                q_a_proj=read(f"{attention_prefix}.q_a_proj.weight"),
+                q_a_norm=read(f"{attention_prefix}.q_a_layernorm.weight"),
+                q_b_proj=read(f"{attention_prefix}.q_b_proj.weight"),
+                kv_a_proj=read(f"{attention_prefix}.kv_a_proj_with_mqa.weight"),
+                kv_a_norm=read(f"{attention_prefix}.kv_a_layernorm.weight"),
+                kv_b_proj=read(f"{attention_prefix}.kv_b_proj.weight"),
+                o_proj=read(f"{attention_prefix}.o_proj.weight"),
+                num_heads=num_heads,
+                qk_nope_head_dim=qk_nope_head_dim,
+                qk_rope_head_dim=qk_rope_head_dim,
+                v_head_dim=v_head_dim,
+                rms_norm_eps=rms_norm_eps,
+            )
+        )
+        indexer_prefix = f"{attention_prefix}.indexer"
+        indexer = GLM5XOfficialDSAIndexer(
+            wq_b=read(f"{indexer_prefix}.wq_b.weight"),
+            wk=read(f"{indexer_prefix}.wk.weight"),
+            k_norm_weight=read(f"{indexer_prefix}.k_norm.weight"),
+            k_norm_bias=read(f"{indexer_prefix}.k_norm.bias"),
+            weights_proj=read(f"{indexer_prefix}.weights_proj.weight"),
+            qk_rope_head_dim=qk_rope_head_dim,
+            index_topk=index_topk,
+            indexer_rope_interleave=True,
+        )
+        moe = GLM5XLayer10MoEReference._from_open_bundle(
+            bundle,
+            tensor_refs=refs,
+            layer_id=layer_id,
+            cache_experts=cache_experts,
+            top_k=top_k,
+            routed_scaling_factor=routed_scaling_factor,
+            expert_intermediate_size=expert_intermediate_size,
+            hidden_size=hidden_size,
+        )
+        return cls(
+            input_layernorm=read(f"{prefix}.input_layernorm.weight"),
+            attention=attention,
+            post_attention_layernorm=read(f"{prefix}.post_attention_layernorm.weight"),
+            moe=moe,
+            dsa_indexer=indexer,
+        )
 
     def __call__(
         self,

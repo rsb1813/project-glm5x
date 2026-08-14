@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import torch
+from safetensors.torch import save_file
 
+from glm5x_converter.bundle import GLM5XExpertBundle, assemble_glm5x_expert_bundle
+from glm5x_converter.shard import convert_glm5x_shard
+from glm5x_ref.manifest import GLM5XTensorManifest
 from glm5x_ref.layer10_moe import GLM5XExpertWeights, GLM5XLayer10MoEReference
 from glm5x_ref.layer_reference import GLM5XDecoderLayerReference
 from glm5x_ref.mla_dsa import GLM5XMLAReference, GLM5XMLAWeights
-from glm5x_ref.official_dsa import GLM5XOfficialDSAIndexer, build_glm_indexer_rope
+from glm5x_ref.official_dsa import GLM5XOfficialDSAIndexer
 
 
 def _make_layer() -> tuple[GLM5XDecoderLayerReference, torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
@@ -99,3 +103,111 @@ def test_decoder_layer_incremental_matches_prefill_with_dsa_state() -> None:
     torch.testing.assert_close(last.topk_indices, full.topk_indices[:, 3:])
     assert last.attention_state.length == 4
     assert last.dsa_state is not None and last.dsa_state.length == 4
+
+
+def test_decoder_layer_bundle_loader_reads_attention_and_experts(monkeypatch, tmp_path) -> None:
+    hidden_size = 8
+    heads = 2
+    q_rank = 4
+    kv_rank = 3
+    nope = 2
+    rope = 2
+    value = 2
+    intermediate = 3
+    prefix = "model.layers.0"
+    names: dict[str, torch.Tensor] = {
+        f"{prefix}.input_layernorm.weight": torch.ones(hidden_size, dtype=torch.bfloat16),
+        f"{prefix}.post_attention_layernorm.weight": torch.ones(hidden_size, dtype=torch.bfloat16),
+        f"{prefix}.self_attn.q_a_proj.weight": torch.randn(q_rank, hidden_size).bfloat16(),
+        f"{prefix}.self_attn.q_a_layernorm.weight": torch.ones(q_rank, dtype=torch.bfloat16),
+        f"{prefix}.self_attn.q_b_proj.weight": torch.randn(heads * (nope + rope), q_rank).bfloat16(),
+        f"{prefix}.self_attn.kv_a_proj_with_mqa.weight": torch.randn(kv_rank + rope, hidden_size).bfloat16(),
+        f"{prefix}.self_attn.kv_a_layernorm.weight": torch.ones(kv_rank, dtype=torch.bfloat16),
+        f"{prefix}.self_attn.kv_b_proj.weight": torch.randn(heads * (nope + value), kv_rank).bfloat16(),
+        f"{prefix}.self_attn.o_proj.weight": torch.randn(hidden_size, heads * value).bfloat16(),
+        f"{prefix}.self_attn.indexer.wq_b.weight": torch.randn(heads * 4, q_rank).bfloat16(),
+        f"{prefix}.self_attn.indexer.wk.weight": torch.randn(4, hidden_size).bfloat16(),
+        f"{prefix}.self_attn.indexer.k_norm.weight": torch.ones(4, dtype=torch.bfloat16),
+        f"{prefix}.self_attn.indexer.k_norm.bias": torch.zeros(4, dtype=torch.bfloat16),
+        f"{prefix}.self_attn.indexer.weights_proj.weight": torch.randn(heads, hidden_size).bfloat16(),
+        f"{prefix}.mlp.gate.weight": torch.randn(2, hidden_size).bfloat16(),
+        f"{prefix}.mlp.gate.e_score_correction_bias": torch.zeros(2, dtype=torch.bfloat16),
+        f"{prefix}.mlp.shared_experts.gate_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+        f"{prefix}.mlp.shared_experts.up_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+        f"{prefix}.mlp.shared_experts.down_proj.weight": torch.randn(hidden_size, intermediate).bfloat16(),
+    }
+    for expert_id in range(2):
+        names.update(
+            {
+                f"{prefix}.mlp.experts.{expert_id}.gate_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+                f"{prefix}.mlp.experts.{expert_id}.up_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+                f"{prefix}.mlp.experts.{expert_id}.down_proj.weight": torch.randn(hidden_size, intermediate).bfloat16(),
+            }
+        )
+    source = tmp_path / "model.safetensors"
+    save_file(names, str(source))
+    config = {
+        "architectures": ["GlmMoeDsaForCausalLM"],
+        "model_type": "glm_moe_dsa",
+        "num_hidden_layers": 1,
+        "hidden_size": hidden_size,
+        "n_routed_experts": 2,
+        "num_experts_per_tok": 1,
+        "n_shared_experts": 1,
+        "moe_intermediate_size": intermediate,
+        "index_topk": 1,
+        "index_n_heads": heads,
+        "index_head_dim": 4,
+        "indexer_types": ["full"],
+        "max_position_embeddings": 64,
+        "vocab_size": 16,
+        "num_nextn_predict_layers": 1,
+    }
+    manifest = GLM5XTensorManifest.from_json(
+        config,
+        {
+            "metadata": {"total_size": source.stat().st_size},
+            "weight_map": {name: source.name for name in names},
+        },
+    )
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    convert_glm5x_shard(source, artifacts / "model.k3x", manifest, source.name)
+    bundle_path = artifacts / "experts.json"
+    report = assemble_glm5x_expert_bundle(artifacts, bundle_path)
+    assert report.completed is True
+    original_open = GLM5XExpertBundle.open
+    open_count = 0
+
+    def count_bundle_open(path):
+        nonlocal open_count
+        open_count += 1
+        return original_open(path)
+
+    monkeypatch.setattr(GLM5XExpertBundle, "open", staticmethod(count_bundle_open))
+    layer = GLM5XDecoderLayerReference.from_bundle(
+        bundle_path,
+        layer_id=0,
+        num_heads=heads,
+        qk_nope_head_dim=nope,
+        qk_rope_head_dim=rope,
+        v_head_dim=value,
+        index_topk=1,
+        top_k=1,
+        expert_intermediate_size=intermediate,
+        hidden_size=hidden_size,
+    )
+    hidden = torch.randn(1, 2, hidden_size)
+    positions = torch.arange(2, dtype=torch.float32).view(1, 2)
+    inverse = 1.0 / (10000.0 ** (torch.arange(0, rope, 2) / rope))
+    frequencies = torch.cat((positions[..., None] * inverse,) * 2, dim=-1)
+    result = layer(
+        hidden,
+        (frequencies.cos(), frequencies.sin()),
+        position_ids=torch.arange(2).view(1, 2),
+    )
+    assert result.output.shape == hidden.shape
+    assert result.attention_state.length == 2
+    assert result.dsa_state is not None and result.dsa_state.length == 2
+    assert result.moe.expert_load_count > 0
+    assert open_count == 1
