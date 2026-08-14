@@ -16,9 +16,11 @@ from conftest import cpp_binary
 
 def _base_record() -> BenchmarkRecord:
     root = Path(__file__).parents[2]
+    baseline = root / "results" / "b0006-l1-cache-fp32" / "disabled-synchronous.json"
+    if not baseline.is_file():
+        pytest.skip("historical B-0006 baseline evidence is not present")
     payload = json.loads(
-        (root / "results" / "b0006-l1-cache-fp32" / "disabled-synchronous.json")
-        .read_text(encoding="utf-8")
+        baseline.read_text(encoding="utf-8")
     )
     return BenchmarkRecord(**payload)
 
