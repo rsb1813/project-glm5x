@@ -130,6 +130,12 @@ def _download_url(repo: str, revision: str, path: str) -> str:
     return f"https://huggingface.co/{repo}/resolve/{quote(revision, safe='')}/{quote(path, safe='')}?download=true"
 
 
+def has_verified_deleted_artifact(output_dir: str | Path, shard_name: str) -> bool:
+    artifact = Path(output_dir) / (Path(shard_name).with_suffix(".k3x").name)
+    marker = artifact.with_suffix(artifact.suffix + ".source-deleted.json")
+    return artifact.is_file() and marker.is_file()
+
+
 def stream_checkpoint(
     *,
     repo: str,
@@ -181,13 +187,14 @@ def stream_checkpoint(
         assert manifest is not None
         if shard_name not in manifest.shard_names:
             raise RuntimeError(f"GLM5X_STREAM_INDEX_SHARD_MISSING: {shard_name}")
-        download_resumable(
-            _download_url(repo, revision, shard_name),
-            source_dir / shard_name,
-            files[shard_name].size,
-            token=token,
-            chunk_bytes=chunk_bytes,
-        )
+        if not has_verified_deleted_artifact(output_dir, shard_name):
+            download_resumable(
+                _download_url(repo, revision, shard_name),
+                source_dir / shard_name,
+                files[shard_name].size,
+                token=token,
+                chunk_bytes=chunk_bytes,
+            )
         report = convert_glm5x_shards(
             source_dir,
             output_dir,

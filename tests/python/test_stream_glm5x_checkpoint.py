@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from glm5x_ref.manifest import GLM5XTensorManifest
-from tools.stream_glm5x_checkpoint import manifest_for_shard
+from tools.stream_glm5x_checkpoint import has_verified_deleted_artifact, manifest_for_shard
 
 
 def test_manifest_for_shard_keeps_only_the_selected_tensors() -> None:
@@ -41,3 +41,19 @@ def test_manifest_for_shard_keeps_only_the_selected_tensors() -> None:
     assert selected.shard_names == ("model-00002-of-00002.safetensors",)
     assert selected.tensor_shards == (("lm_head.weight", "model-00002-of-00002.safetensors"),)
     assert selected.total_size == manifest.total_size
+
+
+def test_stream_recognizes_verified_deleted_artifact(tmp_path) -> None:
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    artifact = output_dir / "model-00001-of-00002.k3x"
+    artifact.write_bytes(b"artifact")
+    marker = output_dir / "model-00001-of-00002.k3x.source-deleted.json"
+    marker.write_text("{}", encoding="utf-8")
+
+    assert has_verified_deleted_artifact(
+        output_dir, "model-00001-of-00002.safetensors"
+    )
+    assert not has_verified_deleted_artifact(
+        output_dir, "model-00002-of-00002.safetensors"
+    )
