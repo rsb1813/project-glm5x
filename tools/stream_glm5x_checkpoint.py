@@ -146,6 +146,9 @@ def stream_checkpoint(
     token: str | None = None,
     chunk_bytes: int = 8 * 1024 * 1024,
     max_shards: int | None = None,
+    shard_start: int = 0,
+    shard_end: int | None = None,
+    assemble: bool = True,
     dry_run: bool = False,
 ) -> dict[str, object]:
     source_dir, output_dir, bundle_path = map(Path, (source_dir, output_dir, bundle_path))
@@ -157,7 +160,14 @@ def stream_checkpoint(
         raise RuntimeError("GLM5X_STREAM_SHARDS_MISSING")
     if max_shards is not None and (max_shards <= 0 or max_shards > len(shard_names)):
         raise ValueError("GLM5X_STREAM_MAX_SHARDS")
-    selected_shards = shard_names if max_shards is None else shard_names[:max_shards]
+    if shard_start < 0 or shard_start > len(shard_names):
+        raise ValueError("GLM5X_STREAM_SHARD_START")
+    if shard_end is None:
+        shard_end = len(shard_names)
+    if shard_end < shard_start or shard_end > len(shard_names):
+        raise ValueError("GLM5X_STREAM_SHARD_END")
+    selected_shards = shard_names[:max_shards] if max_shards is not None else shard_names
+    selected_shards = selected_shards[shard_start:shard_end]
     metadata_names = [
         name
         for name in ("config.json", "model.safetensors.index.json", "tokenizer.json", "tokenizer_config.json")
@@ -208,7 +218,7 @@ def stream_checkpoint(
         print(json.dumps({"converted": shard_name, "remaining": len(selected_shards) - len(converted)}), flush=True)
 
     assembled = False
-    if not dry_run and max_shards is None:
+    if not dry_run and assemble and max_shards is None:
         # Every shard was strict-reader verified before its source deletion marker.
         # Reuse that gate and avoid a second full payload scan for the final index.
         bundle_report = assemble_glm5x_expert_bundle(
@@ -223,6 +233,9 @@ def stream_checkpoint(
         "revision": revision,
         "shard_count": len(shard_names),
         "selected_shards": len(selected_shards),
+        "shard_start": shard_start,
+        "shard_end": shard_end,
+        "assemble": assemble,
         "converted_shards": len(converted),
         "assembled": assembled,
         "dry_run": dry_run,
@@ -238,6 +251,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--chunk-bytes", type=int, default=8 * 1024 * 1024)
     parser.add_argument("--max-shards", type=int)
+    parser.add_argument("--shard-start", type=int, default=0)
+    parser.add_argument("--shard-end", type=int)
+    parser.add_argument(
+        "--no-assemble",
+        action="store_true",
+        help="convert only the selected shard range without assembling the final bundle",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -255,6 +275,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
             token=token,
             chunk_bytes=args.chunk_bytes,
             max_shards=args.max_shards,
+            shard_start=args.shard_start,
+            shard_end=args.shard_end,
+            assemble=not args.no_assemble,
             dry_run=args.dry_run,
         )
     except (OSError, RuntimeError, ValueError) as exc:

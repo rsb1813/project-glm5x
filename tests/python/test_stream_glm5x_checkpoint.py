@@ -57,3 +57,27 @@ def test_stream_recognizes_verified_deleted_artifact(tmp_path) -> None:
     assert not has_verified_deleted_artifact(
         output_dir, "model-00002-of-00002.safetensors"
     )
+
+
+def test_stream_parser_exposes_disjoint_worker_range() -> None:
+    from tools.stream_glm5x_checkpoint import _parser
+
+    args = _parser().parse_args(
+        [
+            "--source-dir",
+            "source",
+            "--output-dir",
+            "output",
+            "--bundle",
+            "output/bundle.json",
+            "--shard-start",
+            "12",
+            "--shard-end",
+            "34",
+            "--no-assemble",
+        ]
+    )
+
+    assert args.shard_start == 12
+    assert args.shard_end == 34
+    assert args.no_assemble is True
