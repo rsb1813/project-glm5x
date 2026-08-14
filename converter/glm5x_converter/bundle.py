@@ -166,6 +166,8 @@ class GLM5XExpertBundle:
             record_indexes[relative] = {
                 record.tensor_id: record for record in reader.tensor_records
             }
+            if len(record_indexes[relative]) != len(reader.tensor_records):
+                raise K3XError("EXPERT_BUNDLE_DUPLICATE_TENSOR", relative)
         raw_experts = metadata.get("experts")
         if not isinstance(raw_experts, list):
             raise K3XError("EXPERT_BUNDLE_EXPERTS", str(path))
