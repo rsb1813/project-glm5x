@@ -312,3 +312,11 @@
 - Evidence: on five bounded real layer-10 shards, two tokens selected 15 routed experts and one shared expert, measured `2,155,188 ns` warm median/block with `0.000585675588809` maximum CPU-relative difference, and used `1,207,959,552` resident bytes. Four tokens selected 29 routed experts plus the shared expert and measured `3,968,243 ns` with `0.000429985491792` relative difference. The full WSL CUDA CTest remained 26/26.
 - Accepted because: shared SwiGLU is part of the official MoE sublayer and omitting it hid both compute and residency pressure. The mode expands the measured boundary without changing natural routing or claiming full-layer throughput.
 - Revisit: when the actual q-residual/MLA/DSA hidden state is connected and the complete layer output, final logits, and incremental state have nonzero parity.
+
+## D-0040 -- Use a small CRC-checked activation artifact for the Python/C++ boundary
+
+- Decision: define `GLM5XACT` v1 as a fixed 40-byte little-endian BF16 activation header plus a contiguous token-major payload. Make the Python writer atomic and make the C++ loader reject bad magic, dimensions, extent, dtype, or CRC before routing. Expose optional `--input-bf16` and `--expected-bf16` on the bounded real-expert benchmark for parity evidence.
+- Alternatives: pass tensors through an in-process Python binding, reuse the full K3X tensor directory for every transient activation, or accept raw unframed bytes with an out-of-band shape.
+- Evidence: the WSL CUDA build passed after adding the writer/loader and the C++ activation test; CTest passed 27/27 in 5.98 seconds. Commit `30bf5d4` exposes the exact `moe_input` field and extends the existing incremental parity assertion. Public correctness `31806277016` and CodeQL `31806277022` passed, including the focused Python header/CRC test; no end-to-end GLM tok/s or full-layer claim is made.
+- Accepted because: the artifact is small enough for per-layer handoff, independently verifiable, crash-safe on the producer side, and does not require loading the checkpoint or changing the model graph. Expected-output comparison remains opt-in so the natural router path is unchanged.
+- Revisit: when exact q-residual/MLA/DSA output is exported from the reference, add a real five-shard activation parity record and replace the bounded synthetic input path.

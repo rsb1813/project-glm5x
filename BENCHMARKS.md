@@ -448,3 +448,12 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - BF16-output cross-check: two tokens measured `2,374,827 ns` warm median/block with `0.00111866334919` maximum CPU-relative difference, so FP32 output remains the default.
 - Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, cache hit rate, speculative acceptance, quality score, and full-model VRAM pressure: not measured.
 - Interpretation: this is the complete bounded learned MoE sublayer, including shared SwiGLU. It still excludes q-residual/MLA/DSA, trunk residuals, final logits, incremental full-layer state, and token generation; no end-to-end tok/s claim follows.
+
+## 2026-08-14 -- GLM5XACT activation boundary verification
+
+- Commits: `11fd058`, `30bf5d4`.
+- Hardware: WSL2 Ubuntu-24.04 with CUDA 13.3 build configured for RTX 5080; no full checkpoint.
+- Model/checkpoint: five bounded `zai-org/GLM-5.2` probe artifacts remain the only real weights.
+- Mode: portable `GLM5XACT` v1 BF16 activation writer/loader, fixed 40-byte header, atomic Python write, C++ shape/extent/CRC validation, `GLM5XDecoderLayerForward.moe_input` exposure, and optional benchmark `--input-bf16`/`--expected-bf16` boundary.
+- Correctness result: WSL CUDA build passed; CTest `27/27` passed in `5.98 s`; public correctness workflow `31806277016` and CodeQL workflow `31806277022` passed, including the focused Python producer test. The Windows interpreter still lacks pytest, so no local Python rerun is claimed.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality: not measured. This is an artifact-boundary test, not model execution.

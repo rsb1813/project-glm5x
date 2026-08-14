@@ -246,3 +246,11 @@
 - Pushed learned-router evidence at `222d113`; Linux correctness `31802692875` passed in 2m43s and CodeQL `31802692977` passed in 4m10s.
 - Dependabot PRs #1–#4 independently fail only in the Linux job after about 2m30s with 50 missing historical `results/b0006`–`b0024` files. Their static-analysis jobs pass. No Dependabot PR branch was changed.
 - The visible Node 20 and CodeQL v3 messages are deprecation annotations, not failed steps. Dependabot and vulnerability-alert APIs return disabled/not-authorized responses, so no CVE alert was verified.
+- Rebased Dependabot PRs #1–#4 onto current `main`; their replacement Linux and CodeQL checks are green. The original 50 missing-artifact failures were stale-branch evidence failures, not dependency test regressions.
+
+## 2026-08-14 -- Portable activation handoff
+
+- Added `GLM5XACT` v1 with a 40-byte fixed header, BF16 dtype tag, token/hidden dimensions, payload length, and CRC32C. The Python writer uses a temporary file plus `fsync`/`replace`; the C++ loader validates the complete extent before returning bytes.
+- Extended `k3x_cuda_glm5x_real_expert_bench` with `--input-bf16` and `--expected-bf16`. The latter reports absolute/relative output error against an independently written BF16 artifact and is opt-in.
+- Verification: commits `11fd058` and `30bf5d4`; WSL CUDA build successful; CTest 27/27 passed in 5.98 seconds; public correctness `31806277016` and CodeQL `31806277022` passed, including the Python writer test. Python syntax compilation also passed locally, while the Windows Python has no pytest.
+- Boundary remains intentionally narrow: exact q-residual/MLA/DSA export and full-layer generation are still pending, and no tok/s number is inferred from the artifact test.
