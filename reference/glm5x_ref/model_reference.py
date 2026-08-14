@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Callable, Sequence
 
 import torch
 
@@ -72,9 +72,54 @@ class GLM5XDecoderModelReference:
             raise ValueError("GLM5X_MODEL_ROPE_THETA")
         self.embedding = embedding
         self.layers = tuple(layers)
+        self._layer_loader: Callable[[int], GLM5XDecoderLayerReference] | None = None
+        self._layer_count = len(self.layers)
+        self._rope_dim = int(self.layers[0].attention.weights.qk_rope_head_dim)
         self.final_norm = final_norm
         self.lm_head = lm_head
         self.rope_theta = float(rope_theta)
+
+    @classmethod
+    def from_layer_loader(
+        cls,
+        *,
+        embedding: torch.Tensor,
+        layer_count: int,
+        layer_loader: Callable[[int], GLM5XDecoderLayerReference],
+        final_norm: torch.Tensor,
+        lm_head: torch.Tensor,
+        rope_dim: int = 64,
+        rope_theta: float = 10000.0,
+    ) -> "GLM5XDecoderModelReference":
+        """Create a reference model whose layer weights are loaded per forward."""
+        if not isinstance(layer_count, int) or layer_count <= 0:
+            raise ValueError("GLM5X_MODEL_LAYER_COUNT")
+        if not callable(layer_loader):
+            raise ValueError("GLM5X_MODEL_LAYER_LOADER")
+        if not isinstance(rope_dim, int) or rope_dim <= 0 or rope_dim % 2:
+            raise ValueError("GLM5X_MODEL_ROPE_DIM")
+        embedding = torch.as_tensor(embedding)
+        final_norm = torch.as_tensor(final_norm)
+        lm_head = torch.as_tensor(lm_head)
+        if embedding.ndim != 2 or embedding.shape[0] == 0 or embedding.shape[1] == 0:
+            raise ValueError("GLM5X_MODEL_EMBEDDING_SHAPE")
+        hidden_size = int(embedding.shape[1])
+        if final_norm.shape != (hidden_size,):
+            raise ValueError("GLM5X_MODEL_FINAL_NORM_SHAPE")
+        if lm_head.ndim != 2 or lm_head.shape[1] != hidden_size or lm_head.shape[0] == 0:
+            raise ValueError("GLM5X_MODEL_LM_HEAD_SHAPE")
+        if rope_theta <= 0.0:
+            raise ValueError("GLM5X_MODEL_ROPE_THETA")
+        instance = cls.__new__(cls)
+        instance.embedding = embedding
+        instance.layers = None
+        instance._layer_loader = layer_loader
+        instance._layer_count = layer_count
+        instance._rope_dim = rope_dim
+        instance.final_norm = final_norm
+        instance.lm_head = lm_head
+        instance.rope_theta = float(rope_theta)
+        return instance
 
     @property
     def vocab_size(self) -> int:
@@ -86,12 +131,30 @@ class GLM5XDecoderModelReference:
 
     @property
     def rope_dim(self) -> int:
-        return int(self.layers[0].attention.weights.qk_rope_head_dim)
+        return self._rope_dim
+
+    @property
+    def layer_count(self) -> int:
+        return self._layer_count
+
+    def _load_layer(self, index: int) -> GLM5XDecoderLayerReference:
+        if self._layer_loader is None:
+            assert self.layers is not None
+            layer = self.layers[index]
+        else:
+            layer = self._layer_loader(index)
+        if not isinstance(layer, GLM5XDecoderLayerReference):
+            raise ValueError("GLM5X_MODEL_LAYER_LOADER_RETURN_TYPE")
+        if layer.attention.weights.hidden_size != self.hidden_size:
+            raise ValueError("GLM5X_MODEL_LAYER_HIDDEN_SHAPE")
+        if layer.attention.weights.qk_rope_head_dim != self.rope_dim:
+            raise ValueError("GLM5X_MODEL_LAYER_ROPE_DIM")
+        return layer
 
     def empty_state(self) -> GLM5XDecoderState:
         return GLM5XDecoderState(
-            attention=tuple(None for _ in self.layers),
-            dsa=tuple(None for _ in self.layers),
+            attention=tuple(None for _ in range(self.layer_count)),
+            dsa=tuple(None for _ in range(self.layer_count)),
         )
 
     def _forward_hidden(
@@ -103,7 +166,7 @@ class GLM5XDecoderModelReference:
     ) -> GLM5XModelForward:
         if hidden_states.ndim != 3 or hidden_states.shape[0] != 1:
             raise ValueError("GLM5X_MODEL_HIDDEN_SHAPE")
-        if len(state.attention) != len(self.layers) or len(state.dsa) != len(self.layers):
+        if len(state.attention) != self.layer_count or len(state.dsa) != self.layer_count:
             raise ValueError("GLM5X_MODEL_STATE_LAYERS")
         position_embeddings = _rope_embeddings(
             position_start,
@@ -122,7 +185,8 @@ class GLM5XDecoderModelReference:
             dtype=torch.long,
             device=hidden_states.device,
         ).view(1, -1)
-        for index, layer in enumerate(self.layers):
+        for index in range(self.layer_count):
+            layer = self._load_layer(index)
             result = layer(
                 current,
                 position_embeddings,

@@ -34,3 +34,26 @@ def test_model_prefill_incremental_and_greedy_generation_match() -> None:
         forward = model.forward_token(token, state)
         state = forward.state
     assert model.generate(prompt, 2) == expected
+
+
+def test_model_reference_can_load_one_layer_at_a_time() -> None:
+    layer, _, _ = _make_layer()
+    torch.manual_seed(79)
+    calls: list[int] = []
+
+    def load_layer(layer_id: int):
+        calls.append(layer_id)
+        return layer
+
+    model = GLM5XDecoderModelReference.from_layer_loader(
+        embedding=torch.randn(16, 8),
+        layer_count=2,
+        layer_loader=load_layer,
+        final_norm=torch.ones(8),
+        lm_head=torch.randn(16, 8),
+        rope_dim=2,
+    )
+    forward = model.forward_tokens(torch.tensor([1, 2]))
+    assert calls == [0, 1]
+    assert model.layer_count == 2
+    assert len(forward.layers) == 2
