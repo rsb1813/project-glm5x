@@ -88,3 +88,11 @@
 - Evidence: the local official metadata reports 59,585 tensors across 282 shards and the observed full/shared pattern resolves layer 3 -> 2, layer 7 -> 6, and layer 77 -> 74 with concrete shard names.
 - Accepted because: role and shard selection can be verified from the small index file without downloading 1.5 TB, while tensor shapes remain a separate bounded-shard gate.
 - Revisit: if opened shard headers or official loader code show a different sharing rule.
+
+## D-0012 -- Use header-only safetensors inspection before conversion
+
+- Decision: inspect bounded real shards with `safe_open().get_slice()` and compare their names against the manifest before any tensor conversion; do not call `get_tensor()` during the header gate.
+- Alternatives: load the first shard tensors into RAM, trust the index without opening a shard, or start full-model conversion before shape validation.
+- Evidence: the first 5,342,821,416-byte shard validated all 35 names and representative BF16 shapes without materializing payloads; the local machine has no complete checkpoint.
+- Accepted because: it gives a real checkpoint boundary with bounded memory and catches index/header drift before conversion.
+- Revisit: when a streaming converter can transform the same shard ranges into GLM5X extents.

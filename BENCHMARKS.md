@@ -4,7 +4,7 @@ No end-to-end GLM-5.2 throughput or quality benchmark has been run yet. The boun
 
 The first benchmark record must include the commit, hardware, model/checkpoint identity, mode, context length, decode and prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, quality result, and enabled optimizations.
 
-The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 22 passing tests. It is not a performance measurement.
+The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 23 passing tests. It is not a performance measurement.
 
 ## 2026-08-14 — TurboQuant reference smoke
 
@@ -47,6 +47,16 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Verified roles: `model.layers.{source}.self_attn.indexer.wk.weight` resolves to the expected shard for each probe layer.
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality score: not measured.
 - Caveat: the index contains names and shard placement only. Tensor shapes, dtypes, learned projection values, and full-model parity still require opening bounded real shards.
+
+## 2026-08-14 -- First official GLM-5.2 shard header parity
+
+- Commit: `1cff340`.
+- Hardware: Windows CPU metadata/header path; no CUDA and no full-model load.
+- Model/checkpoint: `zai-org/GLM-5.2`, `model-00001-of-00282.safetensors`, 5,342,821,416 bytes; this is the only downloaded shard.
+- Mode: `safetensors.safe_open(...).get_slice()` header inspection plus manifest name parity; no tensor payload was materialized.
+- Result: all 35 index-listed tensor names matched the shard header. Representative BF16 shapes were `embed/lm_head=(154880,6144)`, `indexer.wk=(128,6144)`, `indexer.wq_b=(4096,2048)`, `indexer.weights_proj=(32,6144)`, and `indexer.k_norm=(128,)` for layers 0 and 1.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality score: not measured.
+- Caveat: this validates the first shard's header and names only. It does not run GLM projections, load the 1.5 TB checkpoint, or establish model quality/throughput.
 
 ## 2026-08-14 -- GLM-5.2-shaped resident expert grid
 
