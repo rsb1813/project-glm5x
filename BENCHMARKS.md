@@ -35,10 +35,10 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 1
 - Mode: resident MXFP4 E2M1/E8M0 expert grid, admission validation, synchronous activation transfer, no proxy, no pruning, no CUDA graph.
 - Shape: hidden size 6144, expert intermediate size 2048, group size 32, 256 routed experts represented by a selected expert set.
 - Cold selected-weight payload: 160,432,128 bytes for 8 experts; resident weight bytes 160,432,128; peak VRAM 160,850,304 bytes.
-- Warm 8-expert, 1-token block: median wall latency 2,675,694 ns over 100 iterations after 20 warmups; kernel time 1,093,637 ns per 100 calls; maximum absolute error 0.
-- Warm 8-expert, 4-token expert-major block: median block latency 5,437,941 ns; 1,359,485 ns/token within the block; maximum absolute error 0; peak VRAM 162,103,680 bytes.
-- Warm 8-expert, 8-token expert-major block: median block latency 8,945,204 ns; 1,118,151 ns/token within the block; maximum absolute error 0; peak VRAM 163,774,848 bytes.
-- Warm 16-expert, 1-token block: median wall latency 5,318,664 ns; cold selected-weight payload 320,864,256 bytes; maximum absolute error 0.
+- Warm 8-expert, 1-token block: median wall latency 2,662,772 ns over 100 iterations after 20 warmups; kernel time 1,092,040 ns per 100 calls; maximum absolute error 0.
+- Warm 8-expert, 4-token expert-major block: median block latency 5,379,264 ns; 1,344,816 ns/token within the block; maximum absolute error 0; peak VRAM 162,103,680 bytes.
+- Warm 8-expert, 8-token expert-major block: median block latency 8,791,638 ns; 1,098,955 ns/token within the block; maximum absolute error 0; peak VRAM 163,774,848 bytes.
+- Warm 16-expert, 1-token block: median wall latency 5,458,462 ns; cold selected-weight payload 320,864,256 bytes; maximum absolute error 0.
 - Decode tok/s: not measured; the records are one MoE expert block, not 78-layer generation.
 - Prefill tok/s: not measured.
 - TTFT: not measured.

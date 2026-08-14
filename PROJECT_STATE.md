@@ -51,6 +51,6 @@ GLM-5.2 shape/manifest boundary plus RTX 5080 resident expert-grid baseline.
 - CTest: 26/26 tests passed in WSL.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
 - No end-to-end GLM decode tok/s or quality result exists yet.
-- Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,675,694 ns; 8 experts/4 tokens 1,359,485 ns per candidate token; maximum absolute error 0.
+- Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
 - Last known-good code HEAD: `31678d1` (`feat: add GLM5X shape manifest and CUDA baseline`).
 - Next bottleneck: exact DSA/indexer graph and a tensor-core/dequantized resident expert path; full weights remain intentionally absent.
