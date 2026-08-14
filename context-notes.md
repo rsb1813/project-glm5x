@@ -189,3 +189,9 @@
 - Added `--input-mode common|sparse-packed` to `k3x_cuda_glm5x_real_expert_bench`. The sparse mode is deliberately constrained to BF16-rounded, two logical tokens, and alternates token 0/1 across the selected experts before calling the packed raw grid.
 - On the two downloaded probe artifacts, common 8-expert/2-token input measured 1,040,559 ns warm median; sparse-packed measured 965,550 ns. The lower latency is a bounded input-addressing result, not a claim about GLM's learned router or full decode.
 - BF16-output sparse-packed measured 995,611 ns with 0.3967% maximum CPU-relative difference, so FP32 output remains the safer default for quality-sensitive modes.
+
+## 2026-08-14 Ragged packed-batch dispatch boundary
+
+- The raw BF16 CUDA grid accepts a rectangular `[expert][candidate][hidden]` slab, while real router assignments are ragged. The next bounded step is a stable CPU-only bucketing helper that groups packed expert records by assignment count and retains original group indices.
+- The helper will not infer routes, load weights, or scatter outputs. It only makes the existing packed-grid contract callable without padding or silently changing token order; validation remains explicit for hidden width, group payload length, and assignment totals.
+- `bucket_expert_major_packed_plan` now groups by assignment count in first-use order, concatenates each group's already-packed hidden slab, and retains source group indices. The C++ test covers separate buckets, repeated-shape grouping, and malformed payload rejection; WSL CTest remains 26/26 and the focused GLM Python suite remains 35/35.

@@ -96,4 +96,52 @@ Result<ExpertMajorPackedPlan> build_expert_major_packed_plan(
     }
     return Result<ExpertMajorPackedPlan>::success(std::move(packed));
 }
+
+Result<std::vector<ExpertMajorPackedBatch>>
+bucket_expert_major_packed_plan(const ExpertMajorPackedPlan& plan) {
+    if (plan.hidden_size == 0 || plan.assignment_count == 0 ||
+        plan.groups.empty()) {
+        return Result<std::vector<ExpertMajorPackedBatch>>::failure(
+            ErrorCode::invalid_extent);
+    }
+    std::vector<ExpertMajorPackedBatch> batches;
+    std::unordered_map<std::size_t, std::size_t> batch_indices;
+    std::size_t total_assignments = 0;
+    for (std::size_t group_index = 0; group_index < plan.groups.size();
+         ++group_index) {
+        const auto& group = plan.groups[group_index];
+        const auto token_count = group.assignments.size();
+        if (token_count == 0 ||
+            token_count > std::numeric_limits<std::size_t>::max() /
+                              plan.hidden_size ||
+            group.inputs.size() != token_count * plan.hidden_size ||
+            total_assignments >
+                std::numeric_limits<std::size_t>::max() - token_count) {
+            return Result<std::vector<ExpertMajorPackedBatch>>::failure(
+                ErrorCode::invalid_extent);
+        }
+        total_assignments += token_count;
+        auto [batch, inserted] = batch_indices.emplace(
+            token_count, batches.size());
+        if (inserted) {
+            batches.push_back(
+                ExpertMajorPackedBatch{.token_count = token_count});
+        }
+        auto& destination = batches[batch->second];
+        if (group.inputs.size() >
+            std::numeric_limits<std::size_t>::max() - destination.inputs.size()) {
+            return Result<std::vector<ExpertMajorPackedBatch>>::failure(
+                ErrorCode::invalid_extent);
+        }
+        destination.group_indices.push_back(group_index);
+        destination.inputs.insert(destination.inputs.end(), group.inputs.begin(),
+                                  group.inputs.end());
+    }
+    if (total_assignments != plan.assignment_count) {
+        return Result<std::vector<ExpertMajorPackedBatch>>::failure(
+            ErrorCode::invalid_extent);
+    }
+    return Result<std::vector<ExpertMajorPackedBatch>>::success(
+        std::move(batches));
+}
 }

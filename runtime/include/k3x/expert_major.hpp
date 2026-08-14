@@ -42,6 +42,12 @@ struct ExpertMajorPackedPlan {
     std::vector<ExpertMajorPackedGroup> groups;
 };
 
+struct ExpertMajorPackedBatch {
+    std::size_t token_count{};
+    std::vector<std::size_t> group_indices;
+    std::vector<float> inputs;
+};
+
 Result<ExpertMajorPlan> build_expert_major_plan(
     std::span<const ExpertMajorTokenRoute> routes);
 
@@ -49,4 +55,7 @@ Result<ExpertMajorPackedPlan> build_expert_major_packed_plan(
     std::span<const float> token_hidden, std::size_t token_count,
     std::size_t hidden_size,
     std::span<const ExpertMajorTokenRoute> routes);
+
+Result<std::vector<ExpertMajorPackedBatch>>
+bucket_expert_major_packed_plan(const ExpertMajorPackedPlan& plan);
 }

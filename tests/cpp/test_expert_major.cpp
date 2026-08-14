@@ -19,6 +19,7 @@
 
 int main() {
     using k3x::ErrorCode;
+    using k3x::ExpertMajorPackedBatch;
     using k3x::ExpertMajorPackedPlan;
     using k3x::ExpertMajorTokenRoute;
 
@@ -120,5 +121,37 @@ int main() {
         assert(packed.groups[1].expert_id == 1);
         assert(packed.groups[1].inputs ==
                std::vector<float>({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F}));
+
+        const auto batches = k3x::bucket_expert_major_packed_plan(packed);
+        assert(batches);
+        assert(batches.value().size() == 2);
+        const ExpertMajorPackedBatch& first = batches.value()[0];
+        assert(first.token_count == 1);
+        assert(first.group_indices == std::vector<std::size_t>({0}));
+        assert(first.inputs == std::vector<float>({1.0F, 2.0F, 3.0F}));
+        const ExpertMajorPackedBatch& second = batches.value()[1];
+        assert(second.token_count == 2);
+        assert(second.group_indices == std::vector<std::size_t>({1}));
+        assert(second.inputs ==
+               std::vector<float>({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F}));
+
+        auto repeated_shape = packed;
+        repeated_shape.groups.push_back(packed.groups[0]);
+        ++repeated_shape.assignment_count;
+        const auto repeated =
+            k3x::bucket_expert_major_packed_plan(repeated_shape);
+        assert(repeated);
+        assert(repeated.value().size() == 2);
+        assert(repeated.value()[0].group_indices ==
+               std::vector<std::size_t>({0, 2}));
+        assert(repeated.value()[0].inputs ==
+               std::vector<float>({1.0F, 2.0F, 3.0F,
+                                   1.0F, 2.0F, 3.0F}));
+
+        auto malformed = packed;
+        malformed.groups[1].inputs.pop_back();
+        const auto rejected = k3x::bucket_expert_major_packed_plan(malformed);
+        assert(!rejected);
+        assert(rejected.error() == ErrorCode::invalid_extent);
     }
 }
