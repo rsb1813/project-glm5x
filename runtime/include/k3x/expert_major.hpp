@@ -58,4 +58,8 @@ Result<ExpertMajorPackedPlan> build_expert_major_packed_plan(
 
 Result<std::vector<ExpertMajorPackedBatch>>
 bucket_expert_major_packed_plan(const ExpertMajorPackedPlan& plan);
+
+Result<std::vector<float>> scatter_expert_major_outputs(
+    const ExpertMajorPackedPlan& plan, std::size_t token_count,
+    std::size_t output_size, std::span<const float> group_outputs);
 }

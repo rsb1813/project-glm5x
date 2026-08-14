@@ -144,4 +144,54 @@ bucket_expert_major_packed_plan(const ExpertMajorPackedPlan& plan) {
     return Result<std::vector<ExpertMajorPackedBatch>>::success(
         std::move(batches));
 }
+
+Result<std::vector<float>> scatter_expert_major_outputs(
+    const ExpertMajorPackedPlan& plan, std::size_t token_count,
+    std::size_t output_size, std::span<const float> group_outputs) {
+    if (plan.hidden_size == 0 || plan.assignment_count == 0 ||
+        plan.groups.empty() || token_count == 0 || output_size == 0 ||
+        token_count > std::numeric_limits<std::size_t>::max() / output_size) {
+        return Result<std::vector<float>>::failure(ErrorCode::invalid_extent);
+    }
+    std::size_t expected_values = 0;
+    std::size_t assignments = 0;
+    for (const auto& group : plan.groups) {
+        const auto group_assignments = group.assignments.size();
+        if (group_assignments == 0 ||
+            group_assignments >
+                std::numeric_limits<std::size_t>::max() / output_size ||
+            expected_values > std::numeric_limits<std::size_t>::max() -
+                                  group_assignments * output_size ||
+            assignments >
+                std::numeric_limits<std::size_t>::max() - group_assignments) {
+            return Result<std::vector<float>>::failure(ErrorCode::invalid_extent);
+        }
+        expected_values += group_assignments * output_size;
+        assignments += group_assignments;
+    }
+    if (assignments != plan.assignment_count ||
+        group_outputs.size() != expected_values) {
+        return Result<std::vector<float>>::failure(ErrorCode::invalid_extent);
+    }
+
+    std::vector<float> result(token_count * output_size, 0.0F);
+    std::size_t group_offset = 0;
+    for (const auto& group : plan.groups) {
+        for (const auto& assignment : group.assignments) {
+            if (assignment.token_index >= token_count ||
+                !std::isfinite(assignment.contribution)) {
+                return Result<std::vector<float>>::failure(
+                    ErrorCode::invalid_state);
+            }
+            const auto output_offset = assignment.token_index * output_size;
+            for (std::size_t output = 0; output < output_size; ++output) {
+                result[output_offset + output] +=
+                    assignment.contribution *
+                    group_outputs[group_offset + output];
+            }
+            group_offset += output_size;
+        }
+    }
+    return Result<std::vector<float>>::success(std::move(result));
+}
 }

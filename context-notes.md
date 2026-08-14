@@ -195,3 +195,8 @@
 - The raw BF16 CUDA grid accepts a rectangular `[expert][candidate][hidden]` slab, while real router assignments are ragged. The next bounded step is a stable CPU-only bucketing helper that groups packed expert records by assignment count and retains original group indices.
 - The helper will not infer routes, load weights, or scatter outputs. It only makes the existing packed-grid contract callable without padding or silently changing token order; validation remains explicit for hidden width, group payload length, and assignment totals.
 - `bucket_expert_major_packed_plan` now groups by assignment count in first-use order, concatenates each group's already-packed hidden slab, and retains source group indices. The C++ test covers separate buckets, repeated-shape grouping, and malformed payload rejection; WSL CTest remains 26/26 and the focused GLM Python suite remains 35/35.
+
+## 2026-08-14 Expert-major output scatter boundary
+
+- The packed CUDA grid returns one output slab per expert group, but exact MoE semantics require contribution-weighted accumulation back into token order. The next bounded helper will consume group-order output slabs and perform explicit validation and scatter on the CPU reference side.
+- `scatter_expert_major_outputs` now validates group-output shape and assignment totals, then accumulates each group slab by its retained token index and router contribution. The route scatter remains outside CUDA so the same helper can verify future packed dispatch against the CPU reference.

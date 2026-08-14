@@ -39,6 +39,7 @@
 - [x] Add model-neutral expert-major packed slab preparation with explicit route metadata.
 - [x] Add a labeled sparse-packed real-shard benchmark mode and record its non-learned routing caveat.
 - [x] Add stable ragged expert-major packed-batch bucketing for CUDA dispatch.
+- [x] Add exact expert-major contribution scatter after packed CUDA outputs.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [ ] Validate BF16 dequantized execution against nonzero real GLM shard data and quality metrics.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.

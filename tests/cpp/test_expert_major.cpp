@@ -153,5 +153,16 @@ int main() {
         const auto rejected = k3x::bucket_expert_major_packed_plan(malformed);
         assert(!rejected);
         assert(rejected.error() == ErrorCode::invalid_extent);
+
+        const auto scattered = k3x::scatter_expert_major_outputs(
+            packed, 2, 2,
+            std::vector<float>{10.0F, 20.0F, 1.0F, 2.0F, 3.0F, 4.0F});
+        assert(scattered);
+        assert(scattered.value() ==
+               std::vector<float>({6.4F, 12.8F, 3.0F, 4.0F}));
+        const auto rejected_output = k3x::scatter_expert_major_outputs(
+            packed, 2, 2, std::vector<float>{10.0F});
+        assert(!rejected_output);
+        assert(rejected_output.error() == ErrorCode::invalid_extent);
     }
 }
