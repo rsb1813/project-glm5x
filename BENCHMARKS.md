@@ -26,6 +26,16 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
 - Interpretation: this validates exact cross-shard raw-BF16 payload retrieval only. It is not a CUDA expert-kernel or model-throughput result.
 
+## 2026-08-14 -- C++ cross-shard BF16 host loader
+
+- Commit: working tree after `ebe2f50`; code change pending commit.
+- Hardware: WSL on the target RTX 5080 host; this run used host readers only and did not launch CUDA.
+- Model/checkpoint: `zai-org/GLM-5.2`, the two bounded probe artifacts, layer 10 expert 0.
+- Mode: `test_glm5x_bf16_bundle` with metadata-only readers, canonical tensor-ID lookup across both shards, BF16 shape/length checks, and per-role CRC32C validation.
+- Result: 3 roles, 75,497,472 payload bytes, `load_nanoseconds=465087758` (approximately 465.1 ms) and exit 0.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
+- Interpretation: this is the first C++ exact host payload gate. It includes filesystem read and CRC cost, but no CUDA H2D, dequantization, MoE projection, attention, routing, or token generation.
+
 ## 2026-08-14 -- Raw-BF16 expert directory C++ reader gate
 
 - Commit: working tree after `1b22bcb`; code change pending commit.

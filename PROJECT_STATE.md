@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5080 resident native/BF16 expert-grid baselines, and exact cross-shard raw-BF16 expert retrieval.
+GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5080 resident native/BF16 expert-grid baselines, and C++ exact cross-shard raw-BF16 expert retrieval.
 
 ## Completed
 
@@ -23,6 +23,7 @@ GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5
 - Updated the portable C++ reader to accept only validated raw-BF16 `EXPT` links in addition to native MXFP4 links. The storage-slice loader remains MXFP4-only, so this is a staging-format gate rather than BF16 execution.
 - Added `glm5x-convert assemble-experts`, a copy-free bundle index that joins complete expert role triples across finalized shard artifacts and records exact artifact-relative extents and CRCs.
 - Added `GLM5XExpertBundle`, which rechecks artifact identities and role extents before returning exact BF16 bytes. Layer 10 expert 0 from the second real shard matches all three source roles byte-for-byte.
+- Added `k3x::load_glm5x_bf16_expert` and a C++ real-artifact gate. It finds GLM role IDs across multiple readers, validates released dimensions and CRC32C, and returns three host payload vectors.
 - Added and measured `k3x_cuda_glm5x_moe_bench` on the real RTX 5080 at GLM-5.2 expert dimensions.
 - Added an expert-major candidate-token benchmark mode for 1/2/4/8 tokens.
 - Added resident exact MXFP4 reuse to the CUDA expert-major batch backend and allowed resident weights in the CLI validation contract.
@@ -63,6 +64,7 @@ GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5
 - Real-shard C++ metadata gate: both downloaded GLM probe artifacts passed `test_reader ... metadata`; the second artifact contains 212 tensors and 70 complete raw-BF16 expert records.
 - Cross-shard bundle gate: 2 probe artifacts and 247 tensors indexed in approximately 11.9 seconds, producing 70 complete experts and 0 incomplete groups without copying payload bytes.
 - Real BF16 payload gate: layer 10 expert 0 returned three 25,165,824-byte roles that matched source safetensors bytes exactly; a tampered offset is rejected.
+- C++ host loader gate: 75,497,472 bytes loaded and CRC-checked in 465,087,758 ns under WSL; no CUDA execution or token generation.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
@@ -74,5 +76,5 @@ GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
-- Last known-good code HEAD before this change: `a42425a` (`feat: index cross-shard GLM experts`); the exact bundle-loader implementation is verified but not committed yet.
-- Next bottleneck: C++/CUDA consumption of bundle references, q-residual production projection, exact MLA/DSA state, nonzero GLM layer parity, variable-union expert grouping, and VRAM-pressure-aware choice between native MXFP4 and BF16 resident execution; full weights remain intentionally absent.
+- Last known-good code HEAD before this change: `ebe2f50` (`feat: add exact GLM expert bundle loader`); the C++ host loader implementation is verified but not committed yet.
+- Next bottleneck: CUDA consumption of these BF16 vectors, q-residual production projection, exact MLA/DSA state, nonzero GLM layer parity, variable-union expert grouping, and VRAM-pressure-aware choice between native MXFP4 and BF16 resident execution; full weights remain intentionally absent.

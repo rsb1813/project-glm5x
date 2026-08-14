@@ -30,6 +30,7 @@ add_library(k3x_runtime
     runtime/src/expert_scheduler.cpp
     runtime/src/host_expert_store.cpp
     runtime/src/storage_slice.cpp
+    runtime/src/glm5x_bundle.cpp
 )
 if(K3X_ENABLE_CUDA)
     enable_language(CUDA)
@@ -211,6 +212,9 @@ target_link_libraries(test_reader_concurrency PRIVATE k3x_runtime)
 add_executable(test_reader_contract tests/cpp/test_reader_contract.cpp)
 target_link_libraries(test_reader_contract PRIVATE k3x_runtime)
 add_test(NAME reader_contract COMMAND test_reader_contract)
+
+add_executable(test_glm5x_bf16_bundle tests/cpp/test_glm5x_bf16_bundle.cpp)
+target_link_libraries(test_glm5x_bf16_bundle PRIVATE k3x_runtime)
 
 add_executable(test_io_completion tests/cpp/test_io_completion.cpp)
 target_include_directories(test_io_completion PRIVATE runtime/src)

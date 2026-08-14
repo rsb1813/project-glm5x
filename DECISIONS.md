@@ -144,3 +144,11 @@
 - Evidence: layer 10 expert 0 from the second real shard matched all three source safetensors role tensors byte-for-byte at 25,165,824 bytes per role. A tampered offset is rejected before payload return.
 - Accepted because: the runtime can use copy-free random access while stale or manually edited bundle metadata cannot silently feed the model.
 - Revisit: when a native C++/CUDA bundle reader exists and its validation cost is measured against prefetch deadlines.
+
+## D-0019 -- Use canonical tensor IDs for the first C++ cross-shard loader
+
+- Decision: let the bounded C++ loader search multiple validated `Reader` instances by the canonical GLM tensor-name FNV-1a ID, then validate raw BF16 metadata and CRC before returning the three role vectors. Keep JSON parsing outside this hot path.
+- Alternatives: parse `glm5x-expert-bundle-v1` JSON in C++, concatenate all shard payloads, or require one reader per expert role from the caller.
+- Evidence: the real two-shard host gate found layer 10 expert 0 across the second artifact and loaded 75,497,472 bytes with CRC checks in 465,087,758 ns under WSL. The Python bundle had already established the same bytes against safetensors.
+- Accepted because: it keeps the C++ runtime dependency-free and deterministic while the bundle JSON remains the orchestration/index artifact. Duplicate or missing role IDs fail closed.
+- Revisit: when hundreds of shard readers are opened concurrently and a parsed persistent bundle map measurably reduces lookup or I/O scheduling cost.

@@ -110,3 +110,9 @@
 - The loader intentionally accepts only raw BF16/no-auxiliary payloads for this GLM staging path. Native MXFP4 remains a separate exact storage-slice path.
 - A real nonzero gate on layer 10 expert 0 matched all three 25,165,824-byte role tensors byte-for-byte against `model-00002-of-00282.safetensors`; the printed role SHA-256 values were `d2e72bbf...`, `39ebf198...`, and `601b9d1f...`.
 - Focused GLM coverage is now 35 passing tests. This is exact payload/reference evidence, not CUDA execution or end-to-end model throughput.
+
+## 2026-08-14 C++ cross-shard BF16 loader
+
+- Added `k3x::load_glm5x_bf16_expert`, which accepts multiple `Reader` instances, locates canonical GLM role IDs across them, rejects duplicate/missing roles, validates `BF16/NONE`, released `6144 x 2048` shapes, layer/expert IDs, lengths, and CRC32C, then returns three exact host payloads.
+- Added `test_glm5x_bf16_bundle` as a real-artifact gate. With the two downloaded probe artifacts, layer 10 expert 0 loaded 75,497,472 bytes in 465,087,758 ns under WSL. The result is host storage latency only; no CUDA weights or model layer were executed.
+- The next performance boundary is moving these three host vectors into the resident BF16 CUDA grid without an intermediate copy, then comparing that layer output against a CPU BF16 reference.
