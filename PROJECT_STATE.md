@@ -30,6 +30,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - Added direct `RawBf16MlpView` admission so selected `.k3x` BF16 expert bytes do not pass through FP32 staging; the real probe decodes only the last expert for CPU comparison.
 - Added cublasLt pointer-array batching for multi-expert raw BF16 grids, reducing three projection phases to three batched GEMM calls plus one SiTU launch; the single-expert path remains scalar.
 - Added an opt-in BF16-output raw grid path that keeps projection intermediates and final device output in BF16, with a separate BF16 SiTU kernel; FP32 output remains the default reference path.
+- Added an optional raw-grid cublasLt workspace budget and CLI `--workspace-bytes`; zero remains the default and the setting is shape-sensitive.
 - Added and measured `k3x_cuda_glm5x_moe_bench` on the real RTX 5080 at GLM-5.2 expert dimensions.
 - Added an expert-major candidate-token benchmark mode for 1/2/4/8 tokens.
 - Added resident exact MXFP4 reuse to the CUDA expert-major batch backend and allowed resident weights in the CLI validation contract.
@@ -80,6 +81,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - Direct raw-BF16 gate: the same 8-expert/4-token probe measured 1,648,927 ns warm median (approximately 412,232 ns per candidate), 135,877,327 ns cold, 603,979,776 resident bytes, zero warm H2D, and unchanged 0.1351% maximum relative CPU error.
 - Pointer-array gate: the same 8-expert/4-token probe measured 1,065,026 ns warm median (approximately 266,257 ns per candidate), 153,395,924 ns cold, 603,979,776 resident bytes, zero warm H2D, four grid launches/call, and 0.1359% maximum relative CPU error.
 - BF16-output gate: paired 8-expert/4-token real-shard runs measured 1,034,950 ns warm median versus 1,091,122 ns with FP32 output; maximum CPU-relative error was 0.3167% versus 0.1359%. This is an opt-in bounded FFN experiment, not a model tok/s result.
+- cublasLt workspace gate: with the same shape, 64 MiB measured 967,790 ns FP32-output versus 994,529 ns at zero workspace; the same budget measured 1,080,469 ns for BF16 output versus 1,034,950 ns at zero. Keep the knob runtime-selectable and default-off.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.

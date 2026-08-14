@@ -208,3 +208,11 @@
 - Evidence: on the RTX 5080 with the two real probe artifacts, 8 experts x 4 tokens measured 1,034,950 ns warm median with BF16 output versus 1,091,122 ns in the paired FP32-output run. The maximum CPU-relative difference was 0.00316690677 (0.317%) for BF16 output versus 0.00135860045 (0.136%) for FP32 output. The physical final output transfer is halved.
 - Accepted because: BF16 output removes a measured memory-traffic component without changing routing or source weights, and the reference mode remains one option away. It is not a quality-preserving default until a full GLM layer and model-level comparison exists.
 - Revisit: after direct tensor-core algorithm profiling, full natural Top-8 routing, nonzero attention/trunk parity, and task-quality evaluation. Promote only if quality divergence stays within the selected quality-mode budget.
+
+## D-0027 -- Expose cublasLt workspace as a runtime tuning knob
+
+- Decision: allow the raw pointer-array grid to request a bounded cublasLt workspace through `cuda_cublas_workspace_bytes` and `--workspace-bytes`, but keep the default at zero and do not auto-tune during model startup.
+- Alternatives: hard-code 64 MiB, tune every cublasLt algorithm at startup, or leave the heuristic preference unconfigurable.
+- Evidence: on the RTX 5080 real 8-expert/4-token probe, a paired FP32-output run measured 994,529 ns with zero workspace and 967,790 ns with 64 MiB. An 8 MiB run measured 986,393 ns and a 16 MiB run 1,073,612 ns. The 64 MiB BF16-output run measured 1,080,469 ns versus 1,034,950 ns without workspace, so the result is mode- and shape-sensitive.
+- Accepted because: the option enables measured per-workload tuning without changing the default path or routing/output semantics. The reusable workspace is bounded and accounted for by normal CUDA scratch allocation.
+- Revisit: after a larger shape sweep, native tensor-core algorithm profiling, and full-layer scheduling. Do not infer end-to-end tok/s from this block-level knob.

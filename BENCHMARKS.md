@@ -306,3 +306,15 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Relative result: BF16 output was approximately 5.1% faster than the paired FP32-output run and halves the physical final D2H bytes. The higher numerical difference keeps the mode experimental and opt-in.
 - Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, cache hit rate, natural average Top-K, speculative acceptance, and task quality: not measured.
 - Caveat: this is one FFN block over bounded real shards. It does not establish full-layer, end-to-end, or 10+ tok/s performance.
+
+## 2026-08-14 -- cublasLt workspace sweep on real expert grid
+
+- Commit: `716967c`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: the same two bounded GLM-5.2 probe artifacts, layer 10, experts 0-7, 4 candidate tokens. No full checkpoint.
+- Mode: raw-BF16 resident pointer-array grid, FP32 output unless noted, 10 warmups, 30 measured iterations, synchronous transfer, zero warm weight H2D.
+- Warm medians: 0 bytes `994,529 ns`, 8 MiB `986,393 ns`, 16 MiB `1,073,612 ns`, and 64 MiB `967,790 ns` per block. Maximum CPU-relative difference stayed `0.00135860045`.
+- BF16-output cross-check: 64 MiB workspace `1,080,469 ns` versus `1,034,950 ns` with zero workspace; maximum CPU-relative difference stayed `0.00316690677`.
+- Interpretation: workspace can improve FP32-output selection by about 2.7% in this sample, but the effect is not monotonic and can regress BF16 output. Keep it runtime-selectable and default-off.
+- Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, cache hit rate, natural Top-K, speculative acceptance, and task quality: not measured.
+- Caveat: this is a bounded expert FFN block, not full-layer or end-to-end throughput.

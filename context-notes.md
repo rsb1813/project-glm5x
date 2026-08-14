@@ -166,3 +166,9 @@
 - `test_cuda_dense` now checks the BF16-output path against the rounded CPU reference and checks the halved physical D2H byte count on the two-expert fixture. The focused CUDA regression passed after the change.
 - Paired real-shard probe on RTX 5080: FP32 output 1,091,122 ns warm median and 0.135860% maximum relative CPU difference; BF16 output 1,034,950 ns and 0.316691% difference. The speed improvement is modest and the error increases, so the default remains FP32.
 - This is a bounded FFN-block experiment. It does not justify a full-model tok/s estimate or automatic quality-mode promotion.
+
+## 2026-08-14 cublasLt workspace tuning
+
+- Added `cuda_cublas_workspace_bytes` and `--workspace-bytes` for the raw pointer-array grid only. The backend reserves one reusable device scratch buffer and passes it to the three projection calls; the default remains zero.
+- On the real RTX 5080 probe, zero/8 MiB/16 MiB/64 MiB FP32-output medians were 994,529/986,393/1,073,612/967,790 ns for the same 8-expert/4-token command. The 64 MiB BF16-output run was 1,080,469 ns versus 1,034,950 ns without workspace.
+- The workspace preference changes cublasLt heuristic selection and is therefore shape- and output-mode-sensitive. It is exposed for explicit tuning, not enabled globally.
