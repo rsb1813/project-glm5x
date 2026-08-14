@@ -28,6 +28,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - The portable `ExpertMajorPackedPlan` now copies routed token hidden states into stable per-expert slabs while preserving assignment metadata. It is a scheduler-side preparation contract; it does not yet load GLM router/DSA tensors or invoke CUDA by itself.
 - `bucket_expert_major_packed_plan` groups those ragged per-expert slabs by assignment count in first-use order, concatenates each rectangular batch without padding, and retains source group indices for later weight-view construction and route scatter. It validates payload lengths and assignment totals but does not infer routes or hide scatter in CUDA.
 - `scatter_expert_major_outputs` consumes group-order output slabs and performs explicit contribution-weighted accumulation back into token-major order. This keeps route scatter and numerical semantics auditable outside the CUDA kernel while the same helper can serve CPU/reference parity checks.
+- `CudaBackend::raw_bf16_situ_mlp_expert_major` now connects the model-neutral plan to the raw-BF16 CUDA grid. It buckets ragged assignments by count, dispatches one packed grid call per bucket, preserves source group order, and scatters weighted outputs back to token-major order. It is an opt-in scheduler boundary; learned GLM routing and full-layer invocation are still pending.
 - `k3x_cuda_glm5x_real_expert_bench --input-mode sparse-packed` exercises the packed contract on real probe payloads by assigning two logical tokens alternately to eight experts. It is a storage/FFN experiment only; it does not pretend to be learned GLM routing.
 - The portable C++ reader accepts both native MXFP4 expert records and validated raw-BF16 staging records. The storage-slice loader remains MXFP4-only; the separate GLM BF16 bundle loader and CUDA bridge consume validated raw-BF16 payloads without changing the native MXFP4 contract.
 - A bounded RTX 5080 CUDA benchmark for GLM-5.2 expert dimensions (`hidden=6144`, `expert_intermediate=2048`, `group=32`) using the resident expert-grid backend.
@@ -47,7 +48,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - Synthetic GLM-5.2 checkpoint round-trip.
 - Exact DSA/MLA graph around the official indexer, q-residual production projection, nonzero real-shard parity, quantization/calibration, and runtime consumption of the cross-shard expert bundle.
 - Wiring GLM DSA/MTP state and exact routing around the existing expert-major batch path.
-- Replace the layer-10 reference expert loop with the packed CUDA path after q-residual and MLA/DSA outputs are connected.
+- Replace the layer-10 reference expert loop with the packed CUDA path after exact q-residual/MLA/DSA outputs and pinned asynchronous staging are connected.
 
 ### Experimental
 

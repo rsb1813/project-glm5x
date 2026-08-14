@@ -40,6 +40,7 @@
 - [x] Add a labeled sparse-packed real-shard benchmark mode and record its non-learned routing caveat.
 - [x] Add stable ragged expert-major packed-batch bucketing for CUDA dispatch.
 - [x] Add exact expert-major contribution scatter after packed CUDA outputs.
+- [x] Connect ragged expert-major buckets and weighted scatter to the raw-BF16 CUDA grid API; keep learned GLM routing separate.
 - [x] Make Linux correctness reproducible when migrated historical benchmark evidence is absent; keep new GLM tests active.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [x] Add lazy official-router/shared-SwiGLU layer-10 reference over the bounded five-shard bundle.
@@ -49,3 +50,4 @@
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.
 - [ ] Add MTP/DSpark expert-major verification to the GLM path.
 - [ ] Run real GLM-5.2 quality and throughput benchmarks.
+- [ ] Feed the exact layer-10 GLM router/MLA/DSA output into the CUDA expert-major plan and verify nonzero full-layer parity.

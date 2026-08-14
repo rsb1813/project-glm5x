@@ -288,3 +288,11 @@
 - Evidence: a real five-artifact layer-10 smoke measured bundle construction at `250.637263 s` after reuse versus `491.483777 s` before reuse, a `49.0%` reduction. Cold forward was `5.969859 s`, warm cached forward `0.057331 s`, and cached output maximum absolute difference was `0.0`.
 - Accepted because: it removes duplicate multi-gigabyte root hashing without weakening validation and keeps expert payloads lazy. The improvement is storage/open latency only; it does not establish model tok/s.
 - Revisit: when the runtime switches to a persistent process-level artifact registry or direct asynchronous extent reads, while retaining one verified identity per artifact.
+
+## D-0037 -- Connect ragged expert-major plans to the raw-BF16 CUDA grid
+
+- Decision: add `CudaBackend::raw_bf16_situ_mlp_expert_major` as the first CUDA consumer of `ExpertMajorPackedPlan`. Bucket groups by assignment count, dispatch one packed raw-BF16 grid call per bucket, retain group offsets, and use the explicit contribution scatter helper for token-major output. Keep this path opt-in until learned GLM routing and full-layer parity are connected.
+- Alternatives: issue one CUDA grid call per expert, pad every expert to the largest assignment count, or fuse route inference/scatter into the kernel before the exact GLM router boundary exists.
+- Evidence: the nonzero CUDA regression passed in the full WSL CUDA suite. On five bounded real GLM-5.2 shard artifacts at layer 10, the deterministic two-token/8-expert expert-major mode measured `1,380,314 ns` warm median per block, compared with `1,651,193 ns` for common-input and `1,631,127 ns` for sparse-packed in paired runs. Maximum CPU-relative difference was `0.0014705552021`; resident bytes were `603,979,776` and warm weight H2D was `0`.
+- Accepted because: the route metadata, ragged bucketing, raw-BF16 resident representation, and weighted scatter now form one executable boundary without changing source weights or natural-routing semantics. The measured block result is useful kernel evidence but is not a full-layer or tok/s claim.
+- Revisit: after actual GLM router scores produce the plan, pinned/asynchronous staging is measured, and the complete q-residual/MLA/DSA/MoE layer has nonzero parity and quality results.

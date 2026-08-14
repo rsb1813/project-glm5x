@@ -412,3 +412,16 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Reader-reuse comparison: the pre-reuse sample on the same five artifacts took `491.483777 s` to construct the layer, so one shared validated reader reduced open/verification time by approximately `49.0%`. This comparison is storage/open latency, not decode throughput.
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, measured expert-cache hit rate, speculative acceptance, quality score, and end-to-end model throughput: not measured.
 - Caveat: this is a correctness and storage-latency gate for one real layer boundary. It is not a full 78-layer run, a CUDA result, or a TPS claim.
+
+## 2026-08-14 -- Ragged expert-major raw-BF16 CUDA dispatch on bounded real shards
+
+- Commit: `d09eb3a`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: five bounded `zai-org/GLM-5.2` probe artifacts, layer 10, eight selected raw-BF16 experts; no full checkpoint.
+- Mode: `expert-major`, deterministic two-token route pattern, 10 warmups and 30 measured iterations, FP32 output, synchronous transfers. The route is a scheduler exercise and is not learned GLM routing.
+- Route shape: 8 expert groups, 10 total assignments, 2 candidate tokens, one packed CUDA call per assignment-count bucket.
+- Expert-major result: `1,380,314 ns` warm median/block, `168,543,514 ns` cold latency, `4,687,726,797 ns` host payload load, `603,979,776` resident bytes, `603,979,776` cold weight H2D bytes, `0` warm weight H2D bytes, and `0.0014705552021` maximum CPU-relative difference.
+- Paired common-input result: `1,651,193 ns` warm median/block, `165,055,925 ns` cold latency, `603,979,776` resident bytes, and `0.00146513758227` maximum CPU-relative difference.
+- Paired sparse-packed result: `1,631,127 ns` warm median/block, `192,610,519 ns` cold latency, `603,979,776` resident bytes, and `0.00146589963697` maximum CPU-relative difference.
+- Relative result: the expert-major bucket/scatter path was approximately `16.4%` lower warm block latency than common in this sample. This is a bounded FFN scheduling measurement, not a decode tok/s estimate.
+- Not measured: end-to-end decode/prefill tok/s, TTFT, full-layer quality, natural Top-K quality, speculative acceptance, cache hit rate, NVMe GB/token, system RAM, and full-model VRAM pressure.

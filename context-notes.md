@@ -217,3 +217,10 @@
 - Added q-residual MLA projection, compressed incremental MLA state, official causal DSA index-key state, and the decoder-layer order connecting them to the lazy natural Top-8 MoE reference. Synthetic full-vs-incremental parity and bundle-loader coverage are green.
 - The first real five-shard layer-10 smoke exposed duplicate `GLM5XExpertBundle.open()` calls. A test reproduced two opens, then the loader was changed to share one root-verified bundle object with the attention/indexer/norm readers and lazy MoE closure.
 - Focused GLM Python tests passed 42/42 and WSL CTest passed 14/14 after the change. The real smoke measured `250.637263 s` bundle construction, `5.969859 s` cold forward, `0.057331 s` cached forward, and `0.0` maximum cached-output difference. Full-model throughput remains unmeasured.
+
+## 2026-08-14 Ragged expert-major CUDA dispatch
+
+- Added `CudaBackend::raw_bf16_situ_mlp_expert_major` after a compile-failing CUDA test first established the missing API. The backend now consumes the model-neutral packed plan, groups assignments by count, reuses the existing raw-BF16 packed grid per bucket, and scatters weighted outputs through the audited helper.
+- WSL CUDA CTest passed 26/26 and CPU CTest passed 14/14. The Windows Python interpreter has no pytest module, so the focused 42/42 Python result remains the last WSL Python evidence rather than a new local rerun.
+- On five bounded real GLM-5.2 shard artifacts, deterministic 8-group/10-assignment/2-token expert-major measured `1,380,314 ns` warm median per block versus `1,651,193 ns` common and `1,631,127 ns` sparse-packed. Maximum CPU-relative error was `0.1471%`, resident bytes `603,979,776`, and warm weight H2D `0`.
+- This is an executable ragged FFN scheduling boundary, not learned GLM routing, a full layer, or end-to-end tok/s. The next bottleneck is connecting exact router/MLA/DSA outputs and measuring pinned asynchronous staging.

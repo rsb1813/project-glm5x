@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and an exact q-residual/MLA/DSA/MoE layer-10 reference are implemented over five bounded real shards. Linux correctness and CodeQL are green on `a2d6b6d`; extension to all layers, CUDA layer parity, and end-to-end throughput remain open.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, and a ragged expert-major raw-BF16 CUDA dispatch boundary are implemented over five bounded real shards. Local WSL CUDA/CPU tests are green on `d09eb3a`; the pushed Linux correctness and CodeQL gates remain green on the previous public commit until this commit is pushed.
 
 ## Completed
 
@@ -45,24 +45,25 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and an exac
 - Added `GLM5XLayer10MoEReference` with official sigmoid routing, exact Top-8 normalization/routed scale, shared SwiGLU, and lazy exact raw-BF16 expert loading from the copy-free bundle.
 - Added `GLM5XMLAReference`, incremental compressed MLA state, official causal DSA state, and `GLM5XDecoderLayerReference` with full-vs-incremental parity and bundle-backed attention/indexer/norm/MoE construction.
 - Reused one root-verified `GLM5XExpertBundle` reader across the layer loader and lazy MoE closure; the real five-shard construction smoke fell from 491.483777 s to 250.637263 s.
+- Connected `ExpertMajorPackedPlan` bucketing and contribution scatter to `CudaBackend::raw_bf16_situ_mlp_expert_major`; the real bounded probe measured 1,380,314 ns warm median/block for a deterministic 8-group/10-assignment/2-token route.
 - Added a narrow pytest boundary for historical K3X evidence files absent from the GLM5X repository; new GLM5X tests remain active. GitHub Actions correctness and CodeQL pass on `a00beec`.
 
 ## In progress
 
-- Build the tiny GLM-5.2-compatible reference graph and greedy parity tests.
+- Finish the tiny GLM-5.2-compatible reference graph and greedy parity tests around the remaining final-logits/MTP boundary.
 - Extend the layer-10 exact q-residual/MLA/DSA boundary to the remaining layers, final logits, and MTP state.
 - Rename user-facing runtime and benchmark commands where that does not break the inherited storage ABI.
-- Connect the exact layer reference's selected-expert set to the packed CUDA grid while retaining strict natural Top-8 verification.
+- Connect the exact layer-10 reference's selected-expert set to the new packed CUDA grid while retaining strict natural Top-8 verification.
 - Validate nonzero full-layer routing/MLA/DSA parity and measure VRAM-bank pressure before considering BF16 grid mode a default.
 - Replace host float decode plus conversion with direct raw-BF16/tensor-core storage views where quality permits.
 - Measure whether BF16-output resident grids remain inside the chosen quality budget on nonzero full-layer GLM data.
-- Connect the layer-10 reference's exact selected-expert set to the packed CUDA grid after nonzero full-layer parity and pinned asynchronous staging exist.
+- Measure the new CUDA bucket loop with exact nonzero GLM router assignments, then add pinned asynchronous staging after parity is established.
 - Real five-shard layer-10 reference smoke at `a2d6b6d`: bundle open/root verification 250.637263 s, cold two-token forward 5.969859 s, cached repeat 0.057331 s, 16 unique selected experts, cached output max difference 0.0. These are layer/storage reference timings, not tok/s.
 
 ## Known blockers
 
 - No full GLM-5.2 checkpoint is present; five bounded probe shards are available, so full checkpoint correctness and local TPS are not measured.
-- No full checkpoint download or Cloud Run conversion has been authorized or attempted.
+- No full checkpoint download or Cloud Run conversion has been authorized or attempted; only five bounded probe shards are present.
 - Dependabot PRs #1–#4 are open for action/setup-python, action/checkout, numpy, and setuptools updates. Their Linux checks fail only because the stale bot branches reference absent historical K3X artifacts; CodeQL passes. Repository Dependabot and vulnerability-alert APIs are disabled, so no CVE alert is confirmed.
 - The migrated C++ runtime still has K3-oriented names and graph assumptions in several files.
 - CUDA build and bounded RTX 5080 kernel measurements are validated in WSL; native Linux end-to-end throughput has not been measured.
@@ -79,9 +80,10 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and an exac
 
 ## Latest verified state
 
-- Focused GLM descriptor, manifest, CLI, toy reference, TurboQuant, DSA, official indexer, shard-converter, bundle loader, exact MLA/DSA layer reference, and multi-shard tests: 42 passed in the last WSL Python environment. The CUDA Python test remains skipped on Windows because the WSL ELF binary is not a Windows executable.
+- Focused GLM descriptor, manifest, CLI, toy reference, TurboQuant, DSA, official indexer, shard-converter, bundle loader, exact MLA/DSA layer reference, and multi-shard tests: 42 passed in the last WSL Python environment. The Windows Python interpreter currently lacks pytest, so no new Python rerun was claimed. The CUDA Python test remains skipped on Windows because the WSL ELF binary is not a Windows executable.
 - CUDA CMake build: successful in WSL with CUDA 13.3 and RTX 5080 compute capability 12.0.
 - CTest: 26/26 tests passed in WSL.
+- CPU WSL CTest: 14/14 tests passed after the expert-major CUDA API change.
 - Focused CUDA regression now includes a nonzero two-expert/two-token BF16 resident-grid parity case; the 26-test CTest count is unchanged because it extends `cuda_dense`.
 - Real-shard C++ metadata gate: five downloaded GLM probe artifacts passed the reader gates; the assembled bundle contains 888 tensors, 277 complete expert groups, and one incomplete group.
 - Cross-shard bundle gate: five probe artifacts indexed without copying payload bytes; layer 10 is complete and the lazy reference selected 15 unique experts for two random tokens.
@@ -96,12 +98,13 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and an exac
 - cublasLt workspace gate: with the same shape, 64 MiB measured 967,790 ns FP32-output versus 994,529 ns at zero workspace; the same budget measured 1,080,469 ns for BF16 output versus 1,034,950 ns at zero. Keep the knob runtime-selectable and default-off.
 - Packed-grid gate: `cuda_dense` now verifies two experts receiving different one-token slabs, CPU parity, and packed activation/output byte accounting. This is a correctness boundary only; no ragged real-router throughput has been measured.
 - Packed-plan gate: `test_expert_major` verifies stable per-expert slab order for one-token and two-token assignment groups. No GLM router or end-to-end throughput is connected yet.
-- Ragged packed-batch gate: `test_expert_major` verifies stable one-/two-assignment buckets, repeated-shape slab concatenation, source group indices, and malformed payload rejection. No GLM router, CUDA bucket loop, or output scatter is connected yet.
-- Contribution-scatter gate: `test_expert_major` verifies weighted group-output accumulation in token order and short-output rejection. The helper is CPU/reference only; no GLM router or CUDA bucket loop is connected yet.
+- Ragged packed-batch gate: `test_expert_major` verifies stable one-/two-assignment buckets, repeated-shape slab concatenation, source group indices, and malformed payload rejection. The CUDA bucket loop now consumes this contract, but no learned GLM router is connected yet.
+- Contribution-scatter gate: `test_expert_major` verifies weighted group-output accumulation in token order and short-output rejection. The CUDA path now uses the same helper after raw-BF16 bucket execution; full-layer GLM parity remains open.
+- Expert-major real-shard gate: five probe artifacts, deterministic 8-group/10-assignment/2-token route, 1,380,314 ns warm median/block, 168,543,514 ns cold latency, 603,979,776 resident bytes, zero warm weight H2D, and 0.1471% maximum CPU-relative difference. Common was 1,651,193 ns and sparse-packed was 1,631,127 ns in paired samples. This is not learned routing or end-to-end tok/s.
 - Sparse-packed probe: deterministic 8-expert/2-token pattern measured 965,550 ns/block versus 1,040,559 ns for the common-input rerun; this is not learned routing or end-to-end throughput.
 - Latest rerun at `1f43e1a`: common 927,744 ns/block versus sparse-packed 939,149 ns/block, so sparse-packed was about 1.2% slower in this sample. The direction changed from the earlier sample; no stable packed speedup is assumed.
 - Historical K3X evidence checks are explicitly skipped when their absent `results/` artifacts are not shipped; the Linux workflow still builds C++, runs CTest, and runs all new GLM5X tests. The Windows local environment still lacks the Linux-built executable for one cross-language test.
-- Public Linux correctness workflow `31799036731` and CodeQL workflow `31799036726` both passed for `a2d6b6d`.
+- Public Linux correctness workflow `31799670817` and CodeQL workflow `31799670813` both passed for public docs commit `c29ef6a`; this new code commit is not pushed yet.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
 - Resident expert-major batch result: 8 groups x 4 candidates, 1,641,591 ns/candidate token, cold weight H2D 160,432,128 bytes and warm weight H2D 0 bytes.
@@ -112,5 +115,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and an exac
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
-- Last known-good code HEAD: `a2d6b6d` (`perf: reuse validated GLM bundle reader`). Focused GLM Python 42/42, current CPU WSL CTest 14/14, Linux correctness `31799036731`, and CodeQL `31799036726` are green.
-- Next bottleneck: avoid multi-gigabyte root hashing on every process start, then add pinned/asynchronous raw H2D, direct tensor-core algorithm selection, all-layer exact MLA/DSA state, natural Top-8 routing, nonzero full-layer parity, and VRAM-pressure-aware multi-expert residency; full weights remain intentionally absent.
+- Last known-good local code HEAD: `d09eb3a` (`feat: connect ragged expert-major BF16 grid`). WSL CUDA CTest 26/26 and CPU CTest 14/14 are green; focused GLM Python 42/42 is the last WSL Python result. Public CI for this commit is pending push.
+- Next bottleneck: connect the exact layer-10 router/MLA/DSA output to the new bucket loop, avoid multi-gigabyte root hashing on every process start, then add pinned/asynchronous raw H2D, direct tensor-core algorithm selection, all-layer exact state, nonzero full-layer parity, and VRAM-pressure-aware residency; full weights remain intentionally absent.
