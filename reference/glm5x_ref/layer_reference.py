@@ -10,6 +10,8 @@ import torch
 from glm5x_converter.bundle import GLM5XExpertBundle
 
 from .layer10_moe import (
+    GLM5XDenseMlpReference,
+    GLM5XExpertWeights,
     GLM5XLayer10MoEReference,
     GLM5XMoEForward,
     _collect_tensor_refs,
@@ -38,7 +40,7 @@ class GLM5XDecoderLayerReference:
         input_layernorm: torch.Tensor,
         attention: GLM5XMLAReference,
         post_attention_layernorm: torch.Tensor,
-        moe: GLM5XLayer10MoEReference,
+        moe: GLM5XLayer10MoEReference | GLM5XDenseMlpReference,
         dsa_indexer: GLM5XOfficialDSAIndexer | None = None,
     ) -> None:
         input_layernorm = torch.as_tensor(input_layernorm)
@@ -76,6 +78,8 @@ class GLM5XDecoderLayerReference:
         rms_norm_eps: float = 1e-5,
         verify_payloads: bool = True,
         verify_root: bool = True,
+        mlp_type: str = "sparse",
+        indexer_source_layer: int | None = None,
     ) -> "GLM5XDecoderLayerReference":
         bundle = GLM5XExpertBundle.open(
             bundle_path, verify_payloads=verify_payloads, verify_root=verify_root
@@ -95,6 +99,8 @@ class GLM5XDecoderLayerReference:
             expert_intermediate_size=expert_intermediate_size,
             hidden_size=hidden_size,
             rms_norm_eps=rms_norm_eps,
+            mlp_type=mlp_type,
+            indexer_source_layer=indexer_source_layer,
         )
 
     @classmethod
@@ -115,6 +121,8 @@ class GLM5XDecoderLayerReference:
         rms_norm_eps: float = 1e-5,
         verify_payloads: bool = True,
         verify_root: bool = True,
+        mlp_type: str = "sparse",
+        indexer_source_layer: int | None = None,
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
         """Open and validate one bundle once, then provide individual layers."""
         bundle = GLM5XExpertBundle.open(
@@ -138,6 +146,8 @@ class GLM5XDecoderLayerReference:
                 expert_intermediate_size=expert_intermediate_size,
                 hidden_size=hidden_size,
                 rms_norm_eps=rms_norm_eps,
+                mlp_type=mlp_type,
+                indexer_source_layer=indexer_source_layer,
             )
 
         return load
@@ -160,7 +170,11 @@ class GLM5XDecoderLayerReference:
         expert_intermediate_size: int = 2048,
         hidden_size: int = 6144,
         rms_norm_eps: float = 1e-5,
+        mlp_type: str = "sparse",
+        indexer_source_layer: int | None = None,
     ) -> "GLM5XDecoderLayerReference":
+        if mlp_type not in {"dense", "sparse"}:
+            raise ValueError("GLM5X_LAYER_MLP_TYPE")
         read = lambda name: GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)  # noqa: E731
         prefix = f"model.layers.{layer_id}"
         attention_prefix = f"{prefix}.self_attn"
@@ -180,7 +194,8 @@ class GLM5XDecoderLayerReference:
                 rms_norm_eps=rms_norm_eps,
             )
         )
-        indexer_prefix = f"{attention_prefix}.indexer"
+        indexer_layer = layer_id if indexer_source_layer is None else indexer_source_layer
+        indexer_prefix = f"model.layers.{indexer_layer}.self_attn.indexer"
         indexer = GLM5XOfficialDSAIndexer(
             wq_b=read(f"{indexer_prefix}.wq_b.weight"),
             wk=read(f"{indexer_prefix}.wk.weight"),
@@ -191,16 +206,25 @@ class GLM5XDecoderLayerReference:
             index_topk=index_topk,
             indexer_rope_interleave=True,
         )
-        moe = GLM5XLayer10MoEReference._from_open_bundle(
-            bundle,
-            tensor_refs=tensor_refs,
-            layer_id=layer_id,
-            cache_experts=cache_experts,
-            top_k=top_k,
-            routed_scaling_factor=routed_scaling_factor,
-            expert_intermediate_size=expert_intermediate_size,
-            hidden_size=hidden_size,
-        )
+        if mlp_type == "dense":
+            moe = GLM5XDenseMlpReference(
+                GLM5XExpertWeights(
+                    gate_proj=read(f"{prefix}.mlp.gate_proj.weight"),
+                    up_proj=read(f"{prefix}.mlp.up_proj.weight"),
+                    down_proj=read(f"{prefix}.mlp.down_proj.weight"),
+                )
+            )
+        else:
+            moe = GLM5XLayer10MoEReference._from_open_bundle(
+                bundle,
+                tensor_refs=tensor_refs,
+                layer_id=layer_id,
+                cache_experts=cache_experts,
+                top_k=top_k,
+                routed_scaling_factor=routed_scaling_factor,
+                expert_intermediate_size=expert_intermediate_size,
+                hidden_size=hidden_size,
+            )
         return cls(
             input_layernorm=read(f"{prefix}.input_layernorm.weight"),
             attention=attention,

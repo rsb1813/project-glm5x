@@ -7,7 +7,11 @@ from safetensors.torch import save_file
 from glm5x_converter.bundle import GLM5XExpertBundle, assemble_glm5x_expert_bundle
 from glm5x_converter.shard import convert_glm5x_shard
 from glm5x_ref.manifest import GLM5XTensorManifest
-from glm5x_ref.layer10_moe import GLM5XExpertWeights, GLM5XLayer10MoEReference
+from glm5x_ref.layer10_moe import (
+    GLM5XDenseMlpReference,
+    GLM5XExpertWeights,
+    GLM5XLayer10MoEReference,
+)
 from glm5x_ref.layer_reference import GLM5XDecoderLayerReference
 from glm5x_ref.mla_dsa import GLM5XMLAReference, GLM5XMLAWeights
 from glm5x_ref.official_dsa import GLM5XOfficialDSAIndexer
@@ -106,6 +110,34 @@ def test_decoder_layer_incremental_matches_prefill_with_dsa_state() -> None:
     assert last.dsa_state is not None and last.dsa_state.length == 4
 
 
+def test_dense_mlp_matches_swiglu_and_empty_routing_contract() -> None:
+    torch.manual_seed(43)
+    hidden_size = 8
+    intermediate = 3
+    weights = GLM5XExpertWeights(
+        gate_proj=torch.randn(intermediate, hidden_size, dtype=torch.bfloat16),
+        up_proj=torch.randn(intermediate, hidden_size, dtype=torch.bfloat16),
+        down_proj=torch.randn(hidden_size, intermediate, dtype=torch.bfloat16),
+    )
+    mlp = GLM5XDenseMlpReference(weights)
+    hidden = torch.randn(1, 2, hidden_size, dtype=torch.float32)
+    work = hidden.to(dtype=torch.bfloat16)
+    expected = torch.nn.functional.linear(
+        torch.nn.functional.silu(torch.nn.functional.linear(work, weights.gate_proj))
+        * torch.nn.functional.linear(work, weights.up_proj),
+        weights.down_proj,
+    )
+
+    result = mlp(hidden)
+
+    torch.testing.assert_close(result.output, expected)
+    assert result.router_logits.shape == (1, 2, 0)
+    assert result.topk_indices.shape == (1, 2, 0)
+    assert result.topk_weights.shape == (1, 2, 0)
+    assert result.loaded_experts == ()
+    assert result.expert_load_count == 0
+
+
 def test_decoder_layer_bundle_loader_reads_attention_and_experts(monkeypatch, tmp_path) -> None:
     hidden_size = 8
     heads = 2
@@ -136,6 +168,9 @@ def test_decoder_layer_bundle_loader_reads_attention_and_experts(monkeypatch, tm
         f"{prefix}.mlp.shared_experts.gate_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
         f"{prefix}.mlp.shared_experts.up_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
         f"{prefix}.mlp.shared_experts.down_proj.weight": torch.randn(hidden_size, intermediate).bfloat16(),
+        f"{prefix}.mlp.gate_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+        f"{prefix}.mlp.up_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+        f"{prefix}.mlp.down_proj.weight": torch.randn(hidden_size, intermediate).bfloat16(),
     }
     for expert_id in range(2):
         names.update(
@@ -229,3 +264,25 @@ def test_decoder_layer_bundle_loader_reads_attention_and_experts(monkeypatch, tm
     assert isinstance(loader(0), GLM5XDecoderLayerReference)
     assert isinstance(loader(0), GLM5XDecoderLayerReference)
     assert open_count == 1
+
+    dense_layer = GLM5XDecoderLayerReference.from_bundle(
+        bundle_path,
+        layer_id=0,
+        num_heads=heads,
+        qk_nope_head_dim=nope,
+        qk_rope_head_dim=rope,
+        v_head_dim=value,
+        index_topk=1,
+        top_k=1,
+        expert_intermediate_size=intermediate,
+        hidden_size=hidden_size,
+        mlp_type="dense",
+    )
+    dense_result = dense_layer(
+        hidden,
+        (frequencies.cos(), frequencies.sin()),
+        position_ids=torch.arange(2).view(1, 2),
+    )
+    assert dense_result.output.shape == hidden.shape
+    assert dense_result.moe.expert_load_count == 0
+    assert dense_result.moe.topk_indices.shape == (1, 2, 0)

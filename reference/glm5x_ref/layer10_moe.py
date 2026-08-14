@@ -48,6 +48,43 @@ class GLM5XMoEForward:
         return len(self.loaded_experts)
 
 
+class GLM5XDenseMlpReference:
+    """GLM-5.2 first dense MLP layers with the shared forward contract."""
+
+    def __init__(self, weights: GLM5XExpertWeights) -> None:
+        if not isinstance(weights, GLM5XExpertWeights):
+            raise ValueError("GLM5X_DENSE_MLP_WEIGHTS_REQUIRED")
+        self.weights = weights
+
+    @property
+    def hidden_size(self) -> int:
+        return int(self.weights.gate_proj.shape[1])
+
+    def __call__(self, hidden_states: torch.Tensor) -> GLM5XMoEForward:
+        hidden_states = torch.as_tensor(hidden_states)
+        if hidden_states.ndim < 2 or hidden_states.shape[-1] != self.hidden_size:
+            raise ValueError("GLM5X_DENSE_MLP_HIDDEN_SHAPE")
+        original_shape = hidden_states.shape
+        flat = hidden_states.reshape(-1, self.hidden_size)
+        work = flat.to(dtype=self.weights.gate_proj.dtype)
+        gate = F.linear(work, self.weights.gate_proj)
+        up = F.linear(work, self.weights.up_proj)
+        output = F.linear(F.silu(gate) * up, self.weights.down_proj)
+        empty_router = torch.empty(
+            (*original_shape[:-1], 0), dtype=torch.float32, device=output.device
+        )
+        empty_indices = torch.empty(
+            (*original_shape[:-1], 0), dtype=torch.long, device=output.device
+        )
+        return GLM5XMoEForward(
+            output=output.reshape(original_shape),
+            router_logits=empty_router,
+            topk_indices=empty_indices,
+            topk_weights=empty_router.clone(),
+            loaded_experts=(),
+        )
+
+
 ExpertLoader = Callable[[int], GLM5XExpertWeights]
 
 

@@ -18,6 +18,7 @@ from .mla_dsa import GLM5XMLAForward, GLM5XMLAReference, GLM5XMLAState, GLM5XMLA
 from .layer_reference import GLM5XDecoderLayerForward, GLM5XDecoderLayerReference
 from .model_reference import GLM5XDecoderModelReference, GLM5XDecoderState, GLM5XModelForward
 from .layer10_moe import (
+    GLM5XDenseMlpReference,
     GLM5XExpertWeights,
     GLM5XLayer10MoEReference,
     GLM5XMoEForward,
@@ -53,6 +54,7 @@ __all__ = [
     "GLM5XDecoderState",
     "GLM5XModelForward",
     "GLM5XExpertWeights",
+    "GLM5XDenseMlpReference",
     "GLM5XLayer10MoEReference",
     "GLM5XMoEForward",
     "GLM5XSyntheticConfig",
