@@ -212,3 +212,20 @@ def test_decoder_layer_bundle_loader_reads_attention_and_experts(monkeypatch, tm
     assert result.dsa_state is not None and result.dsa_state.length == 2
     assert result.moe.expert_load_count > 0
     assert open_count == 1
+
+    open_count = 0
+    loader = GLM5XDecoderLayerReference.bundle_layer_loader(
+        bundle_path,
+        num_heads=heads,
+        qk_nope_head_dim=nope,
+        qk_rope_head_dim=rope,
+        v_head_dim=value,
+        index_topk=1,
+        top_k=1,
+        expert_intermediate_size=intermediate,
+        hidden_size=hidden_size,
+    )
+    assert open_count == 1
+    assert isinstance(loader(0), GLM5XDecoderLayerReference)
+    assert isinstance(loader(0), GLM5XDecoderLayerReference)
+    assert open_count == 1

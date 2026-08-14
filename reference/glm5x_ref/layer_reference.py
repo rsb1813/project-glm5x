@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Mapping
 
 import torch
 
@@ -75,8 +76,84 @@ class GLM5XDecoderLayerReference:
         rms_norm_eps: float = 1e-5,
     ) -> "GLM5XDecoderLayerReference":
         bundle = GLM5XExpertBundle.open(bundle_path)
+        return cls.from_open_bundle(
+            bundle,
+            tensor_refs=_collect_tensor_refs(bundle),
+            layer_id=layer_id,
+            cache_experts=cache_experts,
+            num_heads=num_heads,
+            qk_nope_head_dim=qk_nope_head_dim,
+            qk_rope_head_dim=qk_rope_head_dim,
+            v_head_dim=v_head_dim,
+            index_topk=index_topk,
+            top_k=top_k,
+            routed_scaling_factor=routed_scaling_factor,
+            expert_intermediate_size=expert_intermediate_size,
+            hidden_size=hidden_size,
+            rms_norm_eps=rms_norm_eps,
+        )
+
+    @classmethod
+    def bundle_layer_loader(
+        cls,
+        bundle_path: str | Path,
+        *,
+        cache_experts: bool = False,
+        num_heads: int = 64,
+        qk_nope_head_dim: int = 192,
+        qk_rope_head_dim: int = 64,
+        v_head_dim: int = 256,
+        index_topk: int = 2048,
+        top_k: int = 8,
+        routed_scaling_factor: float = 2.5,
+        expert_intermediate_size: int = 2048,
+        hidden_size: int = 6144,
+        rms_norm_eps: float = 1e-5,
+    ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
+        """Open and validate one bundle once, then provide individual layers."""
+        bundle = GLM5XExpertBundle.open(bundle_path)
         refs = _collect_tensor_refs(bundle)
-        read = lambda name: GLM5XLayer10MoEReference._read_tensor(refs, name)  # noqa: E731
+
+        def load(layer_id: int) -> "GLM5XDecoderLayerReference":
+            return cls.from_open_bundle(
+                bundle,
+                tensor_refs=refs,
+                layer_id=layer_id,
+                cache_experts=cache_experts,
+                num_heads=num_heads,
+                qk_nope_head_dim=qk_nope_head_dim,
+                qk_rope_head_dim=qk_rope_head_dim,
+                v_head_dim=v_head_dim,
+                index_topk=index_topk,
+                top_k=top_k,
+                routed_scaling_factor=routed_scaling_factor,
+                expert_intermediate_size=expert_intermediate_size,
+                hidden_size=hidden_size,
+                rms_norm_eps=rms_norm_eps,
+            )
+
+        return load
+
+    @classmethod
+    def from_open_bundle(
+        cls,
+        bundle: GLM5XExpertBundle,
+        *,
+        tensor_refs: Mapping[str, tuple[object, object]],
+        layer_id: int = 10,
+        cache_experts: bool = False,
+        num_heads: int = 64,
+        qk_nope_head_dim: int = 192,
+        qk_rope_head_dim: int = 64,
+        v_head_dim: int = 256,
+        index_topk: int = 2048,
+        top_k: int = 8,
+        routed_scaling_factor: float = 2.5,
+        expert_intermediate_size: int = 2048,
+        hidden_size: int = 6144,
+        rms_norm_eps: float = 1e-5,
+    ) -> "GLM5XDecoderLayerReference":
+        read = lambda name: GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)  # noqa: E731
         prefix = f"model.layers.{layer_id}"
         attention_prefix = f"{prefix}.self_attn"
         attention = GLM5XMLAReference(
@@ -108,7 +185,7 @@ class GLM5XDecoderLayerReference:
         )
         moe = GLM5XLayer10MoEReference._from_open_bundle(
             bundle,
-            tensor_refs=refs,
+            tensor_refs=tensor_refs,
             layer_id=layer_id,
             cache_experts=cache_experts,
             top_k=top_k,
