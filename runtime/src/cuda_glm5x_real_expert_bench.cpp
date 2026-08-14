@@ -3,8 +3,10 @@
 #include "k3x/checksums.hpp"
 #include "k3x/format.hpp"
 #include "k3x/glm5x_bundle.hpp"
+#include "k3x/routing_policy.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -13,6 +15,7 @@
 #include <cstring>
 #include <filesystem>
 #include <iomanip>
+#include <initializer_list>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -20,6 +23,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -36,6 +40,7 @@ struct Arguments {
     std::size_t warmup{2};
     std::size_t iterations{10};
     std::size_t workspace_bytes{};
+    std::size_t resident_bytes{1ULL << 30};
     std::string precision{"fp32"};
     std::string output{"fp32"};
     std::string input_mode{"common"};
@@ -96,6 +101,10 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             const auto parsed = parse_size(value);
             if (!parsed) return std::nullopt;
             result.workspace_bytes = *parsed;
+        } else if (key == "--resident-bytes") {
+            const auto parsed = parse_size(value);
+            if (!parsed || *parsed == 0) return std::nullopt;
+            result.resident_bytes = *parsed;
         } else if (key == "--precision") {
             result.precision = value;
         } else if (key == "--output") {
@@ -116,7 +125,8 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
     }
     if (result.input_mode != "common" &&
         result.input_mode != "sparse-packed" &&
-        result.input_mode != "expert-major") {
+        result.input_mode != "expert-major" &&
+        result.input_mode != "learned-expert-major") {
         return std::nullopt;
     }
     if (result.precision != "bf16-rounded" && result.output != "fp32") {
@@ -131,6 +141,13 @@ struct RealExpertFixture {
     std::array<std::vector<float>, 3> weights;
     k3x::DenseMlpView dense{};
     k3x::RawBf16MlpView raw{};
+};
+
+struct NamedTensorPayload {
+    std::uint16_t dtype{};
+    std::uint8_t rank{};
+    std::array<std::uint64_t, 4> dimensions{};
+    std::vector<std::byte> bytes;
 };
 
 float bf16_to_float(const std::byte* bytes) {
@@ -160,6 +177,116 @@ std::vector<float> decode_bf16(std::span<const std::byte> bytes) {
         values[index] = bf16_to_float(bytes.data() + index * 2);
     }
     return values;
+}
+
+std::vector<float> decode_fp32(std::span<const std::byte> bytes) {
+    if (bytes.size() % sizeof(float) != 0) return {};
+    std::vector<float> values(bytes.size() / sizeof(float));
+    std::memcpy(values.data(), bytes.data(), bytes.size());
+    return values;
+}
+
+k3x::Result<NamedTensorPayload> load_named_tensor(
+    std::span<const k3x::Reader* const> shards, std::string_view name) {
+    const std::string owned_name(name);
+    const auto tensor_id = k3x::fnv1a64(owned_name.c_str());
+    const k3x::Reader* owner = nullptr;
+    const k3x::TensorRecord* record = nullptr;
+    for (const auto* shard : shards) {
+        if (shard == nullptr) continue;
+        const auto match = std::find_if(
+            shard->tensors().begin(), shard->tensors().end(),
+            [tensor_id](const k3x::TensorRecord& candidate) {
+                return candidate.tensor_id == tensor_id;
+            });
+        if (match == shard->tensors().end()) continue;
+        if (owner != nullptr) {
+            return k3x::Result<NamedTensorPayload>::failure(
+                k3x::ErrorCode::invalid_directory,
+                "duplicate named GLM tensor");
+        }
+        owner = shard;
+        record = &*match;
+    }
+    if (owner == nullptr || record == nullptr) {
+        return k3x::Result<NamedTensorPayload>::failure(
+            k3x::ErrorCode::tensor_not_found, owned_name);
+    }
+    if (record->quantization != 0 || record->logical_length != record->data_length ||
+        record->auxiliary_length != 0 || record->auxiliary_offset != 0 ||
+        record->auxiliary_crc32c != 0) {
+        return k3x::Result<NamedTensorPayload>::failure(
+            k3x::ErrorCode::invalid_directory, "invalid named GLM tensor");
+    }
+    const auto payload = owner->read_tensor(tensor_id);
+    if (!payload) {
+        return k3x::Result<NamedTensorPayload>::failure(
+            payload.error(), payload.message());
+    }
+    if (payload.value().size() != record->data_length ||
+        k3x::crc32c(payload.value()) != record->data_crc32c) {
+        return k3x::Result<NamedTensorPayload>::failure(
+            k3x::ErrorCode::data_crc_mismatch, owned_name);
+    }
+    NamedTensorPayload result;
+    result.dtype = record->dtype;
+    result.rank = record->rank;
+    result.dimensions = record->dimensions;
+    result.bytes = payload.value();
+    return k3x::Result<NamedTensorPayload>::success(std::move(result));
+}
+
+bool has_shape(
+    const NamedTensorPayload& tensor,
+    std::initializer_list<std::uint64_t> expected) {
+    if (tensor.rank != expected.size()) return false;
+    std::size_t index = 0;
+    for (const auto value : expected) {
+        if (tensor.dimensions[index++] != value) return false;
+    }
+    return true;
+}
+
+std::vector<k3x::ExpertMajorTokenRoute> build_learned_routes(
+    std::span<const float> input, std::size_t token_count,
+    std::span<const float> router_weight,
+    std::span<const float> correction_bias) {
+    constexpr std::size_t kExpertCount = 256;
+    constexpr std::size_t kTopK = 8;
+    constexpr float kRoutedScale = 2.5F;
+    if (input.size() != token_count * kHiddenSize ||
+        router_weight.size() != kExpertCount * kHiddenSize ||
+        correction_bias.size() != kExpertCount) {
+        return {};
+    }
+    std::vector<k3x::ExpertMajorTokenRoute> routes(token_count);
+    for (std::size_t token = 0; token < token_count; ++token) {
+        std::vector<float> scores(kExpertCount);
+        const auto token_input = input.subspan(token * kHiddenSize, kHiddenSize);
+        for (std::size_t expert = 0; expert < kExpertCount; ++expert) {
+            const auto weights = router_weight.subspan(expert * kHiddenSize,
+                                                       kHiddenSize);
+            float logit = 0.0F;
+            for (std::size_t index = 0; index < kHiddenSize; ++index) {
+                logit += token_input[index] * weights[index];
+            }
+            scores[expert] = 1.0F / (1.0F + std::exp(-logit));
+        }
+        const auto decision = k3x::select_routing(
+            scores, correction_bias, kTopK,
+            k3x::RoutingPolicyConfig{.mode = k3x::RoutingMode::natural});
+        if (!decision) return {};
+        auto& route = routes[token];
+        route.expert_ids.reserve(kTopK);
+        route.contributions.reserve(kTopK);
+        for (std::size_t slot = 0; slot < decision.value().selected_k; ++slot) {
+            route.expert_ids.push_back(static_cast<std::uint32_t>(
+                decision.value().expert_ids[slot]));
+            route.contributions.push_back(
+                decision.value().normalized_weights[slot] * kRoutedScale);
+        }
+    }
+    return routes;
 }
 
 std::uint64_t median(std::vector<std::uint64_t> values) {
@@ -205,8 +332,8 @@ int main(int argc, char** argv) {
     if (!arguments || !std::filesystem::is_directory(arguments->artifact_dir)) {
         std::cerr << "usage: --artifact-dir DIR --layer N --expert N "
                      "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
-                     "[--workspace-bytes N] [--precision fp32|bf16-rounded] "
-                     "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major]\n";
+                     "[--workspace-bytes N] [--resident-bytes N] [--precision fp32|bf16-rounded] "
+                     "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major|learned-expert-major]\n";
         return 2;
     }
     const auto paths = artifact_paths(arguments->artifact_dir);
@@ -236,8 +363,64 @@ int main(int argc, char** argv) {
             }
         }
     }
+    const bool sparse_packed = arguments->input_mode == "sparse-packed";
+    const bool expert_major = arguments->input_mode == "expert-major";
+    const bool learned_expert_major =
+        arguments->input_mode == "learned-expert-major";
+    if (learned_expert_major &&
+        (arguments->precision != "bf16-rounded" || arguments->tokens == 0)) {
+        std::cerr << "learned-expert-major requires --precision bf16-rounded\n";
+        return 7;
+    }
+    const auto logical_token_count = arguments->tokens;
+    const auto grid_token_count = sparse_packed ? 1 : arguments->tokens;
+    const auto input_value_count = logical_token_count * kHiddenSize;
+    std::vector<float> input(input_value_count);
+    for (std::size_t index = 0; index < input.size(); ++index) {
+        input[index] = static_cast<float>(static_cast<int>(index % 29) - 14) * 0.01F;
+        if (arguments->precision == "bf16-rounded") input[index] = round_to_bf16(input[index]);
+    }
+    std::vector<k3x::ExpertMajorTokenRoute> learned_routes;
     std::vector<std::uint32_t> expert_ids;
-    if (arguments->experts == 1) {
+    std::uint64_t router_payload_bytes = 0;
+    const auto host_start = std::chrono::steady_clock::now();
+    if (learned_expert_major) {
+        const auto router = load_named_tensor(
+            shard_views,
+            "model.layers." + std::to_string(arguments->layer) +
+                ".mlp.gate.weight");
+        const auto bias = load_named_tensor(
+            shard_views,
+            "model.layers." + std::to_string(arguments->layer) +
+                ".mlp.gate.e_score_correction_bias");
+        if (!router || !bias || router.value().dtype != 3 ||
+            bias.value().dtype != 1 ||
+            !has_shape(router.value(), {256, kHiddenSize}) ||
+            !has_shape(bias.value(), {256})) {
+            std::cerr << "invalid GLM router tensors\n";
+            return 5;
+        }
+        const auto router_weight = decode_bf16(router.value().bytes);
+        const auto correction_bias = decode_fp32(bias.value().bytes);
+        router_payload_bytes = router.value().bytes.size() + bias.value().bytes.size();
+        learned_routes = build_learned_routes(
+            input, arguments->tokens, router_weight, correction_bias);
+        if (learned_routes.size() != arguments->tokens) {
+            std::cerr << "GLM router selection failed\n";
+            return 5;
+        }
+        std::set<std::uint32_t> selected;
+        for (const auto& route : learned_routes) {
+            selected.insert(route.expert_ids.begin(), route.expert_ids.end());
+        }
+        expert_ids.assign(selected.begin(), selected.end());
+        for (const auto expert_id : expert_ids) {
+            if (!available_experts.contains(expert_id)) {
+                std::cerr << "selected GLM expert is absent from bounded shards\n";
+                return 5;
+            }
+        }
+    } else if (arguments->experts == 1) {
         if (!available_experts.contains(arguments->expert)) return 5;
         expert_ids.push_back(arguments->expert);
     } else {
@@ -245,7 +428,6 @@ int main(int argc, char** argv) {
         expert_ids.assign(available_experts.begin(), available_experts.end());
         expert_ids.resize(arguments->experts);
     }
-    const auto host_start = std::chrono::steady_clock::now();
     std::vector<RealExpertFixture> fixtures;
     fixtures.reserve(expert_ids.size());
     std::uint64_t host_payload_bytes = 0;
@@ -263,7 +445,7 @@ int main(int argc, char** argv) {
         fixture.payload = std::move(loaded.value());
         host_payload_bytes += fixture.payload.payload_bytes;
         const auto needs_float_view = arguments->precision == "fp32" ||
-            arguments->input_mode == "expert-major" ||
+            expert_major || learned_expert_major ||
             expert_id == expert_ids.back();
         if (needs_float_view) {
             for (std::size_t index = 0; index < fixture.weights.size(); ++index) {
@@ -301,8 +483,6 @@ int main(int argc, char** argv) {
     const auto host_load_ns = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - host_start).count());
-    const bool sparse_packed = arguments->input_mode == "sparse-packed";
-    const bool expert_major = arguments->input_mode == "expert-major";
     if (sparse_packed &&
         (arguments->precision != "bf16-rounded" || arguments->tokens != 2)) {
         std::cerr << "sparse-packed requires --precision bf16-rounded --tokens 2\n";
@@ -315,13 +495,12 @@ int main(int argc, char** argv) {
                      "and at least two experts\n";
         return 7;
     }
-    const auto logical_token_count = arguments->tokens;
-    const auto grid_token_count = sparse_packed ? 1 : arguments->tokens;
-    const auto input_value_count = logical_token_count * kHiddenSize;
-    std::vector<float> input(input_value_count);
-    for (std::size_t index = 0; index < input.size(); ++index) {
-        input[index] = static_cast<float>(static_cast<int>(index % 29) - 14) * 0.01F;
-        if (arguments->precision == "bf16-rounded") input[index] = round_to_bf16(input[index]);
+    if (learned_expert_major &&
+        (arguments->precision != "bf16-rounded" || arguments->tokens == 0 ||
+         fixtures.size() < 2)) {
+        std::cerr << "learned-expert-major requires BF16 precision and at least "
+                     "two selected experts\n";
+        return 7;
     }
     std::vector<k3x::RawBf16MlpView> raw_views;
     raw_views.reserve(fixtures.size());
@@ -330,23 +509,28 @@ int main(int argc, char** argv) {
     }
     std::optional<k3x::ExpertMajorPackedPlan> expert_major_plan;
     std::vector<k3x::RawBf16MlpView> expert_major_views;
-    if (expert_major) {
-        std::vector<k3x::ExpertMajorTokenRoute> routes(arguments->tokens);
-        for (std::size_t token = 0; token < arguments->tokens; ++token) {
-            auto& route = routes[token];
-            for (std::size_t expert_index = 0;
-                 expert_index < fixtures.size(); ++expert_index) {
-                const bool shared = expert_index < 2;
-                const bool alternating = expert_index >= 2 &&
-                    ((expert_index + token) % arguments->tokens == 0);
-                if (shared || alternating) {
-                    route.expert_ids.push_back(expert_ids[expert_index]);
+    if (expert_major || learned_expert_major) {
+        std::vector<k3x::ExpertMajorTokenRoute> routes;
+        if (learned_expert_major) {
+            routes = learned_routes;
+        } else {
+            routes.resize(arguments->tokens);
+            for (std::size_t token = 0; token < arguments->tokens; ++token) {
+                auto& route = routes[token];
+                for (std::size_t expert_index = 0;
+                     expert_index < fixtures.size(); ++expert_index) {
+                    const bool shared = expert_index < 2;
+                    const bool alternating = expert_index >= 2 &&
+                        ((expert_index + token) % arguments->tokens == 0);
+                    if (shared || alternating) {
+                        route.expert_ids.push_back(expert_ids[expert_index]);
+                    }
                 }
+                if (route.expert_ids.empty()) return 7;
+                route.contributions.assign(
+                    route.expert_ids.size(),
+                    1.0F / static_cast<float>(route.expert_ids.size()));
             }
-            if (route.expert_ids.empty()) return 7;
-            route.contributions.assign(
-                route.expert_ids.size(),
-                1.0F / static_cast<float>(route.expert_ids.size()));
         }
         auto built = k3x::build_expert_major_packed_plan(
             input, arguments->tokens, kHiddenSize, routes);
@@ -391,7 +575,7 @@ int main(int argc, char** argv) {
     options.cuda_bf16_output = arguments->output == "bf16"
         ? k3x::CudaBf16OutputMode::bf16 : k3x::CudaBf16OutputMode::fp32;
     options.cuda_weight_validation = k3x::CudaWeightValidationMode::admission;
-    options.cuda_resident_bytes = 1ULL << 30;
+    options.cuda_resident_bytes = arguments->resident_bytes;
     auto cuda = k3x::make_cuda_backend(options);
     if (!cuda) {
         std::cerr << k3x::error_code_name(cuda.error()) << ": "
@@ -402,7 +586,7 @@ int main(int argc, char** argv) {
     std::vector<float> cpu_reference;
     cpu_reference.reserve(grid_token_count * kHiddenSize);
     const auto reference_token_count = sparse_packed ? 1 : arguments->tokens;
-    if (expert_major) {
+    if (expert_major || learned_expert_major) {
         cpu_reference.assign(arguments->tokens * kHiddenSize, 0.0F);
         for (const auto& group : expert_major_plan->groups) {
             const auto fixture = std::find_if(
@@ -439,7 +623,7 @@ int main(int argc, char** argv) {
                              reference.value().end());
     }
     const auto execute = [&]() {
-        if (expert_major) {
+        if (expert_major || learned_expert_major) {
             return cuda.value()->raw_bf16_situ_mlp_expert_major(
                 input, arguments->tokens, *expert_major_plan,
                 expert_major_views, 1.0F, std::nullopt, arguments->layer,
@@ -512,8 +696,11 @@ int main(int argc, char** argv) {
     const auto cpu_scale = std::max(maximum_absolute_value(cpu_reference), 1.0e-6F);
     std::cout << std::setprecision(12)
               << "{\"artifact_kind\":\""
-              << (expert_major ? "glm5.2_real_bf16_expert_major"
-                               : "glm5.2_real_bf16_expert")
+              << ((expert_major || learned_expert_major)
+                      ? (learned_expert_major
+                             ? "glm5.2_real_bf16_learned_expert_major"
+                             : "glm5.2_real_bf16_expert_major")
+                      : "glm5.2_real_bf16_expert")
               << "\""
               << ",\"layer_id\":" << arguments->layer
               << ",\"expert_id\":" << expert_ids.front()
@@ -525,13 +712,18 @@ int main(int argc, char** argv) {
               << ",\"output\":\"" << arguments->output << "\""
               << ",\"input_mode\":\"" << arguments->input_mode << "\""
               << ",\"route_group_count\":"
-              << (expert_major ? expert_major_plan->groups.size() : 0)
+              << ((expert_major || learned_expert_major)
+                      ? expert_major_plan->groups.size() : 0)
               << ",\"route_assignment_count\":"
-              << (expert_major ? expert_major_plan->assignment_count : 0)
+              << ((expert_major || learned_expert_major)
+                      ? expert_major_plan->assignment_count : 0)
               << ",\"grid_token_count\":" << grid_token_count
               << ",\"cublas_workspace_bytes\":"
               << arguments->workspace_bytes
+              << ",\"resident_budget_bytes\":"
+              << arguments->resident_bytes
               << ",\"host_payload_bytes\":" << host_payload_bytes
+              << ",\"router_payload_bytes\":" << router_payload_bytes
               << ",\"host_load_nanoseconds\":" << host_load_ns
               << ",\"cold_latency_nanoseconds\":" << cold_ns
               << ",\"latency_nanoseconds_median\":" << median(samples)
