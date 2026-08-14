@@ -144,3 +144,11 @@
 - The two-token CUDA regression uses nonzero matrices and CPU BF16-rounded references. The full WSL CTest suite remains 26/26 and the focused GLM Python suite remains 35/35.
 - Rerun on the two real probe artifacts: 8 experts x 4 tokens measured 1,758,739 ns warm block median, 603,979,776 resident bytes, zero warm H2D, and 0.1351% maximum relative CPU difference. This is a bounded FFN block result, not model tok/s.
 - The next bottleneck is now direct raw-BF16/tensor-core storage plus exact natural Top-8 routing and nonzero full-layer parity. The dense grid is opt-in until those quality and capacity gates exist.
+
+## 2026-08-14 Direct raw-BF16 resident admission
+
+- Added public `RawBf16WeightView`/`RawBf16MlpView` contracts and a CUDA `raw_bf16_situ_mlp_grid` entry point. The implementation validates byte lengths, tensor IDs, shapes, CRC-checked caller payloads, and resident capacity before admitting role bytes directly.
+- The real benchmark now keeps raw `.k3x` role bytes for every selected expert and decodes only the last expert for the CPU comparison. FP32 mode remains unchanged and still exercises the high-precision scalar reference.
+- Direct raw BF16 on the two probe artifacts measured 8 experts x 4 tokens at 1,648,927 ns warm block median, 135,877,327 ns cold, 603,979,776 resident bytes, zero warm H2D, and 0.1351% maximum relative CPU difference. The prior dense wrapper measured 1,758,739 ns warm and 759,804,032 ns cold under the same command shape.
+- `test_cuda_dense` now exercises both the dense-wrapper and raw-byte APIs with a nonzero two-expert/two-token fixture. Full WSL CTest remains 26/26 and focused GLM Python remains 35/35.
+- The next bottleneck is pinned/asynchronous raw H2D plus exact natural Top-8/MLA/DSA layer integration; raw grid results are still FFN-block evidence, not model tok/s.

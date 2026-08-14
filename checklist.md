@@ -31,6 +31,7 @@
 - [x] Measure bounded multi-expert resident pressure with real GLM shard data.
 - [x] Add real raw-BF16 expert-major grid execution with candidate-token batching and CPU parity.
 - [x] Measure the real 8-expert/4-token BF16 grid on the RTX 5080 probe artifacts.
+- [x] Add direct raw-BF16 resident admission without FP32 conversion for the expert grid.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [ ] Validate BF16 dequantized execution against nonzero real GLM shard data and quality metrics.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.

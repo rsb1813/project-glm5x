@@ -27,6 +27,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - Added `k3x_cuda_glm5x_real_expert_bench`, which feeds one exact real expert into the resident CUDA dense SiTU path and compares output against the CPU reference.
 - Added a dense BF16 `resident_grid` backend path for real GLM experts, with candidate-token batching, resident-table admission, one activation upload, and CPU-parity regression coverage.
 - Extended the real-expert benchmark with `--tokens`; 8 real experts over 4 candidate tokens now run through the BF16 grid while FP32 keeps the scalar numerical reference path.
+- Added direct `RawBf16MlpView` admission so selected `.k3x` BF16 expert bytes do not pass through FP32 staging; the real probe decodes only the last expert for CPU comparison.
 - Added and measured `k3x_cuda_glm5x_moe_bench` on the real RTX 5080 at GLM-5.2 expert dimensions.
 - Added an expert-major candidate-token benchmark mode for 1/2/4/8 tokens.
 - Added resident exact MXFP4 reuse to the CUDA expert-major batch backend and allowed resident weights in the CLI validation contract.
@@ -73,6 +74,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - Real CUDA expert gate: FP32 resident rerun warm median 271,493 ns with 150,994,944 resident bytes and CPU max absolute error `8.38190317154e-09`; cached BF16-rounded rerun warm median 236,593 ns with 75,497,472 resident bytes and 0.1828% max relative error. These are one-expert FFN records only.
 - Multi-expert pressure gate: 8 real layer-10 experts measured 1,854,140 ns sequential warm median with BF16/604 MB resident and zero warm H2D; FP32 exceeded the 1 GiB budget and measured 13,153,048 ns with 3.02 GB warm H2D.
 - Real expert-major gate: 8 real layer-10 experts over 4 candidate tokens measured 1,758,739 ns BF16 grid warm median (approximately 439,685 ns per candidate), 603,979,776 resident bytes, zero warm H2D, and 0.1351% maximum relative CPU error.
+- Direct raw-BF16 gate: the same 8-expert/4-token probe measured 1,648,927 ns warm median (approximately 412,232 ns per candidate), 135,877,327 ns cold, 603,979,776 resident bytes, zero warm H2D, and unchanged 0.1351% maximum relative CPU error.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
@@ -84,5 +86,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
-- Last known-good code HEAD: `399556d` (`feat: add real BF16 expert-major grid`). Focused Python and WSL CTest gates are green.
-- Next bottleneck: direct raw-BF16/tensor-core CUDA weights, q-residual production projection, exact MLA/DSA state, natural Top-8 routing, nonzero full-layer parity, and VRAM-pressure-aware multi-expert residency; full weights remain intentionally absent.
+- Last known-good code HEAD: `29e4c61` (`perf: add direct raw BF16 expert grid`). Focused Python and WSL CTest gates are green.
+- Next bottleneck: pinned/asynchronous raw H2D, direct tensor-core algorithm selection, q-residual production projection, exact MLA/DSA state, natural Top-8 routing, nonzero full-layer parity, and VRAM-pressure-aware multi-expert residency; full weights remain intentionally absent.

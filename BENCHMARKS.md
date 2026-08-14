@@ -94,6 +94,18 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Decode tok/s, prefill tok/s, TTFT, GPU utilization, VRAM peak, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality benchmark: not measured.
 - Interpretation: this is the first nonzero real-shard expert-major candidate-block gate. It proves payload-to-grid parity for one FFN block and removes repeated weight movement, but it is not a full GLM layer, routing result, or end-to-end tok/s claim. The command's `--tokens` argument is now bounded to 1..65535 and uses the exact scalar FP32 path when BF16 grid mode is not selected.
 
+## 2026-08-14 -- Direct raw-BF16 real expert-major grid
+
+- Commit: `29e4c61`.
+- Hardware: NVIDIA GeForce RTX 5080, CUDA 13.3, WSL; same two bounded GLM probe artifacts.
+- Model/checkpoint: `zai-org/GLM-5.2`, layer 10, first 8 available real experts, gate/up `2048 x 6144`, down `6144 x 2048`.
+- Mode: `k3x_cuda_glm5x_real_expert_bench --experts 8 --tokens 4 --precision bf16-rounded` using `RawBf16MlpView` and direct resident-table admission. Non-reference experts never materialize FP32 vectors; only the last expert is decoded for CPU comparison. Five warmups and 20 measured iterations.
+- Context length: 4 candidate tokens in one expert FFN block; not a prefill/decode context benchmark.
+- Result: warm block latency median 1,648,927 ns (approximately 412,232 ns per candidate token); cold latency 135,877,327 ns; host payload/load setup 3,864,059,647 ns; cold weight H2D 603,979,776 bytes; warm weight H2D 0; resident weight bytes 603,979,776; last-expert CPU maximum relative error 0.00135118968 (0.135%).
+- Single-expert check: 1 expert x 4 tokens measured 270,243 ns warm block median, 57,380,545 ns cold, and the same bounded CPU error gate.
+- Decode tok/s, prefill tok/s, TTFT, GPU utilization, VRAM peak, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality benchmark: not measured.
+- Interpretation: direct raw-byte admission reduced the 8-expert warm block by approximately 6.2% and cold execution by approximately 5.6x relative to the preceding dense-wrapper probe. The cold comparison also excludes seven experts' FP32 reference materialization, so it is a storage/setup result, not a pure kernel speedup or end-to-end tok/s claim.
+
 ## 2026-08-14 -- Raw-BF16 expert directory C++ reader gate
 
 - Commit: working tree after `1b22bcb`; code change pending commit.

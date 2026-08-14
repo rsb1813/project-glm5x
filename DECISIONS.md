@@ -184,3 +184,11 @@
 - Evidence: the two probe artifacts supplied 8 complete layer-10 experts. On the RTX 5080, 8 experts x 4 candidate tokens measured 1,758,739 ns/block with 603,979,776 resident bytes, zero warm weight H2D, and maximum relative CPU difference 0.00135118968 (0.135%). The two-token tiny CUDA regression and the full 26-test CTest suite passed.
 - Accepted because: the grid amortizes one activation transfer and schedules the expert union as a single candidate block without changing routing or payload bytes. It remains opt-in because this is one FFN block and the BF16 quality gap is not a full-model quality result.
 - Revisit: after direct raw-BF16 tensor-core storage, full natural Top-8 routing, nonzero layer parity, and end-to-end decode measurements.
+
+## D-0024 -- Admit validated raw BF16 bytes directly
+
+- Decision: add `RawBf16WeightView`/`RawBf16MlpView` and a CUDA grid entry point that passes validated `.k3x` BF16 role bytes directly to the resident table. Keep the dense FP32 view as the CPU/reference and compatibility path.
+- Alternatives: decode every expert to FP32 then reconvert to BF16, require callers to preconvert a second BF16 file, or make the raw path replace the existing dense API.
+- Evidence: on the same RTX 5080 real-shard probe, 8 experts x 4 tokens improved from 1,758,739 ns to 1,648,927 ns warm median; cold execution fell from 759,804,032 ns to 135,877,327 ns, with resident bytes 603,979,776, warm H2D 0, and unchanged 0.1351% maximum relative CPU difference. The CUDA dense/raw parity test and full 26-test CTest suite passed.
+- Accepted because: the path removes seven unnecessary FP32 staging vectors from the multi-expert probe and makes the storage representation match the resident representation without changing the source bytes or routing semantics.
+- Revisit: after pinned/asynchronous raw H2D, direct tensor-core algorithm selection, full natural Top-8 layer parity, and quality evaluation beyond the last-expert FFN output.
