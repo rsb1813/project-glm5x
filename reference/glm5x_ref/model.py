@@ -23,6 +23,24 @@ def _first_int(config: Mapping[str, object], *keys: str, default: int = 0) -> in
     return default
 
 
+def _optional_positive_int(config: Mapping[str, object], key: str) -> int:
+    value = config.get(key)
+    if value is None:
+        return 0
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"INVALID_{key.upper()}={value!r}")
+    return value
+
+
+def _optional_bool(config: Mapping[str, object], key: str) -> bool:
+    value = config.get(key)
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise ValueError(f"INVALID_{key.upper()}={value!r}")
+    return value
+
+
 @dataclass(frozen=True)
 class GLM5XModelDescriptor:
     """모델 가중치와 runtime 정책 사이의 안정적인 GLM descriptor입니다."""
@@ -36,6 +54,13 @@ class GLM5XModelDescriptor:
     shared_experts: int
     vocab_size: int
     mtp_layers: int
+    moe_intermediate_size: int = 0
+    index_topk: int = 0
+    index_topk_freq: int = 0
+    index_n_heads: int = 0
+    index_head_dim: int = 0
+    index_share_for_mtp_iteration: bool = False
+    max_position_embeddings: int = 0
 
     @classmethod
     def from_config(cls, config: Mapping[str, object]) -> "GLM5XModelDescriptor":
@@ -78,5 +103,18 @@ class GLM5XModelDescriptor:
             vocab_size=_positive_int(config, "vocab_size"),
             mtp_layers=_first_int(
                 config, "num_nextn_predict_layers", "num_mtp_layers", default=0
+            ),
+            moe_intermediate_size=_optional_positive_int(
+                config, "moe_intermediate_size"
+            ),
+            index_topk=_optional_positive_int(config, "index_topk"),
+            index_topk_freq=_optional_positive_int(config, "index_topk_freq"),
+            index_n_heads=_optional_positive_int(config, "index_n_heads"),
+            index_head_dim=_optional_positive_int(config, "index_head_dim"),
+            index_share_for_mtp_iteration=_optional_bool(
+                config, "index_share_for_mtp_iteration"
+            ),
+            max_position_embeddings=_optional_positive_int(
+                config, "max_position_embeddings"
             ),
         )

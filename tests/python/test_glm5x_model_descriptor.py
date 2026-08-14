@@ -14,6 +14,13 @@ def _glm52_config() -> dict[str, object]:
         "n_routed_experts": 256,
         "num_experts_per_tok": 8,
         "n_shared_experts": 1,
+        "moe_intermediate_size": 2048,
+        "index_topk": 2048,
+        "index_topk_freq": 4,
+        "index_n_heads": 32,
+        "index_head_dim": 128,
+        "index_share_for_mtp_iteration": True,
+        "max_position_embeddings": 1048576,
         "vocab_size": 154880,
         "num_nextn_predict_layers": 1,
     }
@@ -27,6 +34,13 @@ def test_glm52_descriptor_reads_dsa_top8_shape() -> None:
     assert descriptor.routed_experts == 256
     assert descriptor.top_k == 8
     assert descriptor.mtp_layers == 1
+    assert descriptor.moe_intermediate_size == 2048
+    assert descriptor.index_topk == 2048
+    assert descriptor.index_topk_freq == 4
+    assert descriptor.index_n_heads == 32
+    assert descriptor.index_head_dim == 128
+    assert descriptor.index_share_for_mtp_iteration is True
+    assert descriptor.max_position_embeddings == 1048576
 
 
 def test_descriptor_rejects_k3_architecture() -> None:
@@ -43,4 +57,3 @@ def test_descriptor_rejects_invalid_top_k() -> None:
 
     with pytest.raises(ValueError, match="INVALID_TOP_K"):
         GLM5XModelDescriptor.from_config(config)
-
