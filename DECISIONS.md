@@ -152,3 +152,11 @@
 - Evidence: the real two-shard host gate found layer 10 expert 0 across the second artifact and loaded 75,497,472 bytes with CRC checks in 465,087,758 ns under WSL. The Python bundle had already established the same bytes against safetensors.
 - Accepted because: it keeps the C++ runtime dependency-free and deterministic while the bundle JSON remains the orchestration/index artifact. Duplicate or missing role IDs fail closed.
 - Revisit: when hundreds of shard readers are opened concurrently and a parsed persistent bundle map measurably reduces lookup or I/O scheduling cost.
+
+## D-0020 -- Keep FP32 resident conversion as the real-expert CUDA reference
+
+- Decision: for the first real GLM expert CUDA bridge, decode exact raw BF16 payloads to host FP32 and use the existing resident dense SiTU path. Keep `bf16-rounded` resident execution experimental and do not make it the default.
+- Alternatives: use the existing BF16-rounded cublasLt path immediately, upload raw BF16 bytes through a new kernel, or quantize the real shard to MXFP4 before the first execution gate.
+- Evidence: layer 10 expert 0 on RTX 5080/WSL measured 275,473 ns warm median in FP32 resident mode with 150,994,944-byte resident weights and CPU max absolute error `8.38190317154e-09`. BF16-rounded used 75,497,472 resident bytes but measured 28,154,650 ns warm median and 0.1828% maximum relative CPU difference.
+- Accepted because: FP32 provides a numerically tight, independently verifiable execution reference while the current BF16 plan is materially slower. The resident memory cost is bounded for one expert and can be revisited after a direct BF16/tensor-core path.
+- Revisit: after direct BF16 storage views, pinned H2D, tensor-core cublasLt algorithm selection, and multi-expert resident pressure are benchmarked with nonzero real shards.

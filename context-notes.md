@@ -116,3 +116,10 @@
 - Added `k3x::load_glm5x_bf16_expert`, which accepts multiple `Reader` instances, locates canonical GLM role IDs across them, rejects duplicate/missing roles, validates `BF16/NONE`, released `6144 x 2048` shapes, layer/expert IDs, lengths, and CRC32C, then returns three exact host payloads.
 - Added `test_glm5x_bf16_bundle` as a real-artifact gate. With the two downloaded probe artifacts, layer 10 expert 0 loaded 75,497,472 bytes in 465,087,758 ns under WSL. The result is host storage latency only; no CUDA weights or model layer were executed.
 - The next performance boundary is moving these three host vectors into the resident BF16 CUDA grid without an intermediate copy, then comparing that layer output against a CPU BF16 reference.
+
+## 2026-08-14 First real GLM expert CUDA bridge
+
+- Added `k3x_cuda_glm5x_real_expert_bench`. It loads layer 10 expert 0 across the two real probe artifacts, decodes BF16 bytes to host floats, and executes the existing resident CUDA dense SiTU FFN against a deterministic nonzero input.
+- FP32 resident run with 5 warm samples measured `latency_nanoseconds_median=457802` in the first smoke; the 20-sample rerun measured `275473` ns. Cold weight H2D was 150,994,944 bytes, warm H2D was 0, resident bytes were 150,994,944, and GPU-vs-CPU maximum absolute error was `8.38190317154e-09`.
+- `bf16-rounded` resident run reduced weight H2D/residency to 75,497,472 bytes but measured 28,154,650 ns warm median and 0.1828% maximum relative CPU difference. This is not an accepted default; it indicates the current cublasLt BF16 plan/transfer path needs a direct packed-BF16 optimization.
+- Neither run is a full GLM layer or token-generation benchmark. Router, DSA/MLA, dense trunk, residuals, and other experts remain outside the measurement.

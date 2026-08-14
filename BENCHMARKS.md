@@ -36,6 +36,26 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
 - Interpretation: this is the first C++ exact host payload gate. It includes filesystem read and CRC cost, but no CUDA H2D, dequantization, MoE projection, attention, routing, or token generation.
 
+## 2026-08-14 -- First real GLM expert CUDA bridge, FP32 resident reference
+
+- Commit: working tree after `b2c10f4`; code change pending commit.
+- Hardware: NVIDIA GeForce RTX 5080, CUDA 13.3, WSL; host CPU/RAM used for payload decode and CPU reference only.
+- Model/checkpoint: `zai-org/GLM-5.2`, two bounded probe artifacts, layer 10 expert 0, real nonzero BF16 role bytes.
+- Mode: `k3x_cuda_glm5x_real_expert_bench`, cross-shard C++ loader, BF16-to-FP32 host decode, resident dense SiTU FFN, synchronous transfer, 5 warm samples after 2 warmups in the smoke and 20 samples after 5 warmups in the recorded rerun.
+- Shape: gate/up `2048 x 6144`, down `6144 x 2048`, one token.
+- Rerun result: warm latency median 275,473 ns; cold latency 146,123,666 ns; host payload load 479,973,878 ns; cold weight H2D 150,994,944 bytes; warm weight H2D 0; resident weight bytes 150,994,944; GPU-vs-CPU maximum absolute error `8.38190317154e-09` and relative error `3.67445380789e-07`.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
+- Interpretation: this is one real expert FFN execution only. It excludes router, DSA/MLA, dense trunk, residuals, other experts, and token generation.
+
+## 2026-08-14 -- First real GLM expert CUDA bridge, BF16-rounded experiment
+
+- Commit: same working tree after `b2c10f4`; code change pending commit.
+- Hardware/model/shape: same RTX 5080 WSL and layer 10 expert 0 real shard as the FP32 record.
+- Mode: resident `bf16-rounded` cublasLt dense SiTU path, 5 warm samples after 2 warmups.
+- Result: warm latency median 28,154,650 ns; cold latency 202,057,408 ns; host payload load 443,554,804 ns; cold weight H2D 75,497,472 bytes; warm weight H2D 0; resident weight bytes 75,497,472; GPU-vs-CPU maximum relative error 0.00182774465 (0.1828%).
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
+- Interpretation: this lower-memory path is materially slower in the current plan and remains experimental. It is not a model quality result.
+
 ## 2026-08-14 -- Raw-BF16 expert directory C++ reader gate
 
 - Commit: working tree after `1b22bcb`; code change pending commit.
