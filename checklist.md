@@ -59,3 +59,5 @@
 - [ ] Run real GLM-5.2 quality and throughput benchmarks.
 - [ ] Feed the exact layer-10 GLM router/MLA/DSA output into the CUDA expert-major plan and verify nonzero full-layer parity.
 - [ ] Feed the exact layer-10 MLA/DSA hidden state into the learned router benchmark and compare complete layer output against Python reference.
+- [x] Evaluate prepared expert-major packed-bucket reuse; paired RTX 5080 medians showed no stable speedup, so it is not enabled by default.
+- [ ] Replace host expert-major copy/scatter with a parity-tested device-side accumulation path and measure it against `f07d78c`.

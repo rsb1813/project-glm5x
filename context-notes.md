@@ -269,3 +269,9 @@
 - Public CodeQL run `31812923191` for `f07d78c` completed successfully for both Python and C++. The non-failing Node 20 and CodeQL v3 deprecation annotations remain informational.
 - The local WSL regression reproduced the public path with host CTest `15/15`, CUDA CTest `27/27`, and `301 passed, 124 skipped` in `71.25 s` using `/tmp/glm5x-venv/bin/python`.
 - Dependabot PRs #1 through #4 remain open update proposals only. Their rebased replacement checks are green: #1 `31805879968`/`31805879919`, #2 `31805884019`/`31805884008`, #3 `31805888033`/`31805888023`, and #4 `31805890586`/`31805890614`. The repository is public, Dependabot security updates are disabled, and the alerts endpoint returns `403` disabled; no vulnerability alert was verified and no PR was merged.
+
+## 2026-08-15 -- Expert-major bucket reuse and shared-dispatch experiment rejected
+
+- The learned CUDA MoE benchmark was tested with a cached immutable bucket list and, for one-token decode, a fused routed-plus-shared expert-major dispatch. Both changes preserved route/output parity but did not improve paired RTX 5080 medians.
+- Token-1 five-run medians were `1,307,995 ns` with both changes versus `1,265,441 ns` at the baseline. Token-2 three-run medians were `2,191,291 ns` with bucket caching versus `2,166,726 ns` at the baseline. The token-1 fused path cut grid calls but remained slower overall.
+- The experiment was reverted from the default code path and recorded as D-0042. The next performance hypothesis is device-side accumulation to remove per-expert host output copies and CPU scatter; it must first pass exact parity and a paired benchmark.

@@ -470,3 +470,15 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Correctness: GPU-versus-C++ CPU maximum absolute error `0.000018091101083` and relative error `0.000452667358331`. The expected GLM5XACT artifact is compared after the actual FP32 output is rounded to BF16: maximum absolute error `0.00006103515625`, relative error `0.00152439018711`. The separate unrounded CPU-versus-Python diagnostic is `0.000105291604996` absolute / `0.00262972200289` relative and reflects accumulation-order plus BF16 storage precision, not routing divergence.
 - Tests: WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the full WSL Python suite `301 passed, 124 skipped` after building the CI-compatible `build/k3x_run` executable. No end-to-end quality score, token generation, or full-model throughput was measured.
 - Interpretation: this closes the GLM MoE activation and bounded real-output handoff boundary. The next bottleneck is exact q-residual/MLA/DSA hidden-state export and full-layer parity; the repository must not claim a GLM tok/s number from this record.
+
+## 2026-08-15 -- Rejected expert-major bucket-cache and shared-dispatch experiment
+
+- Date: 2026-08-15.
+- Commit: working-tree experiment compared with `f07d78c` baseline; reverted after measurement.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL2 Ubuntu-24.04.
+- Model/checkpoint: five bounded `zai-org/GLM-5.2` probe artifacts, layer 10, exact raw-BF16 expert roles; no full checkpoint.
+- Mode: `learned-moe-layer`, natural Top-8 sigmoid routing, explicit GLM SiLU, FP32 output, resident experts. The experiment cached ragged expert-major buckets and fused the shared expert only for one-token calls. The baseline rebuilt buckets per call and dispatched routed/shared paths separately.
+- Token-1 result: experiment five-run medians were `1,317,339`, `1,307,995`, `1,206,625`, `1,147,763`, and `1,374,589 ns`; median-of-runs `1,307,995 ns`. Baseline medians were `1,255,004`, `1,304,073`, `1,252,984`, `1,484,929`, and `1,265,441 ns`; median-of-runs `1,265,441 ns`. The experiment was approximately `3.4%` slower by median-of-runs.
+- Token-2 result: bucket-cache-only experiment three-run medians were `2,238,866`, `2,191,291`, and `2,157,692 ns`; median `2,191,291 ns`. Baseline medians were `2,529,160`, `2,166,726`, and `2,120,466 ns`; median `2,166,726 ns`. The experiment was approximately `1.1%` slower by median-of-runs.
+- Correctness: the existing real layer-10 CPU/GPU and BF16-boundary parity remained within the previously recorded tolerance. No route or output divergence was observed.
+- Decision: rejected as a default optimization because the measured latency did not improve despite fewer token-1 grid calls. No decode/prefill tok/s, TTFT, full-layer quality, cache hit rate, NVMe traffic, or end-to-end throughput was measured.
