@@ -45,4 +45,5 @@ GLM5X bootstrap plus CPU/reference TurboQuant KV-cache milestone.
 - CTest: 14/14 tests passed in WSL.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
 - No GLM throughput result exists yet.
+- Last known-good pushed HEAD: `cfd0c45` (`docs: record TurboQuant reference smoke`).
 - Next bottleneck: model-neutral GLM manifest, exact DSA/indexer state, and real-checkpoint correctness.
