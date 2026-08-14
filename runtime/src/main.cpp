@@ -870,8 +870,10 @@ int main(int argc, char** argv) {
                 return 2;
             }
             if (backend_options.cuda_weights !=
-                k3x::CudaWeightMode::transient) {
-                std::cerr << "CUDA expert-major verification requires transient weights\n";
+                    k3x::CudaWeightMode::transient &&
+                backend_options.cuda_weights !=
+                    k3x::CudaWeightMode::resident) {
+                std::cerr << "CUDA expert-major verification requires transient or resident weights\n";
                 return 2;
             }
             if (backend_options.cuda_transfer !=

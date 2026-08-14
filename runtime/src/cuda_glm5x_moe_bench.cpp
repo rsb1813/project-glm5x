@@ -27,6 +27,7 @@ struct Arguments {
     std::size_t tokens{1};
     std::size_t warmup{};
     std::size_t iterations{1};
+    std::string mode{"grid"};
 };
 
 struct ExpertStorage {
@@ -57,6 +58,10 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             return std::nullopt;
         }
         const std::string key = argv[index];
+        if (key == "--mode") {
+            arguments.mode = argv[index + 1];
+            continue;
+        }
         const auto value = parse_size(argv[index + 1]);
         if (!value) {
             std::cerr << "invalid option value\n";
@@ -83,6 +88,10 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
     if (arguments.tokens != 1 && arguments.tokens != 2 &&
         arguments.tokens != 4 && arguments.tokens != 8) {
         std::cerr << "tokens must be one of 1, 2, 4, or 8\n";
+        return std::nullopt;
+    }
+    if (arguments.mode != "grid" && arguments.mode != "expert-batch") {
+        std::cerr << "mode must be grid or expert-batch\n";
         return std::nullopt;
     }
     if (arguments.iterations == 0) {
@@ -196,9 +205,27 @@ int main(int argc, char** argv) {
     }
     auto& backend = *created.value();
     const auto execute = [&]() {
-        return backend.mxfp4_situ_mlp_grid(
-            input, arguments->tokens, experts, 1.0F, std::nullopt, 1,
-            k3x::ProfilePhase::decode);
+        if (arguments->mode == "grid") {
+            return backend.mxfp4_situ_mlp_grid(
+                input, arguments->tokens, experts, 1.0F, std::nullopt, 1,
+                k3x::ProfilePhase::decode);
+        }
+        std::vector<std::vector<float>> outputs;
+        outputs.reserve(arguments->experts * arguments->tokens);
+        for (const auto& expert : experts) {
+            auto result = backend.mxfp4_situ_mlp_batch(
+                input, arguments->tokens, expert, 1.0F, std::nullopt, 1,
+                k3x::ProfilePhase::decode);
+            if (!result) {
+                return k3x::Result<std::vector<std::vector<float>>>::failure(
+                    result.error(), result.message());
+            }
+            for (auto& output : result.value()) {
+                outputs.push_back(std::move(output));
+            }
+        }
+        return k3x::Result<std::vector<std::vector<float>>>::success(
+            std::move(outputs));
     };
 
     const auto cold_start = std::chrono::steady_clock::now();
@@ -244,6 +271,7 @@ int main(int argc, char** argv) {
               << "{\"artifact_kind\":\"glm5.2_shaped_expert_ffn\""
               << ",\"model_family\":\"glm5\""
               << ",\"routing_semantics\":false"
+              << ",\"mode\":\"" << arguments->mode << "\""
               << ",\"hidden_size\":" << kHiddenSize
               << ",\"expert_intermediate_size\":" << kIntermediateSize
               << ",\"group_size\":" << kGroupSize
@@ -279,6 +307,12 @@ int main(int argc, char** argv) {
               << ",\"resident_grid_fallbacks\":"
               << runtime_after.resident_grid_fallbacks -
                      runtime_before.resident_grid_fallbacks
+              << ",\"batched_expert_ffn_calls\":"
+              << runtime_after.batched_expert_ffn_calls -
+                     runtime_before.batched_expert_ffn_calls
+              << ",\"batched_expert_ffn_tokens\":"
+              << runtime_after.batched_expert_ffn_tokens -
+                     runtime_before.batched_expert_ffn_tokens
               << ",\"peak_vram_bytes\":"
               << backend.memory_stats().peak_device_bytes << "}\n";
     return 0;

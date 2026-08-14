@@ -2270,7 +2270,8 @@ public:
         if (options_.kind != BackendKind::cuda_custom ||
             options_.cuda_boundary != CudaBoundaryMode::ffn_block ||
             options_.cuda_allocation != CudaAllocationMode::reused ||
-            options_.cuda_weights != CudaWeightMode::transient ||
+            (options_.cuda_weights != CudaWeightMode::transient &&
+             options_.cuda_weights != CudaWeightMode::resident) ||
             options_.cuda_transfer != CudaTransferMode::synchronous ||
             options_.cuda_moe_fusion != CudaMoeFusionMode::none ||
             batch_size == 0 || batch_size > 65535 ||
@@ -2302,10 +2303,40 @@ public:
         const auto maximum_scale_bytes = std::max({
             expert.gate.scales.size_bytes(), expert.up.scales.size_bytes(),
             expert.down.scales.size_bytes()});
-        const auto total_weight_transfer =
-            expert.gate.packed.size_bytes() + expert.gate.scales.size_bytes() +
-            expert.up.packed.size_bytes() + expert.up.scales.size_bytes() +
-            expert.down.packed.size_bytes() + expert.down.scales.size_bytes();
+        struct WeightMember {
+            Mxfp4WeightView view;
+            const std::uint8_t* packed{};
+            const std::uint8_t* scales{};
+            std::uint64_t transfer_bytes{};
+        };
+        std::array<WeightMember, 3> members{{
+            {expert.gate}, {expert.up}, {expert.down}}};
+        std::uint64_t total_weight_transfer = 0;
+        for (auto& member : members) {
+            member.transfer_bytes = member.view.packed.size_bytes() +
+                                    member.view.scales.size_bytes();
+            if (options_.cuda_weights == CudaWeightMode::resident &&
+                resident_weights_) {
+                const auto acquisition = resident_weights_->acquire(
+                    {member.view.tensor_id, cuda::WeightRepresentation::mxfp4,
+                     member.view.rows, member.view.cols,
+                     member.view.group_size},
+                    member.view.packed, member.view.scales);
+                if (!acquisition) {
+                    return Result<std::vector<std::vector<float>>>::failure(
+                        acquisition.error(), acquisition.message());
+                }
+                if (acquisition.value().disposition !=
+                    cuda::ResidentDisposition::bypass) {
+                    member.packed = static_cast<const std::uint8_t*>(
+                        acquisition.value().primary);
+                    member.scales = static_cast<const std::uint8_t*>(
+                        acquisition.value().secondary);
+                    member.transfer_bytes = acquisition.value().uploaded_bytes;
+                }
+            }
+            total_weight_transfer += member.transfer_bytes;
+        }
 
         std::array<EventOwner, 8> events;
         for (auto& event : events) {
@@ -2344,28 +2375,37 @@ public:
                 "CUDA batched expert activation upload failed");
         }
 
-        const auto launch_weight = [&](Mxfp4WeightView weight,
+        const auto launch_weight = [&](std::size_t member_index,
                                        const float* input, float* output,
                                        EventOwner& start, EventOwner& end) {
-            if (cudaMemcpyAsync(device_packed, weight.packed.data(),
-                                weight.packed.size_bytes(),
-                                cudaMemcpyHostToDevice, stream_) != cudaSuccess ||
-                cudaMemcpyAsync(device_scales, weight.scales.data(),
-                                weight.scales.size_bytes(),
-                                cudaMemcpyHostToDevice, stream_) != cudaSuccess ||
-                cudaEventRecord(start.get(), stream_) != cudaSuccess) {
+            auto& member = members[member_index];
+            if (member.packed == nullptr) {
+                if (cudaMemcpyAsync(device_packed, member.view.packed.data(),
+                                    member.view.packed.size_bytes(),
+                                    cudaMemcpyHostToDevice, stream_) !=
+                        cudaSuccess ||
+                    cudaMemcpyAsync(device_scales, member.view.scales.data(),
+                                    member.view.scales.size_bytes(),
+                                    cudaMemcpyHostToDevice, stream_) !=
+                        cudaSuccess) {
+                    return false;
+                }
+                member.packed = device_packed;
+                member.scales = device_scales;
+            }
+            if (cudaEventRecord(start.get(), stream_) != cudaSuccess) {
                 return false;
             }
             return cuda::launch_mxfp4_matvec_batch(
-                       input, device_packed, device_scales, output,
-                       weight.rows, weight.cols, batch_size, stream_) ==
-                       cudaSuccess &&
+                       input, member.packed, member.scales, output,
+                       member.view.rows, member.view.cols, batch_size,
+                       stream_) == cudaSuccess &&
                    cudaEventRecord(end.get(), stream_) == cudaSuccess;
         };
 
-        if (!launch_weight(expert.gate, device_input, device_gate,
+        if (!launch_weight(0, device_input, device_gate,
                            events[0], events[1]) ||
-            !launch_weight(expert.up, device_input, device_up,
+            !launch_weight(1, device_input, device_up,
                            events[2], events[3])) {
             return Result<std::vector<std::vector<float>>>::failure(
                 ErrorCode::backend_unavailable,
@@ -2381,7 +2421,7 @@ public:
                 ErrorCode::backend_unavailable,
                 "CUDA batched expert SiTU failed");
         }
-        if (!launch_weight(expert.down, device_activation, device_output,
+        if (!launch_weight(2, device_activation, device_output,
                            events[6], events[7])) {
             return Result<std::vector<std::vector<float>>>::failure(
                 ErrorCode::backend_unavailable,
@@ -2421,6 +2461,7 @@ public:
         ++runtime_stats_.stream_synchronization_count;
         runtime_stats_.activation_h2d_bytes += input_bytes;
         runtime_stats_.weight_h2d_bytes += total_weight_transfer;
+        runtime_stats_.device_to_host_bytes += output_bytes;
         ++runtime_stats_.ffn_block_calls;
         ++runtime_stats_.ffn_block_experts;
         ++runtime_stats_.batched_expert_ffn_calls;

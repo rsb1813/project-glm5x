@@ -262,6 +262,8 @@ int test_exact_mxfp4_token_batch() {
                 before.batched_expert_ffn_calls != 1 ||
         after.batched_expert_ffn_tokens -
                 before.batched_expert_ffn_tokens != 2 ||
+        after.device_to_host_bytes - before.device_to_host_bytes !=
+            2 * sizeof(float) ||
         after_profile.device_to_host_bytes -
                 before_profile.device_to_host_bytes != 2 * sizeof(float)) {
         return 93;
@@ -283,6 +285,64 @@ int test_exact_mxfp4_token_batch() {
             before_invalid.batched_expert_ffn_calls ||
         profiler.events().size() != before_invalid_events) {
         return 94;
+    }
+    return 0;
+}
+
+int test_exact_mxfp4_token_batch_resident() {
+    const Mxfp4Fixture fixture;
+    const auto expert = fixture.views()[0];
+    auto second_input = fixture.input;
+    second_input[1] = -4.0F;
+    std::array<float, 64> inputs{};
+    std::copy(fixture.input.begin(), fixture.input.end(), inputs.begin());
+    std::copy(second_input.begin(), second_input.end(), inputs.begin() + 32);
+
+    auto cpu = k3x::make_cpu_backend();
+    const auto expected = cpu->mxfp4_situ_mlp_batch(
+        inputs, 2, expert, 2.0F, 1.5F, 10,
+        k3x::ProfilePhase::decode);
+    if (!expected) return 95;
+
+    k3x::BackendOptions options;
+    options.kind = k3x::BackendKind::cuda_custom;
+    options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
+    options.cuda_allocation = k3x::CudaAllocationMode::reused;
+    options.cuda_weights = k3x::CudaWeightMode::resident;
+    options.cuda_resident_bytes = 2048;
+    k3x::Profiler profiler;
+    auto backend = k3x::make_cuda_backend(options, &profiler);
+    if (!backend) return 96;
+
+    const auto before = backend.value()->runtime_stats();
+    const auto first = backend.value()->mxfp4_situ_mlp_batch(
+        inputs, 2, expert, 2.0F, 1.5F, 10,
+        k3x::ProfilePhase::decode);
+    if (!first || first.value().size() != 2 ||
+        !nearly_equal(first.value()[0], expected.value()[0], 1.0e-6F) ||
+        !nearly_equal(first.value()[1], expected.value()[1], 1.0e-6F)) {
+        return 97;
+    }
+    const auto after_first = backend.value()->runtime_stats();
+    const auto second = backend.value()->mxfp4_situ_mlp_batch(
+        inputs, 2, expert, 2.0F, 1.5F, 10,
+        k3x::ProfilePhase::decode);
+    if (!second || second.value().size() != 2 ||
+        !nearly_equal(second.value()[0], expected.value()[0], 1.0e-6F) ||
+        !nearly_equal(second.value()[1], expected.value()[1], 1.0e-6F)) {
+        return 98;
+    }
+    const auto after_second = backend.value()->runtime_stats();
+    constexpr std::uint64_t expert_weight_bytes = 512 + 32 + 512 + 32 + 16 + 1;
+    if (after_first.weight_h2d_bytes - before.weight_h2d_bytes !=
+            expert_weight_bytes ||
+        after_second.weight_h2d_bytes != after_first.weight_h2d_bytes ||
+        after_second.weight_cache_hits - after_first.weight_cache_hits != 3 ||
+        after_second.batched_expert_ffn_calls -
+                after_first.batched_expert_ffn_calls != 1 ||
+        after_second.batched_expert_ffn_tokens -
+                after_first.batched_expert_ffn_tokens != 2) {
+        return 99;
     }
     return 0;
 }
@@ -523,6 +583,9 @@ int main() {
     if (const auto result = test_bf16()) return result;
     if (const auto result = test_validation()) return result;
     if (const auto result = test_exact_mxfp4_token_batch()) return result;
+    if (const auto result = test_exact_mxfp4_token_batch_resident()) {
+        return result;
+    }
     if (const auto result = test_exact_mxfp4_group()) return result;
     if (const auto result = test_exact_mxfp4_group_rejects_non_native_group_size()) {
         return result;

@@ -45,3 +45,29 @@ def test_glm52_shaped_expert_bench_contract() -> None:
     assert payload["latency_nanoseconds_median"] > 0
     assert payload["peak_vram_bytes"] > 0
 
+
+def test_glm52_expert_batch_mode_contract() -> None:
+    result = subprocess.run(
+        [
+            str(_runner()),
+            "--mode",
+            "expert-batch",
+            "--experts",
+            "1",
+            "--tokens",
+            "2",
+            "--warmup",
+            "0",
+            "--iterations",
+            "1",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "expert-batch"
+    assert payload["batched_expert_ffn_calls"] == 1
+    assert payload["batched_expert_ffn_tokens"] == 2
+    assert payload["weight_h2d_bytes"] == 0
+    assert payload["maximum_absolute_error"] <= 1.0e-5
