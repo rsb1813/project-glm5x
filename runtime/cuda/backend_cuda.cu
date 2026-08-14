@@ -1178,7 +1178,6 @@ public:
         }
 
         std::vector<__nv_bfloat16> bf16_input;
-        std::array<std::vector<__nv_bfloat16>, 3> bf16_weights;
         const void* host_input = input.data();
         std::size_t input_bytes = input.size_bytes();
         const auto input_type =
@@ -1211,13 +1210,14 @@ public:
             member.host = member.view.values.data();
             member.bytes = member.view.values.size_bytes();
             if (options_.dense_precision == DensePrecision::bf16_rounded) {
-                auto& converted = bf16_weights[index];
-                converted.reserve(member.view.values.size());
-                for (const auto value : member.view.values) {
-                    converted.push_back(__float2bfloat16_rn(value));
+                const auto* converted = rounded_dense_bf16_host(member.view);
+                if (converted == nullptr) {
+                    return Result<std::vector<float>>::failure(
+                        ErrorCode::backend_unavailable,
+                        "CUDA BF16 host weight conversion failed");
                 }
-                member.host = converted.data();
-                member.bytes = converted.size() * sizeof(__nv_bfloat16);
+                member.host = converted->data();
+                member.bytes = converted->size() * sizeof(__nv_bfloat16);
             }
             member.transfer_bytes = member.bytes;
             maximum_weight_bytes = std::max(maximum_weight_bytes, member.bytes);
@@ -3780,6 +3780,14 @@ private:
         std::vector<__nv_bfloat16> values;
     };
 
+    struct RoundedDenseBf16Host {
+        const float* source_data{};
+        std::size_t source_bytes{};
+        std::size_t rows{};
+        std::size_t cols{};
+        std::vector<__nv_bfloat16> values;
+    };
+
     using DensePlanKey =
         std::tuple<std::size_t, std::size_t, int, int>;
     using DenseBatchPlanKey =
@@ -3968,6 +3976,31 @@ private:
         return &entry.values;
     }
 
+    const std::vector<__nv_bfloat16>* rounded_dense_bf16_host(
+        DenseWeightView view) {
+        auto& entry = rounded_dense_bf16_hosts_[view.tensor_id];
+        if (entry.source_data == view.values.data() &&
+            entry.source_bytes == view.values.size_bytes() &&
+            entry.rows == view.rows && entry.cols == view.cols &&
+            entry.values.size() == view.values.size()) {
+            return &entry.values;
+        }
+        if (view.rows == 0 || view.cols == 0 ||
+            view.rows > std::numeric_limits<std::size_t>::max() / view.cols ||
+            view.values.size() != view.rows * view.cols) {
+            return nullptr;
+        }
+        entry.source_data = view.values.data();
+        entry.source_bytes = view.values.size_bytes();
+        entry.rows = view.rows;
+        entry.cols = view.cols;
+        entry.values.resize(view.values.size());
+        for (std::size_t index = 0; index < view.values.size(); ++index) {
+            entry.values[index] = __float2bfloat16_rn(view.values[index]);
+        }
+        return &entry.values;
+    }
+
     NumericPrecision numeric_precision() const noexcept {
         return options_.dense_precision == DensePrecision::fp32
                    ? NumericPrecision::fp32
@@ -4069,6 +4102,8 @@ private:
         dense_batch_plans_;
     std::unordered_map<std::uint64_t, DequantizedMxfp4Host>
         dequantized_mxfp4_hosts_;
+    std::unordered_map<std::uint64_t, RoundedDenseBf16Host>
+        rounded_dense_bf16_hosts_;
     std::unique_ptr<cuda::ResidentWeightTable> resident_weights_;
     std::unique_ptr<cuda::AsyncMxfp4Pipeline> async_pipeline_;
     std::optional<PreparedMxfp4Metadata> prepared_mxfp4_;

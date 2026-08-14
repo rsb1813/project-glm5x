@@ -160,3 +160,11 @@
 - Evidence: layer 10 expert 0 on RTX 5080/WSL measured 275,473 ns warm median in FP32 resident mode with 150,994,944-byte resident weights and CPU max absolute error `8.38190317154e-09`. BF16-rounded used 75,497,472 resident bytes but measured 28,154,650 ns warm median and 0.1828% maximum relative CPU difference.
 - Accepted because: FP32 provides a numerically tight, independently verifiable execution reference while the current BF16 plan is materially slower. The resident memory cost is bounded for one expert and can be revisited after a direct BF16/tensor-core path.
 - Revisit: after direct BF16 storage views, pinned H2D, tensor-core cublasLt algorithm selection, and multi-expert resident pressure are benchmarked with nonzero real shards.
+
+## D-0021 -- Cache repeated BF16 host conversion by tensor identity
+
+- Decision: cache the FP32-to-BF16 host conversion used by `dense_situ_mlp` using tensor ID, source pointer/byte size, and matrix shape. Keep activation conversion per call because activations are mutable.
+- Alternatives: leave conversion inside every call, require callers to pre-convert weights, or add a raw-BF16 `DenseWeightView` API before measuring the current bottleneck.
+- Evidence: the real layer 10 expert BF16-rounded path fell from 28,154,650 ns to 236,593 ns warm median after caching, while resident bytes stayed 75,497,472 and GPU-vs-CPU relative error stayed 0.1828%. FP32 rerun was 271,493 ns.
+- Accepted because: this removes a measured host-side cost without changing CUDA math or model weights. The cache invalidates when pointer, byte size, or shape changes.
+- Revisit: when direct raw-BF16/tensor-core views can remove the remaining host decode and resident representation tradeoff.

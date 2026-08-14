@@ -56,6 +56,16 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
 - Interpretation: this lower-memory path is materially slower in the current plan and remains experimental. It is not a model quality result.
 
+## 2026-08-14 -- Cached BF16 host conversion rerun
+
+- Commit: working tree after `4c4b444`; code change pending commit.
+- Hardware/model/shape: same RTX 5080 WSL and real layer 10 expert 0 as the preceding records.
+- Mode: resident `bf16-rounded` dense SiTU path with tensor-identity keyed host BF16 conversion cache, 5 warmups, and 20 measured iterations.
+- Result: warm latency median 236,593 ns; cold latency 197,436,559 ns; host payload load 486,771,614 ns; cold weight H2D 75,497,472 bytes; warm weight H2D 0; resident weight bytes 75,497,472; GPU-vs-CPU maximum relative error 0.00182774465 (0.1828%).
+- FP32 comparison rerun: 271,493 ns warm median, 150,994,944 resident bytes, and maximum absolute error `8.38190317154e-09`.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
+- Interpretation: caching removed the repeated 75 MiB host conversion and made the bounded BF16 path faster than FP32 at half resident weight bytes. It remains experimental pending full-layer/model quality.
+
 ## 2026-08-14 -- Raw-BF16 expert directory C++ reader gate
 
 - Commit: working tree after `1b22bcb`; code change pending commit.

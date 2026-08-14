@@ -121,5 +121,11 @@
 
 - Added `k3x_cuda_glm5x_real_expert_bench`. It loads layer 10 expert 0 across the two real probe artifacts, decodes BF16 bytes to host floats, and executes the existing resident CUDA dense SiTU FFN against a deterministic nonzero input.
 - FP32 resident run with 5 warm samples measured `latency_nanoseconds_median=457802` in the first smoke; the 20-sample rerun measured `275473` ns. Cold weight H2D was 150,994,944 bytes, warm H2D was 0, resident bytes were 150,994,944, and GPU-vs-CPU maximum absolute error was `8.38190317154e-09`.
-- `bf16-rounded` resident run reduced weight H2D/residency to 75,497,472 bytes but measured 28,154,650 ns warm median and 0.1828% maximum relative CPU difference. This is not an accepted default; it indicates the current cublasLt BF16 plan/transfer path needs a direct packed-BF16 optimization.
+- Pre-cache `bf16-rounded` resident run reduced weight H2D/residency to 75,497,472 bytes but measured 28,154,650 ns warm median and 0.1828% maximum relative CPU difference. This historical sample exposed the repeated host conversion bottleneck.
 - Neither run is a full GLM layer or token-generation benchmark. Router, DSA/MLA, dense trunk, residuals, and other experts remain outside the measurement.
+
+## 2026-08-14 BF16 host-conversion cache rerun
+
+- The first BF16-rounded real-expert run spent most of its 28.15 ms warm median reconverting 75 MiB of FP32 views to BF16 on every call. Added a tensor-identity/shape/pointer keyed host BF16 cache in the CUDA backend; input conversion remains per call because activations can change.
+- Rerun with 5 warmups and 20 samples measured BF16-rounded warm median 236,593 ns, cold latency 197,436,559 ns, cold H2D 75,497,472 bytes, warm H2D 0, and resident bytes 75,497,472. CPU relative difference remained 0.00182774465 (0.1828%).
+- FP32 rerun measured 271,493 ns warm median, 150,994,944 resident bytes, and `8.38190317154e-09` maximum absolute CPU difference. The cached BF16 path is now the faster bounded candidate, but remains experimental until full-layer/model quality is measured.
