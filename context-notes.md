@@ -462,3 +462,8 @@
 - Added `expert_precision="fp8"` through the layer/model reference and `--expert-precision fp8` to the benchmark CLI. It quantizes each expert projection row to E4M3 with a float scale and uses CUDA `torch._scaled_mm`; exact BF16 remains the default.
 - The real layer-10 probe showed identical route IDs but `5.603%` output relative L2 drift. Host-quantized FP8 was `2.901 s` cold and `5.713 ms` warm versus exact `2.752 s` and `4.731 ms`, so it is not a speed promotion yet.
 - The next useful step is a persistent packed FP8/MXFP4 sidecar so H2D savings are measured without quantizing after the raw BF16 transfer. Do not infer full-model TPS from this sublayer result.
+
+## 2026-08-15 -- Grouped exact expert payload reads
+
+- All three role refs for a complete expert are co-located in one shard in the real probe bundle. `GLM5XExpertBundle.read_expert()` now groups them and calls `read_tensor_extents_many()` once, preserving per-record CRC validation.
+- Focused bundle/reader/layer/model tests passed `20` with `4` capability skips. The real one-token layer-10 cold sample improved to `2.184 s` with four readers; one reader measured `4.979 s`. This is a bounded I/O result, not full-model TPS.

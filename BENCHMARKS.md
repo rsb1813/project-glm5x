@@ -751,3 +751,11 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Timing: exact `2.751867 s` cold and `4.731 ms` warm; FP8 `2.901232 s` cold and `5.713 ms` warm. The current experimental path is slower in this bounded sample because quantization and scaled GEMM overhead exceed the saved device bytes; no on-disk packed FP8 artifact was used.
 - Correctness/quality: Top-K route IDs were identical; output relative L2 drift was `5.603%`, maximum absolute difference `0.265625`. Focused layer/model/reference tests passed `14/14`.
 - Interpretation: retain the switch as default-off research. A persistent packed artifact, mixed-precision residuals, and a full-model quality/traffic gate are required before considering FP8 for BALANCED or QUALITY modes. No end-to-end tok/s was measured.
+
+## 2026-08-15 -- Grouped exact expert-role reads
+
+- Date: 2026-08-15.
+- Hardware/model: RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.0, official GLM-5.2 five-shard layer-10 probe, exact raw-BF16 roles.
+- Change: one expert's three role extents are read from one artifact open lifetime, with the existing lazy CRC checks applied to every record.
+- Timing: one-token layer-10 cold sample with four readers measured `2.183734 s`; the same grouped path with one reader measured `4.978850 s`. An earlier pre-group four-reader sample was `2.751867 s`; the bounded comparison is approximately `20.6%` lower, but filesystem cache and worker overlap are not controlled across separate processes.
+- Correctness: selected expert count and output route remained unchanged; focused bundle/reader/layer/model tests passed `20` cases with `4` capability skips. No full-model tok/s or quality score was measured.

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -209,6 +209,7 @@ class GLM5XExpertBundle:
             if cached is not None:
                 return cached
         result: dict[str, bytes] = {}
+        grouped: dict[str, list[tuple[str, TensorRecord]]] = defaultdict(list)
         for role in _ROLES:
             item = roles[role]
             ref = item.get("ref")
@@ -238,10 +239,16 @@ class GLM5XExpertBundle:
                 or record.auxiliary_length != 0
             ):
                 raise K3XError("EXPERT_BUNDLE_UNSUPPORTED_PAYLOAD", role)
-            data, auxiliary = reader.read_tensor_extents(record)
-            if auxiliary:
-                raise K3XError("EXPERT_BUNDLE_AUXILIARY_PAYLOAD", role)
-            result[role] = data
+            grouped[artifact_key].append((role, record))
+
+        for artifact_key, items in grouped.items():
+            reader = self.readers[artifact_key]
+            payloads = reader.read_tensor_extents_many([record for _, record in items])
+            for role, record in items:
+                data, auxiliary = payloads[record.tensor_id]
+                if auxiliary:
+                    raise K3XError("EXPERT_BUNDLE_AUXILIARY_PAYLOAD", role)
+                result[role] = data
         if self.payload_cache is not None:
             self.payload_cache.put((layer_id, expert_id), result)
         return result

@@ -5,6 +5,7 @@ import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
+from typing import Sequence
 
 import google_crc32c
 
@@ -126,3 +127,44 @@ class K3XReader:
                         raise K3XError("AUXILIARY_CRC_MISMATCH")
                     self._verified_tensor_ids.add(record.tensor_id)
         return data, auxiliary
+
+    def read_tensor_extents_many(
+        self, records: Sequence[TensorRecord]
+    ) -> dict[int, tuple[bytes, bytes]]:
+        """Read multiple records from one artifact with one file-open lifetime."""
+        if not records:
+            return {}
+        if len({record.tensor_id for record in records}) != len(records):
+            raise K3XError("DUPLICATE_TENSOR_ID")
+        values: dict[int, tuple[bytes, bytes]] = {}
+        with self.path.open("rb") as stream:
+            for record in records:
+                data = _read_exact(
+                    stream,
+                    record.data_offset,
+                    record.data_length,
+                    self.superblock.file_length,
+                )
+                auxiliary = (
+                    _read_exact(
+                        stream,
+                        record.auxiliary_offset,
+                        record.auxiliary_length,
+                        self.superblock.file_length,
+                    )
+                    if record.auxiliary_length
+                    else b""
+                )
+                values[record.tensor_id] = (data, auxiliary)
+        if not self.payloads_verified:
+            with self._validation_lock:
+                for record in records:
+                    if record.tensor_id in self._verified_tensor_ids:
+                        continue
+                    data, auxiliary = values[record.tensor_id]
+                    if google_crc32c.value(data) != record.data_crc32c:
+                        raise K3XError("DATA_CRC_MISMATCH")
+                    if auxiliary and google_crc32c.value(auxiliary) != record.auxiliary_crc32c:
+                        raise K3XError("AUXILIARY_CRC_MISMATCH")
+                    self._verified_tensor_ids.add(record.tensor_id)
+        return values

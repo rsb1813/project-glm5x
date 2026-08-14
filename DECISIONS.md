@@ -529,3 +529,11 @@
 - Evidence: the focused layer/model/reference suite passed `14/14`. On the real five-shard layer-10 RTX 5080 probe with one token, host-quantized FP8 measured `2.901 s` cold versus exact `2.752 s`, and `5.713 ms` warm versus exact `4.731 ms`; route IDs were identical but output relative L2 drift was `5.603%`. The path currently quantizes before device staging but has no packed on-disk FP8 artifact yet.
 - Accepted because: it creates a reproducible Blackwell FP8 experiment without weakening exact mode or silently changing quality. The measured bounded result does not justify default promotion.
 - Revisit: after a persistent packed FP8/MXFP4 artifact and full-model quality/traffic gate exist. Promote only if measured H2D/NVMe savings outweigh dequantization and the coding-quality suite accepts the divergence.
+
+## D-0067 -- Read all roles of one exact expert under one artifact open
+
+- Decision: group `gate_proj`, `up_proj`, and `down_proj` references by K3X artifact and read them through one `K3XReader.read_tensor_extents_many()` call. Keep the strict per-record metadata and CRC validation contract.
+- Alternatives: keep one file open per role, mmap every full artifact, or use a process-wide descriptor pool before full-model I/O is measured.
+- Evidence: the real five-shard layer-10 bundle places all three roles of every complete expert in the same shard. Focused bundle/reader/layer/model tests passed `20` cases (`4` capability skips). With four exact payload readers, the one-token real layer-10 cold sample fell from the earlier `2.752 s` baseline to `2.184 s`; one worker measured `4.979 s`, so parallel reads remain the larger knob. No output or route difference was observed.
+- Accepted because: it is format-compatible, preserves exact bytes and validation, and reduces per-expert file-open overhead without changing cache policy or routing.
+- Revisit: after the full 78-layer gate records NVMe GB/token, open/read latency, and I/O queue pressure. Replace with mmap or descriptor reuse only if the measured filesystem overhead remains material.
