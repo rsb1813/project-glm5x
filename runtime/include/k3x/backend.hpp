@@ -18,6 +18,7 @@ enum class BackendKind { cpu, cuda_dense, cuda_custom };
 enum class DensePrecision { fp32, bf16_rounded };
 enum class CudaAllocationMode { per_operation, reused };
 enum class CudaWeightMode { transient, resident };
+enum class CudaMxfp4Execution { native, dequantized_bf16 };
 enum class CudaBatchingMode { scalar, grouped, resident_grid };
 enum class CudaBoundaryMode { operation, ffn_block, moe_layer };
 enum class CudaTransferMode { synchronous, prefetch };
@@ -29,6 +30,7 @@ struct BackendOptions {
     DensePrecision dense_precision{DensePrecision::fp32};
     CudaAllocationMode cuda_allocation{CudaAllocationMode::per_operation};
     CudaWeightMode cuda_weights{CudaWeightMode::transient};
+    CudaMxfp4Execution cuda_mxfp4_execution{CudaMxfp4Execution::native};
     CudaBatchingMode cuda_batching{CudaBatchingMode::scalar};
     CudaBoundaryMode cuda_boundary{CudaBoundaryMode::operation};
     CudaTransferMode cuda_transfer{CudaTransferMode::synchronous};

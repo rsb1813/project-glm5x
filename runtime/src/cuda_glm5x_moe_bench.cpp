@@ -28,6 +28,7 @@ struct Arguments {
     std::size_t warmup{};
     std::size_t iterations{1};
     std::string mode{"grid"};
+    std::string execution{"native"};
 };
 
 struct ExpertStorage {
@@ -62,6 +63,10 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             arguments.mode = argv[index + 1];
             continue;
         }
+        if (key == "--execution") {
+            arguments.execution = argv[index + 1];
+            continue;
+        }
         const auto value = parse_size(argv[index + 1]);
         if (!value) {
             std::cerr << "invalid option value\n";
@@ -92,6 +97,11 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
     }
     if (arguments.mode != "grid" && arguments.mode != "expert-batch") {
         std::cerr << "mode must be grid or expert-batch\n";
+        return std::nullopt;
+    }
+    if (arguments.execution != "native" &&
+        arguments.execution != "dequantized-bf16") {
+        std::cerr << "execution must be native or dequantized-bf16\n";
         return std::nullopt;
     }
     if (arguments.iterations == 0) {
@@ -194,6 +204,10 @@ int main(int argc, char** argv) {
     options.cuda_transfer = k3x::CudaTransferMode::synchronous;
     options.cuda_moe_fusion = k3x::CudaMoeFusionMode::none;
     options.cuda_weight_validation = k3x::CudaWeightValidationMode::admission;
+    options.cuda_mxfp4_execution =
+        arguments->execution == "dequantized-bf16"
+            ? k3x::CudaMxfp4Execution::dequantized_bf16
+            : k3x::CudaMxfp4Execution::native;
     options.cuda_resident_bytes = kResidentCapacity;
 
     k3x::Profiler profiler;
@@ -272,6 +286,7 @@ int main(int argc, char** argv) {
               << ",\"model_family\":\"glm5\""
               << ",\"routing_semantics\":false"
               << ",\"mode\":\"" << arguments->mode << "\""
+              << ",\"execution\":\"" << arguments->execution << "\""
               << ",\"hidden_size\":" << kHiddenSize
               << ",\"expert_intermediate_size\":" << kIntermediateSize
               << ",\"group_size\":" << kGroupSize

@@ -347,6 +347,133 @@ int test_exact_mxfp4_token_batch_resident() {
     return 0;
 }
 
+int test_dequantized_bf16_token_batch_resident() {
+    const Mxfp4Fixture fixture;
+    const auto expert = fixture.views()[0];
+    auto second_input = fixture.input;
+    second_input[1] = -4.0F;
+    std::array<float, 64> inputs{};
+    std::copy(fixture.input.begin(), fixture.input.end(), inputs.begin());
+    std::copy(second_input.begin(), second_input.end(), inputs.begin() + 32);
+
+    auto cpu = k3x::make_cpu_backend();
+    const auto expected = cpu->mxfp4_situ_mlp_batch(
+        inputs, 2, expert, 2.0F, 1.5F, 10,
+        k3x::ProfilePhase::decode);
+    if (!expected) return 100;
+
+    k3x::BackendOptions options;
+    options.kind = k3x::BackendKind::cuda_custom;
+    options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
+    options.cuda_allocation = k3x::CudaAllocationMode::reused;
+    options.cuda_weights = k3x::CudaWeightMode::resident;
+    options.cuda_mxfp4_execution =
+        k3x::CudaMxfp4Execution::dequantized_bf16;
+    options.cuda_resident_bytes = 8192;
+    auto backend = k3x::make_cuda_backend(options);
+    if (!backend) return 101;
+
+    const auto before = backend.value()->runtime_stats();
+    const auto first = backend.value()->mxfp4_situ_mlp_batch(
+        inputs, 2, expert, 2.0F, 1.5F, 10,
+        k3x::ProfilePhase::decode);
+    if (!first || first.value().size() != 2 ||
+        !nearly_equal(first.value()[0], expected.value()[0], 1.0e-5F) ||
+        !nearly_equal(first.value()[1], expected.value()[1], 1.0e-5F)) {
+        return 102;
+    }
+    const auto after_first = backend.value()->runtime_stats();
+    const auto second = backend.value()->mxfp4_situ_mlp_batch(
+        inputs, 2, expert, 2.0F, 1.5F, 10,
+        k3x::ProfilePhase::decode);
+    if (!second || second.value().size() != 2 ||
+        !nearly_equal(second.value()[0], expected.value()[0], 1.0e-5F) ||
+        !nearly_equal(second.value()[1], expected.value()[1], 1.0e-5F)) {
+        return 103;
+    }
+    const auto after_second = backend.value()->runtime_stats();
+    constexpr std::uint64_t bf16_weight_bytes =
+        32ULL * 32ULL * 2ULL + 32ULL * 32ULL * 2ULL + 1ULL * 32ULL * 2ULL;
+    if (after_first.weight_h2d_bytes - before.weight_h2d_bytes !=
+            bf16_weight_bytes ||
+        after_second.weight_h2d_bytes != after_first.weight_h2d_bytes ||
+        after_second.weight_cache_hits - after_first.weight_cache_hits != 3 ||
+        after_first.resident_weight_bytes != bf16_weight_bytes ||
+        after_second.batched_expert_ffn_calls -
+                after_first.batched_expert_ffn_calls != 1) {
+        return 104;
+    }
+    return 0;
+}
+
+int test_dequantized_bf16_grid_resident() {
+    const Mxfp4Fixture fixture;
+    const auto experts = fixture.views();
+    auto second_input = fixture.input;
+    second_input[1] = -4.0F;
+    std::array<float, 64> inputs{};
+    std::copy(fixture.input.begin(), fixture.input.end(), inputs.begin());
+    std::copy(second_input.begin(), second_input.end(), inputs.begin() + 32);
+
+    auto cpu = k3x::make_cpu_backend();
+    std::vector<std::vector<float>> expected(experts.size());
+    for (std::size_t token = 0; token < 2; ++token) {
+        const auto result = cpu->mxfp4_situ_mlp_group(
+            std::span<const float>(inputs).subspan(token * 32, 32), experts,
+            2.0F, 1.5F, 10, k3x::ProfilePhase::decode);
+        if (!result) return 105;
+        for (std::size_t expert = 0; expert < experts.size(); ++expert) {
+            expected[expert].insert(expected[expert].end(),
+                                    result.value()[expert].begin(),
+                                    result.value()[expert].end());
+        }
+    }
+
+    k3x::BackendOptions options;
+    options.kind = k3x::BackendKind::cuda_custom;
+    options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
+    options.cuda_allocation = k3x::CudaAllocationMode::reused;
+    options.cuda_weights = k3x::CudaWeightMode::resident;
+    options.cuda_mxfp4_execution =
+        k3x::CudaMxfp4Execution::dequantized_bf16;
+    options.cuda_batching = k3x::CudaBatchingMode::resident_grid;
+    options.cuda_resident_bytes = 16384;
+    auto backend = k3x::make_cuda_backend(options);
+    if (!backend) return 106;
+    const auto before = backend.value()->runtime_stats();
+    const auto first = backend.value()->mxfp4_situ_mlp_grid(
+        inputs, 2, experts, 2.0F, 1.5F, 10,
+        k3x::ProfilePhase::decode);
+    if (!first || first.value().size() != experts.size() ||
+        !nearly_equal(first.value()[0], expected[0], 1.0e-5F) ||
+        !nearly_equal(first.value()[1], expected[1], 1.0e-5F)) {
+        return 107;
+    }
+    const auto after_first = backend.value()->runtime_stats();
+    const auto second = backend.value()->mxfp4_situ_mlp_grid(
+        inputs, 2, experts, 2.0F, 1.5F, 10,
+        k3x::ProfilePhase::decode);
+    if (!second || !nearly_equal(second.value()[0], expected[0], 1.0e-5F) ||
+        !nearly_equal(second.value()[1], expected[1], 1.0e-5F)) {
+        return 108;
+    }
+    const auto after_second = backend.value()->runtime_stats();
+    constexpr std::uint64_t bf16_weight_bytes = 2ULL * 4160ULL;
+    if (after_first.weight_h2d_bytes - before.weight_h2d_bytes !=
+            bf16_weight_bytes ||
+        after_first.activation_h2d_bytes - before.activation_h2d_bytes !=
+            128 ||
+        after_first.device_to_host_bytes - before.device_to_host_bytes != 16 ||
+        after_second.weight_h2d_bytes != after_first.weight_h2d_bytes ||
+        after_second.weight_cache_hits - after_first.weight_cache_hits != 6 ||
+        after_first.resident_grid_calls != before.resident_grid_calls + 1 ||
+        after_first.resident_grid_kernel_launches !=
+            before.resident_grid_kernel_launches + 7) {
+        return 109;
+    }
+    return 0;
+}
+
 int test_exact_mxfp4_group() {
     const Mxfp4Fixture fixture;
     const auto experts = fixture.views();
@@ -584,6 +711,12 @@ int main() {
     if (const auto result = test_validation()) return result;
     if (const auto result = test_exact_mxfp4_token_batch()) return result;
     if (const auto result = test_exact_mxfp4_token_batch_resident()) {
+        return result;
+    }
+    if (const auto result = test_dequantized_bf16_token_batch_resident()) {
+        return result;
+    }
+    if (const auto result = test_dequantized_bf16_grid_resident()) {
         return result;
     }
     if (const auto result = test_exact_mxfp4_group()) return result;
