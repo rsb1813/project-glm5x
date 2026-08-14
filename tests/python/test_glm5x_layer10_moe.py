@@ -140,3 +140,50 @@ def test_glm5x_expert_major_matches_reference_loop() -> None:
     torch.testing.assert_close(grouped.topk_weights, reference.topk_weights)
     torch.testing.assert_close(grouped.output, reference.output, rtol=1e-5, atol=1e-5)
     assert grouped.loaded_experts == reference.loaded_experts
+
+
+def test_glm5x_batched_expert_loader_preserves_serial_output() -> None:
+    hidden = torch.tensor(
+        [[0.5, -1.0, 0.25], [1.0, 0.25, -0.75], [-0.25, 0.75, 0.5]],
+        dtype=torch.float32,
+    )
+    router_weight = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.5, 0.25]],
+        dtype=torch.float32,
+    )
+    correction_bias = torch.tensor([0.0, 0.1, -0.2, 0.05], dtype=torch.float32)
+    shared = _weights(0)
+    batch_calls: list[tuple[int, ...]] = []
+
+    serial = GLM5XLayer10MoEReference(
+        router_weight=router_weight,
+        correction_bias=correction_bias,
+        expert_loader=lambda expert_id: _weights(expert_id),
+        shared_expert=shared,
+        top_k=2,
+        routed_scaling_factor=2.5,
+    )
+
+    def load_batch(expert_ids: tuple[int, ...]):
+        batch_calls.append(expert_ids)
+        return {expert_id: _weights(expert_id) for expert_id in expert_ids}
+
+    batched = GLM5XLayer10MoEReference(
+        router_weight=router_weight,
+        correction_bias=correction_bias,
+        expert_loader=lambda expert_id: _weights(expert_id),
+        expert_batch_loader=load_batch,
+        expert_load_workers=4,
+        shared_expert=shared,
+        top_k=2,
+        routed_scaling_factor=2.5,
+    )
+
+    expected = serial(hidden)
+    actual = batched(hidden)
+
+    torch.testing.assert_close(actual.output, expected.output)
+    torch.testing.assert_close(actual.topk_indices, expected.topk_indices)
+    torch.testing.assert_close(actual.topk_weights, expected.topk_weights)
+    assert actual.loaded_experts == expected.loaded_experts
+    assert batch_calls == [tuple(sorted(set(expected.topk_indices.flatten().tolist())))]

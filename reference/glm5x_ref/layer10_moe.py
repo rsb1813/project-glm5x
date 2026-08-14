@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Callable, Mapping, Sequence
 
 import torch
 import torch.nn.functional as F
@@ -89,6 +90,7 @@ class GLM5XDenseMlpReference:
 
 
 ExpertLoader = Callable[[int], GLM5XExpertWeights]
+ExpertBatchLoader = Callable[[Sequence[int]], Mapping[int, GLM5XExpertWeights]]
 
 
 class GLM5XLayer10MoEReference:
@@ -108,6 +110,8 @@ class GLM5XLayer10MoEReference:
         norm_topk_prob: bool = True,
         cache_experts: bool = True,
         execution_mode: str = "loop",
+        expert_batch_loader: ExpertBatchLoader | None = None,
+        expert_load_workers: int = 1,
     ) -> None:
         router_weight = torch.as_tensor(router_weight)
         correction_bias = torch.as_tensor(correction_bias)
@@ -134,6 +138,14 @@ class GLM5XLayer10MoEReference:
             raise ValueError("GLM5X_INVALID_EXPERT_CACHE_FLAG")
         if execution_mode not in {"loop", "expert_major"}:
             raise ValueError("GLM5X_INVALID_EXECUTION_MODE")
+        if expert_batch_loader is not None and not callable(expert_batch_loader):
+            raise ValueError("GLM5X_INVALID_EXPERT_BATCH_LOADER")
+        if (
+            not isinstance(expert_load_workers, int)
+            or isinstance(expert_load_workers, bool)
+            or expert_load_workers <= 0
+        ):
+            raise ValueError("GLM5X_INVALID_EXPERT_LOAD_WORKERS")
         self.router_weight = router_weight
         self.correction_bias = correction_bias.to(torch.float32)
         self.expert_loader = expert_loader
@@ -145,6 +157,8 @@ class GLM5XLayer10MoEReference:
         self.norm_topk_prob = bool(norm_topk_prob)
         self.cache_experts = cache_experts
         self.execution_mode = execution_mode
+        self.expert_batch_loader = expert_batch_loader
+        self.expert_load_workers = expert_load_workers
         self._expert_cache: dict[int, GLM5XExpertWeights] = {}
 
     @property
@@ -166,6 +180,41 @@ class GLM5XLayer10MoEReference:
         if self.cache_experts:
             self._expert_cache[expert_id] = expert
         return expert, True
+
+    def _load_experts(
+        self, expert_ids: Sequence[int]
+    ) -> tuple[dict[int, GLM5XExpertWeights], tuple[int, ...]]:
+        experts: dict[int, GLM5XExpertWeights] = {}
+        pending: list[int] = []
+        for expert_id in expert_ids:
+            if self.cache_experts and expert_id in self._expert_cache:
+                experts[expert_id] = self._expert_cache[expert_id]
+            else:
+                pending.append(expert_id)
+
+        loaded: list[int] = []
+        if self.expert_batch_loader is None:
+            for expert_id in pending:
+                expert, did_load = self._load_expert(expert_id)
+                experts[expert_id] = expert
+                if did_load:
+                    loaded.append(expert_id)
+            return experts, tuple(loaded)
+
+        batch = self.expert_batch_loader(tuple(pending)) if pending else {}
+        if not isinstance(batch, Mapping) or set(batch) != set(pending):
+            raise ValueError("GLM5X_EXPERT_BATCH_LOADER_RESULT")
+        for expert_id in pending:
+            expert = batch[expert_id]
+            if not isinstance(expert, GLM5XExpertWeights):
+                raise ValueError("GLM5X_EXPERT_LOADER_RETURN_TYPE")
+            if expert.gate_proj.shape[1] != self.hidden_size:
+                raise ValueError("GLM5X_EXPERT_HIDDEN_SIZE_MISMATCH")
+            experts[expert_id] = expert
+            if self.cache_experts:
+                self._expert_cache[expert_id] = expert
+            loaded.append(expert_id)
+        return experts, tuple(loaded)
 
     @staticmethod
     def _mlp(hidden: torch.Tensor, expert: GLM5XExpertWeights) -> torch.Tensor:
@@ -215,12 +264,10 @@ class GLM5XLayer10MoEReference:
         topk_weights: torch.Tensor,
         output: torch.Tensor,
     ) -> tuple[int, ...]:
-        loaded: list[int] = []
-        for expert_id_tensor in torch.unique(topk_indices, sorted=True):
-            expert_id = int(expert_id_tensor)
-            expert, did_load = self._load_expert(expert_id)
-            if did_load:
-                loaded.append(expert_id)
+        expert_ids = [int(value) for value in torch.unique(topk_indices, sorted=True)]
+        experts, loaded = self._load_experts(expert_ids)
+        for expert_id in expert_ids:
+            expert = experts[expert_id]
             slot_mask = topk_indices == expert_id
             token_indices, slots = torch.where(slot_mask)
             routed = self._mlp(flat[token_indices], expert)
@@ -228,7 +275,7 @@ class GLM5XLayer10MoEReference:
                 routed.dtype
             ).unsqueeze(-1)
             output.index_add_(0, token_indices, weighted.to(output.dtype))
-        return tuple(loaded)
+        return loaded
 
     def _run_expert_major(
         self,
@@ -237,19 +284,17 @@ class GLM5XLayer10MoEReference:
         topk_weights: torch.Tensor,
         output: torch.Tensor,
     ) -> tuple[int, ...]:
+        expert_ids = [int(value) for value in torch.unique(topk_indices, sorted=True)]
+        experts, loaded = self._load_experts(expert_ids)
         assignments: list[tuple[int, GLM5XExpertWeights, torch.Tensor, torch.Tensor]] = []
-        loaded: list[int] = []
-        for expert_id_tensor in torch.unique(topk_indices, sorted=True):
-            expert_id = int(expert_id_tensor)
-            expert, did_load = self._load_expert(expert_id)
-            if did_load:
-                loaded.append(expert_id)
+        for expert_id in expert_ids:
+            expert = experts[expert_id]
             slot_mask = topk_indices == expert_id
             token_indices, slots = torch.where(slot_mask)
             assignments.append((expert_id, expert, token_indices, slots))
 
         if not assignments:
-            return tuple(loaded)
+            return loaded
 
         shapes = {
             (
@@ -304,7 +349,7 @@ class GLM5XLayer10MoEReference:
                 token_indices, slots
             ].to(routed.dtype).unsqueeze(-1)
             output.index_add_(0, token_indices, weighted.to(output.dtype))
-        return tuple(loaded)
+        return loaded
 
     def __call__(self, hidden_states: torch.Tensor) -> GLM5XMoEForward:
         hidden_states = torch.as_tensor(hidden_states)
@@ -342,6 +387,7 @@ class GLM5XLayer10MoEReference:
         expert_intermediate_size: int = 2048,
         hidden_size: int = 6144,
         execution_mode: str = "loop",
+        expert_load_workers: int = 1,
     ) -> "GLM5XLayer10MoEReference":
         bundle = GLM5XExpertBundle.open(bundle_path)
         return cls._from_open_bundle(
@@ -357,6 +403,7 @@ class GLM5XLayer10MoEReference:
             expert_intermediate_size=expert_intermediate_size,
             hidden_size=hidden_size,
             execution_mode=execution_mode,
+            expert_load_workers=expert_load_workers,
         )
 
     @classmethod
@@ -376,6 +423,7 @@ class GLM5XLayer10MoEReference:
         hidden_size: int = 6144,
         device: torch.device | str | None = None,
         execution_mode: str = "loop",
+        expert_load_workers: int = 1,
     ) -> "GLM5XLayer10MoEReference":
 
         prefix = f"model.layers.{layer_id}.mlp"
@@ -413,6 +461,32 @@ class GLM5XLayer10MoEReference:
                 device=target,
             )
 
+        def load_experts(expert_ids: Sequence[int]) -> Mapping[int, GLM5XExpertWeights]:
+            def read_one(expert_id: int) -> tuple[int, Mapping[str, bytes]]:
+                try:
+                    return int(expert_id), bundle.read_expert(layer_id, int(expert_id))
+                except (KeyError, K3XError) as exc:
+                    raise K3XError(
+                        "GLM5X_LAYER_EXPERT_NOT_FOUND", f"{layer_id}:{expert_id}"
+                    ) from exc
+
+            if len(expert_ids) <= 1 or expert_load_workers == 1:
+                payloads = [read_one(expert_id) for expert_id in expert_ids]
+            else:
+                with ThreadPoolExecutor(
+                    max_workers=min(expert_load_workers, len(expert_ids))
+                ) as executor:
+                    payloads = list(executor.map(read_one, expert_ids))
+            return {
+                expert_id: cls._expert_from_payload(
+                    payload,
+                    (expert_intermediate_size, hidden_size),
+                    (hidden_size, expert_intermediate_size),
+                    device=target,
+                )
+                for expert_id, payload in payloads
+            }
+
         return cls(
             router_weight=router_weight,
             correction_bias=correction_bias,
@@ -425,6 +499,8 @@ class GLM5XLayer10MoEReference:
             norm_topk_prob=norm_topk_prob,
             cache_experts=cache_experts,
             execution_mode=execution_mode,
+            expert_batch_loader=load_experts if expert_load_workers > 1 else None,
+            expert_load_workers=expert_load_workers,
         )
 
     @staticmethod

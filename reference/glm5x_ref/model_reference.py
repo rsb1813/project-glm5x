@@ -209,6 +209,7 @@ class GLM5XDecoderModelReference:
         layer_cache_capacity: int = 0,
         device: torch.device | str | None = None,
         execution_mode: str = "loop",
+        expert_load_workers: int = 1,
     ) -> "GLM5XDecoderModelReference":
         """Build an out-of-core model factory from one validated GLM bundle.
 
@@ -293,6 +294,7 @@ class GLM5XDecoderModelReference:
                 indexer_rope_interleave=indexer_rope_interleave,
                 device=target,
                 execution_mode=execution_mode,
+                expert_load_workers=expert_load_workers,
             )
 
         return cls.from_layer_loader(

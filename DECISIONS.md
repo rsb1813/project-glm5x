@@ -465,3 +465,11 @@
 - Evidence: the existing model reference already has synthetic full-bundle prefill/incremental/greedy parity, while real full-checkpoint logits and decode remain unmeasured. The new CLI compiles, prints help, and its model-reference regression remains green (`4 passed`).
 - Accepted because: it creates one reproducible measured boundary for the first real full-model run and preserves explicit quality/reference settings. It does not change model semantics or claim a TPS result before execution.
 - Revisit: immediately after all 282 shards assemble; add a native CUDA runtime benchmark once exact full-model logits and hidden-state handoff are validated.
+
+## D-0059 -- Keep parallel exact expert reads opt-in
+
+- Decision: add `expert_load_workers` to the reference bundle path so selected exact raw-BF16 expert payloads can be read concurrently before serial tensor decoding and device staging. Keep `1` as the default correctness path and expose higher values only through the benchmark gate.
+- Alternatives: retain one-by-one reads, parallelize GPU copies as well, or prefetch speculative experts before the router result is known.
+- Evidence: the batch loader preserves route/output/loaded-expert parity in `4/4` focused MoE tests, and the full layer/model reference regressions pass `8/8`. The real full-bundle I/O latency, NVMe contention, and H2D overlap are not measured yet.
+- Accepted because: it changes only scheduling of exact reads, preserves natural routing and payloads, and gives the first full-model gate a controlled I/O-overlap knob without silently changing quality.
+- Revisit: after the active 282-shard CUDA gate records cold/warm read latency, H2D bytes, and decode tok/s. Disable or retune if concurrent reads starve compute or increase residency pressure.

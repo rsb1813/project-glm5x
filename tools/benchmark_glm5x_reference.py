@@ -42,6 +42,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--execution-mode", choices=("loop", "expert_major"), default="loop"
     )
     parser.add_argument(
+        "--expert-load-workers",
+        type=int,
+        default=1,
+        help="parallel K3X expert payload readers; 1 keeps the serial reference path",
+    )
+    parser.add_argument(
         "--lazy-bundle",
         action="store_true",
         help="skip whole-artifact payload/root scans and CRC-check selected tensors on read",
@@ -54,6 +60,8 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         raise ValueError("new-tokens must be positive")
     if arguments.layer_cache_capacity < 0:
         raise ValueError("layer-cache-capacity must be non-negative")
+    if arguments.expert_load_workers <= 0:
+        raise ValueError("expert-load-workers must be positive")
     if arguments.device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA device requested but torch.cuda.is_available() is false")
     device = torch.device(arguments.device)
@@ -70,6 +78,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         layer_cache_capacity=arguments.layer_cache_capacity,
         device=device,
         execution_mode=arguments.execution_mode,
+        expert_load_workers=arguments.expert_load_workers,
     )
     prompt = torch.tensor(arguments.prompt, dtype=torch.long, device=device)
     _synchronize(device)
@@ -116,6 +125,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         "cache_experts": arguments.cache_experts,
         "layer_cache_capacity": arguments.layer_cache_capacity,
         "execution_mode": arguments.execution_mode,
+        "expert_load_workers": arguments.expert_load_workers,
         "lazy_bundle": arguments.lazy_bundle,
     }
     if device.type == "cuda":

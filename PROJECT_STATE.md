@@ -56,6 +56,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Added `GLM5XLayer10MoEReference` with official sigmoid routing, exact Top-8 normalization/routed scale, shared SwiGLU, and lazy exact raw-BF16 expert loading from the copy-free bundle.
 - Added an opt-in reference expert-major MoE execution mode, propagated through decoder-layer and model factories. The loop reference remains the default; parity and real RTX 5080 trade-offs are recorded in `BENCHMARKS.md`.
 - Added `tools/benchmark_glm5x_reference.py` for explicit-token full-bundle prefill/TTFT/decode measurement with strict/lazy admission, cache switches, execution-mode selection, and CUDA peak-memory telemetry. It has no full-checkpoint result yet.
+- Added opt-in parallel exact expert payload reads through `--expert-load-workers`; the serial default remains unchanged, and the focused MoE/model-reference regression passes.
 - Added `GLM5XMLAReference`, incremental compressed MLA state, official causal DSA state, and `GLM5XDecoderLayerReference` with full-vs-incremental parity and bundle-backed attention/indexer/norm/MoE construction.
 - Added `GLM5XDecoderModelReference` with per-layer MLA/DSA state, final RMSNorm, LM-head logits, prompt prefill, one-token continuation, and greedy generation parity over a synthetic two-layer graph.
 - Reused one root-verified `GLM5XExpertBundle` reader across the layer loader and lazy MoE closure; the real five-shard construction smoke fell from 491.483777 s to 250.637263 s.

@@ -42,6 +42,7 @@ python tools/benchmark_glm5x_reference.py \
   --prompt 0 \
   --new-tokens 1 \
   --device cuda \
+  --expert-load-workers 4 \
   --lazy-bundle \
   > "$cuda_partial"
 mv -f "$cuda_partial" "$cuda_report"
