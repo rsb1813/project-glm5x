@@ -51,7 +51,7 @@
 
 ## 2026-08-14 DSA/indexer reference state
 
-- Added `GLM5XDSAConfig` and `GLM5XDSAState` instead of pretending the standalone TurboQuant cache was already a GLM DSA graph. Descriptor metadata now determines index width and top-k policy.
+- Added `GLM5XDSAConfig`, `GLM5XDSAIndexer`, and `GLM5XDSAState` instead of pretending the standalone TurboQuant cache was already a GLM DSA graph. Descriptor metadata now determines index width/top-k policy, and explicit query/key matrices project hidden states into index keys.
 - The correctness path (`reference_mode=True`) refreshes index top-k on every query. The experimental fast path reuses the previous selection until `index_topk_freq` new tokens arrive; the distinction is explicit in the API and tests.
-- The state stores synthetic index keys plus the existing TurboQuant KV cache. It does not implement learned indexer projections, MLA latent transforms, or CUDA storage, so 600k/1M numbers remain arithmetic estimates.
-- Focused GLM Python coverage is now 20 passing tests. The next implementation boundary is the learned/indexer-compatible reference graph, not a speculative end-to-end TPS claim.
+- The state stores projected synthetic index keys plus the existing TurboQuant KV cache. Official tensor mapping, MLA latent transforms, and CUDA storage are still absent, so 600k/1M numbers remain arithmetic estimates.
+- Focused GLM Python coverage is now 21 passing tests. The next implementation boundary is official tensor mapping and DSA/MLA reference parity, not a speculative end-to-end TPS claim.

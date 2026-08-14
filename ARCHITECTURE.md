@@ -15,14 +15,14 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - Experimental resident BF16 expert-grid execution dequantizes exact MXFP4 values once per tensor and uses cublasLt BF16-input/FP32-output projections; native MXFP4 remains the default. A preflight budget check accounts for dense resident weights and warm BF16 keys before admission, then falls back to native without partial mixed-representation residency when the budget is insufficient.
 - GLM5X converter CLI wrapper.
 - CPU/reference TurboQuant-inspired KV cache with Hadamard rotation, integer and half-bit schedules, asymmetric K/V policy, incremental attention, and capacity estimation.
-- CPU/reference `GLM5XDSAState` that connects descriptor index metadata to an index-key store, compressed KV blocks, exact top-k refresh, and an explicitly stale fast refresh policy. Its 600k/1M capacity numbers are allocation-free estimates.
+- CPU/reference `GLM5XDSAState` and `GLM5XDSAIndexer` that connect descriptor index metadata, explicit query/key projection matrices, an index-key store, compressed KV blocks, exact top-k refresh, and an explicitly stale fast refresh policy. Its 600k/1M capacity numbers are allocation-free estimates.
 
 ### In progress
 
 - GLM model-specific extent roles and streaming conversion from the validated manifest.
 - GLM-5.2 reference graph with exact DSA/MLA and MoE routing.
 - Synthetic GLM-5.2 checkpoint round-trip.
-- Exact GLM-5.2 DSA/MLA graph and learned indexer projection weights.
+- Official GLM-5.2 indexer tensor mapping, exact DSA/MLA graph, and learned projection calibration.
 - Wiring GLM DSA/MTP state and exact routing around the existing expert-major batch path.
 
 ### Experimental

@@ -72,3 +72,11 @@
 - Evidence: the new tests pass exact top-k/attention selection with lossless KV, verify the `index_topk_freq` refresh boundary, and compute allocation-free 600k/1M state estimates of 201,637,504 and 336,062,512 bytes for the documented BF16-index/K6/V4 shape.
 - Accepted because: it creates a testable state boundary without claiming that synthetic index keys are the learned GLM indexer. The reference and fast refresh semantics are visible and reversible.
 - Revisit: when a real GLM shard or official indexer projection is available, before enabling any CUDA or stale-selection path by default.
+
+## D-0010 -- Keep indexer projections explicit and weight-agnostic
+
+- Decision: represent DSA query/key projections as explicit matrices in `GLM5XDSAIndexer` and feed projected keys into `GLM5XDSAState`; do not infer tensor names or silently synthesize official weights.
+- Alternatives: hard-code a guessed GLM tensor layout, keep direct synthetic index keys only, or postpone the projection boundary until the full checkpoint is present.
+- Evidence: the projection test passes exact projected-key top-k selection with a synthetic matrix, while the manifest still reports no downloaded GLM shard.
+- Accepted because: the runtime contract can be tested now and swapped to official tensors later without changing cache or refresh semantics.
+- Revisit: when the official GLM indexer tensor map and a nonzero shard are available.
