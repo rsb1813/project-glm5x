@@ -379,3 +379,10 @@
 
 - Added disjoint range arguments and launched three `--no-assemble` workers. The first overlap sample finalized 12, 102, 103, 193, and 194 while each worker continued to prefetch its next source.
 - The stream is now a coordinator/worker pipeline: workers never write the shared bundle, and final lazy assembly waits for all 282 source-deleted markers. Sustained throughput and failure recovery still need a longer sample.
+
+## 2026-08-15 -- CI, Dependabot, and live conversion verification
+
+- The recurring Linux failure was reproduced from historical run `31795400168` on stale commit `b94c8b8`: the Python step ended after `60.08s` with `50 failed, 294 passed, 74 skipped`, primarily because migrated historical `results/` files were absent. The follow-up guard commit `a00beec` made absent historical evidence an explicit skip; current `main` no longer exhibits that failure.
+- Latest pushed head `5c5a2eb` is green in Linux correctness run `31835150475` and CodeQL run `31835150428`. The Linux job completed in `2m55s`; this is CI wall time, not model execution time.
+- Dependabot PRs 1-4 are closed and their dependency/action changes are already present on `main`. The repository has Dependabot security alerts disabled, so the REST endpoint's `403` means alerting is unavailable, not that a number of vulnerabilities was confirmed.
+- At 05:03 KST, 23/282 `.k3x` artifacts and 23 source-deleted markers were present. Three workers had produced 13 new artifacts in 22m37s, an initial aggregate sample of `34.5 shards/hour`; 259 artifacts remained. The estimate is conditional and must be refreshed after a longer sample.

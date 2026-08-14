@@ -6,6 +6,18 @@ The first benchmark record must include the commit, hardware, model/checkpoint i
 
 The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 26 passing WSL CTest cases plus 35 focused GLM Python tests. It is not a performance measurement.
 
+## 2026-08-15 -- Three-worker local conversion snapshot
+
+- Date: 2026-08-15 05:03 KST.
+- Commit: `5c5a2eb`.
+- Hardware: RTX 5080 PC, WSL2 Ubuntu-24.04, C: NVMe workspace, 1 GbE network.
+- Model/checkpoint: official `zai-org/GLM-5.2`; 282 source shards, no model weights committed to Git.
+- Mode: three independent resumable stream workers, half-open ranges `10..100`, `101..191`, and `192..281`, `--no-assemble`.
+- Measurement: 13 newly finalized artifacts from 04:39:53 to 05:02:30, 22m37s wall time, approximately `34.5 shards/hour` aggregate. 23/282 artifacts and source-deleted markers exist including the ten completed before launch.
+- Projection: 259 artifacts remain; at the observed sample rate this is approximately 7.5 hours. This is a conditional conversion estimate, not a completion promise.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
+- Interpretation: this measures storage conversion overlap only. Full bundle indexing, all-layer logits, and end-to-end RTX 5080 execution remain open.
+
 ## 2026-08-14 -- Cross-shard expert bundle index
 
 - Commit: working tree after `4d596f5`; code change pending commit.
