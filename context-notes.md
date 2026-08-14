@@ -26,3 +26,10 @@
 - Final benchmark samples at commit `31678d1`: 8 experts/1 token median 2,662,772 ns, 8 experts/4 tokens median 5,379,264 ns (1,344,816 ns/token), 8 experts/8 tokens median 8,791,638 ns (1,098,955 ns/token), and 16 experts/1 token median 5,458,462 ns. All maximum absolute errors were 0.
 - A shared-input row-tiled kernel and a lookup/bit-scale MXFP4 decoder were tested and rejected after repeated slowdowns. They were not kept in the accepted source.
 - Expert-major candidate batching is a measured optimization candidate for MTP/DSpark integration. It must not be treated as speculative acceptance or full-model throughput until the exact target verifier is connected.
+
+## 2026-08-14 Resident expert-major batch reuse
+
+- `mxfp4_situ_mlp_batch` now accepts resident CUDA weights, acquires all three exact MXFP4 projections through `ResidentWeightTable`, and falls back to the existing transient scratch path only on capacity bypass.
+- The CUDA FFN test is a red-green regression: before the patch, the second resident batch re-uploaded weights; after the patch, CPU parity is exact, cache hits increase by three, and warm weight H2D remains unchanged.
+- The CLI expert-major contract no longer rejects resident weights. This is a storage/transfer optimization only; natural routing, exact candidate verification, and quality semantics are unchanged.
+- GLM-shaped `expert-batch` is not faster than the all-expert grid for the synthetic 8-expert case, but it proves the important invariant that cold weight upload is one-time and warm upload is zero. The next performance work should target variable-union scheduling and tensor-core/dequantized GEMM, not proxy weights.

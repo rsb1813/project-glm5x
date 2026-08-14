@@ -11,6 +11,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - GLM descriptor validation for DSA, Top-8, 256 routed experts, shared experts, and MTP metadata.
 - GLM-5.2 tensor-manifest validation for `config.json`, safetensors `weight_map`, shard names, tensor count, and source byte total without opening a weight shard.
 - A bounded RTX 5080 CUDA benchmark for GLM-5.2 expert dimensions (`hidden=6144`, `expert_intermediate=2048`, `group=32`) using the resident expert-grid backend.
+- Resident expert-major batch execution now admits packed/scales through the shared `ResidentWeightTable`; repeated candidate batches can reuse exact MXFP4 weights without another weight H2D upload.
 - GLM5X converter CLI wrapper.
 - CPU/reference TurboQuant-inspired KV cache with Hadamard rotation, integer and half-bit schedules, asymmetric K/V policy, incremental attention, and capacity estimation.
 
@@ -20,7 +21,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - GLM-5.2 reference graph with exact DSA/MLA and MoE routing.
 - Synthetic GLM-5.2 checkpoint round-trip.
 - Connecting compressed KV blocks to the GLM DSA/indexer state instead of the standalone reference cache.
-- Wiring expert-major candidate-token batching into the MTP verifier rather than only the standalone CUDA benchmark.
+- Wiring GLM DSA/MTP state and exact routing around the existing expert-major batch path.
 
 ### Experimental
 

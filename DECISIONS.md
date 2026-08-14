@@ -47,3 +47,11 @@
 - Evidence: both variants preserved synthetic zero-weight output parity, but the 8-expert 1-token warm median increased from roughly 2.25--2.27 ms to roughly 3.00 ms for row tiling and 2.53--2.56 ms for lookup/bit-scale decoding over repeated 100-iteration runs.
 - Rejected because: correctness alone is insufficient for the stated TPS goal, and the observed regressions would make a full 78-layer path slower.
 - Revisit: only after a tensor-core or batched GEMM path changes the launch and memory balance.
+
+## D-0007 -- Allow resident exact weights in expert-major batch verification
+
+- Decision: permit CUDA expert-major verification to use either transient or resident weights, and make `mxfp4_situ_mlp_batch` acquire exact packed/scales through `ResidentWeightTable` when resident mode is selected.
+- Alternatives: keep expert-major transient-only, rely on the host expert cache alone, or enable proxy/pruned weights.
+- Evidence: the new CUDA regression passes exact CPU parity twice; the first call uploads 1,105 bytes in the tiny fixture and the second call uploads 0 while recording three resident cache hits. The GLM-shaped 8-expert/4-token benchmark uploads 160,432,128 bytes cold and 0 bytes in warm samples, with maximum absolute error 0.
+- Accepted because: this reduces repeated VRAM transfer without changing routing, weights, or verification semantics.
+- Revisit: after exact variable-union expert grouping and a tensor-core/dequantized resident kernel are measured.

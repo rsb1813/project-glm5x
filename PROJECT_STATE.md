@@ -18,6 +18,7 @@ GLM-5.2 shape/manifest boundary plus RTX 5080 resident expert-grid baseline.
 - Added `GLM5XTensorManifest` validation for safetensors weight maps, shard names, tensor count, and source byte totals.
 - Added and measured `k3x_cuda_glm5x_moe_bench` on the real RTX 5080 at GLM-5.2 expert dimensions.
 - Added an expert-major candidate-token benchmark mode for 1/2/4/8 tokens.
+- Added resident exact MXFP4 reuse to the CUDA expert-major batch backend and allowed resident weights in the CLI validation contract.
 
 ## In progress
 
@@ -25,7 +26,7 @@ GLM-5.2 shape/manifest boundary plus RTX 5080 resident expert-grid baseline.
 - Build the tiny GLM-5.2-compatible reference graph and greedy parity tests.
 - Rename user-facing runtime and benchmark commands where that does not break the inherited storage ABI.
 - Connect compressed KV blocks to the GLM DSA/indexer state and add a reference-mode switch.
-- Integrate expert-major candidate batching into MTP verification and retain strict natural Top-8 verification.
+- Connect the now-resident expert-major batch backend to exact GLM DSA/MTP state and retain strict natural Top-8 verification.
 - Replace the scalar MXFP4 path with a measured tensor-core or dequantized resident-GEMM path.
 
 ## Known blockers
@@ -52,5 +53,6 @@ GLM-5.2 shape/manifest boundary plus RTX 5080 resident expert-grid baseline.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
+- Resident expert-major batch result: 8 groups x 4 candidates, 1,641,591 ns/candidate token, cold weight H2D 160,432,128 bytes and warm weight H2D 0 bytes.
 - Last known-good code HEAD: `31678d1` (`feat: add GLM5X shape manifest and CUDA baseline`).
-- Next bottleneck: exact DSA/indexer graph and a tensor-core/dequantized resident expert path; full weights remain intentionally absent.
+- Next bottleneck: exact DSA/indexer graph, variable-union expert grouping, and a tensor-core/dequantized resident expert path; full weights remain intentionally absent.

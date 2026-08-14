@@ -11,6 +11,7 @@
 - [x] Record the TurboQuant correctness smoke result and non-performance caveat.
 - [ ] Connect compressed blocks to the GLM DSA/indexer state.
 - [x] Add a bounded GLM-5.2-shaped resident expert CUDA baseline and expert-major token batching benchmark.
+- [x] Reuse exact resident MXFP4 weights in expert-major batch verification and record warm H2D telemetry.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.
 - [ ] Add MTP/DSpark expert-major verification to the GLM path.
 - [ ] Run real GLM-5.2 quality and throughput benchmarks.

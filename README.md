@@ -14,6 +14,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - GLM descriptor validation for DSA, 256 routed experts, Top-8 routing, shared experts, and MTP metadata.
 - `GLM5XTensorManifest` validation for safetensors shard maps and source byte totals before conversion.
 - A GLM-5.2-shaped CUDA expert benchmark for hidden size 6144 and expert intermediate size 2048, including 1/2/4/8-token expert-major batching.
+- Exact resident MXFP4 reuse for CUDA expert-major batches; warm batches avoid re-uploading packed/scales weights.
 - CPU/reference TurboQuant-style KV cache with asymmetric K/V bits and 600k–1M capacity arithmetic. This does not compress model weights and is not yet a CUDA performance path.
 - A `glm5x-convert` entry point that wraps the proven storage converter while model-specific extent roles are completed.
 - Strict separation between implemented code, experiments, proposals, and measurements.
@@ -22,7 +23,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 
 - GLM-5.2 or GLM-5.3 weights are not included.
 - The GLM reference graph and CUDA fast path are not complete.
-- DSpark/MTP acceptance, proxy routing, adaptive quality modes, and end-to-end RTX 5080 throughput are not yet measured on the target PC. Expert-major candidate batching is measured only as a bounded CUDA layer path.
+- DSpark/MTP acceptance, proxy routing, adaptive quality modes, and end-to-end RTX 5080 throughput are not yet measured on the target PC. Expert-major batching is measured only as a bounded CUDA layer path, although its resident weight-reuse contract is now tested.
 - Synthetic or bounded fixtures are not evidence of full-model throughput.
 
 ## Design

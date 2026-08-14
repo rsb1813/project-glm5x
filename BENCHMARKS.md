@@ -52,3 +52,16 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 1
 - Enabled optimizations: resident expert grid, expert-major candidate-token batching, admission validation.
 - Rejected micro-optimizations in this milestone: shared-input row tiling and E2M1 lookup/bit-scale decode both preserved output parity but regressed the 8-expert 1-token median, so neither is in the accepted path.
 - Caveat: these measurements bound the current expert FFN cost. Attention, router, dense trunk, DSA indexer, KV state, storage traffic, and end-to-end scheduling are not included.
+
+## 2026-08-14 -- Resident expert-major batch path
+
+- Commit: `d204fb1`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: no checkpoint; the same deterministic GLM-5.2-shaped zero-weight tensors.
+- Mode: `expert-batch`, resident MXFP4 E2M1/E8M0, synchronous transfer, 8 independent expert groups, 4 candidate tokens per group.
+- Warm median block latency: 6,566,362 ns over 100 iterations after 20 warmups, or 1,641,591 ns per candidate token inside the block.
+- Maximum absolute error: 0.
+- Cold weight H2D: 160,432,128 bytes for the 8 selected experts; warm sample weight H2D: 0 bytes; resident weight bytes: 160,432,128; peak VRAM: 167,411,712 bytes.
+- Batch telemetry: 800 batched expert calls and 3,200 batched expert tokens over the 100-iteration sample; activation H2D 78,643,200 bytes and device-to-host 78,643,200 bytes.
+- Decode tok/s, prefill tok/s, TTFT, NVMe GB/token, quality score, and speculative acceptance: not measured; this is a per-expert-group layer record.
+- Decision: resident exact batching is enabled for the expert-major path, but it is not claimed faster than the all-expert resident grid. Its immediate value is eliminating repeated weight movement; variable-union grouping and tensor-core execution remain open bottlenecks.
