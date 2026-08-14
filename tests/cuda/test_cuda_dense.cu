@@ -348,6 +348,40 @@ int test_bf16_resident_grid() {
         }
     }
     auto cpu = k3x::make_cpu_backend();
+    auto bf16_output_options = options;
+    bf16_output_options.cuda_bf16_output = k3x::CudaBf16OutputMode::bf16;
+    auto bf16_output_backend = k3x::make_cuda_backend(bf16_output_options);
+    if (!bf16_output_backend) return 79;
+    const auto bf16_grid_output =
+        bf16_output_backend.value()->raw_bf16_situ_mlp_grid(
+            input, 2, raw_experts, 1.0F, std::nullopt, 17,
+            k3x::ProfilePhase::decode);
+    if (!bf16_grid_output ||
+        bf16_grid_output.value().size() != output.value().size()) {
+        return 80;
+    }
+    for (std::size_t expert = 0; expert < rounded_experts.size(); ++expert) {
+        for (std::size_t token = 0; token < 2; ++token) {
+            const auto expected = cpu->dense_situ_mlp(
+                std::span<const float>(rounded_input).subspan(token * 3, 3),
+                rounded_experts[expert], 1.0F, std::nullopt, 17,
+                k3x::ProfilePhase::decode);
+            if (!expected) return 81;
+            for (std::size_t value = 0; value < expected.value().size();
+                 ++value) {
+                if (!nearly_equal(
+                        bf16_grid_output.value()[expert][token * 2 + value],
+                        expected.value()[value], 4.0e-2F)) {
+                    return 82;
+                }
+            }
+        }
+    }
+    const auto bf16_output_stats = bf16_output_backend.value()->runtime_stats();
+    if (bf16_output_stats.device_to_host_bytes != 16 ||
+        bf16_output_stats.resident_grid_kernel_launches != 4) {
+        return 83;
+    }
     for (std::size_t expert = 0; expert < rounded_experts.size(); ++expert) {
         for (std::size_t token = 0; token < 2; ++token) {
             const auto expected = cpu->dense_situ_mlp(

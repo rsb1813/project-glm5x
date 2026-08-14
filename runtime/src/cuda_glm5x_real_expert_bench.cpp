@@ -36,6 +36,7 @@ struct Arguments {
     std::size_t warmup{2};
     std::size_t iterations{10};
     std::string precision{"fp32"};
+    std::string output{"fp32"};
 };
 
 std::optional<std::size_t> parse_size(std::string_view text) {
@@ -91,12 +92,21 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             result.iterations = *parsed;
         } else if (key == "--precision") {
             result.precision = value;
+        } else if (key == "--output") {
+            result.output = value;
         } else {
             return std::nullopt;
         }
     }
-    if (result.artifact_dir.empty() || result.precision == "") return std::nullopt;
+    if (result.artifact_dir.empty() || result.precision == "" ||
+        result.output == "") return std::nullopt;
     if (result.precision != "fp32" && result.precision != "bf16-rounded") {
+        return std::nullopt;
+    }
+    if (result.output != "fp32" && result.output != "bf16") {
+        return std::nullopt;
+    }
+    if (result.precision != "bf16-rounded" && result.output != "fp32") {
         return std::nullopt;
     }
     return result;
@@ -182,7 +192,7 @@ int main(int argc, char** argv) {
     if (!arguments || !std::filesystem::is_directory(arguments->artifact_dir)) {
         std::cerr << "usage: --artifact-dir DIR --layer N --expert N "
                      "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
-                     "[--precision fp32|bf16-rounded]\n";
+                     "[--precision fp32|bf16-rounded] [--output fp32|bf16]\n";
         return 2;
     }
     const auto paths = artifact_paths(arguments->artifact_dir);
@@ -298,6 +308,8 @@ int main(int argc, char** argv) {
         ? k3x::CudaBatchingMode::resident_grid : k3x::CudaBatchingMode::scalar;
     options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
     options.cuda_transfer = k3x::CudaTransferMode::synchronous;
+    options.cuda_bf16_output = arguments->output == "bf16"
+        ? k3x::CudaBf16OutputMode::bf16 : k3x::CudaBf16OutputMode::fp32;
     options.cuda_weight_validation = k3x::CudaWeightValidationMode::admission;
     options.cuda_resident_bytes = 1ULL << 30;
     auto cuda = k3x::make_cuda_backend(options);
@@ -389,6 +401,7 @@ int main(int argc, char** argv) {
               << ",\"last_expert_id\":" << expert_ids.back()
               << ",\"shard_count\":" << paths.size()
               << ",\"precision\":\"" << arguments->precision << "\""
+              << ",\"output\":\"" << arguments->output << "\""
               << ",\"host_payload_bytes\":" << host_payload_bytes
               << ",\"host_load_nanoseconds\":" << host_load_ns
               << ",\"cold_latency_nanoseconds\":" << cold_ns

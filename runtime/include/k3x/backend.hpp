@@ -22,6 +22,7 @@ enum class CudaMxfp4Execution { native, dequantized_bf16 };
 enum class CudaBatchingMode { scalar, grouped, resident_grid };
 enum class CudaBoundaryMode { operation, ffn_block, moe_layer };
 enum class CudaTransferMode { synchronous, prefetch };
+enum class CudaBf16OutputMode { fp32, bf16 };
 enum class CudaMoeFusionMode { none, routed_accumulate };
 enum class CudaWeightValidationMode { per_call, admission };
 
@@ -34,6 +35,7 @@ struct BackendOptions {
     CudaBatchingMode cuda_batching{CudaBatchingMode::scalar};
     CudaBoundaryMode cuda_boundary{CudaBoundaryMode::operation};
     CudaTransferMode cuda_transfer{CudaTransferMode::synchronous};
+    CudaBf16OutputMode cuda_bf16_output{CudaBf16OutputMode::fp32};
     CudaMoeFusionMode cuda_moe_fusion{CudaMoeFusionMode::none};
     CudaWeightValidationMode cuda_weight_validation{
         CudaWeightValidationMode::per_call};
