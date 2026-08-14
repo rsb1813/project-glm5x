@@ -706,3 +706,13 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Baseline/reuse: `2.298938 ms` versus `2.224939 ms`, approximately `3.22%` lower for the optimized attention boundary.
 - Correctness: output maximum absolute difference was `0.0`; route inputs and state construction were unchanged.
 - Full-model decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, H2D GB/token, speculative acceptance, and quality benchmark were not measured. This is a bounded exact attention result, not a full-model throughput result.
+
+## 2026-08-15 -- Experimental sparse Top-K MLA attention
+
+- Date: 2026-08-15.
+- Commit: `2a1eafc`.
+- Hardware/model: RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.3, official GLM-5.2 five-shard probe bundle, layer 10 attention boundary.
+- Mode: one BF16 incremental query after a manually constructed exact compressed MLA state of context length `16,384`; both paths used the same 128 selected key positions. Dense mode projected/masked the full context, while sparse mode gathered selected compressed KV positions before `kv_b_proj`.
+- Timing: dense `12.154 ms`, sparse `2.040 ms`, approximately `83.2%` lower in this sample.
+- Correctness/quality: output maximum absolute difference `0.000244140625`; relative L2 difference `0.0278%`. Synthetic prefill and incremental parity tests were exact within the test tolerance. The sparse switch is experimental and default-off.
+- Full-model decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, speculative acceptance, and task quality were not measured. This is a long-context attention boundary result, not a full-model throughput result.

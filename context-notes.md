@@ -433,3 +433,8 @@
 
 - Commit `7c79976` adds an optional q-residual argument to the MLA reference and passes the decoder layer's DSA residual through it. The focused MLA/layer/model suite passed `17/17`.
 - On the real layer-10 CUDA probe, the synchronized median attention boundary fell from `2.298938 ms` to `2.224939 ms` (`3.22%`), with output maximum absolute difference `0.0`. This remains a bounded layer result, not an end-to-end TPS claim.
+
+## 2026-08-15 -- Experimental DSA sparse Top-K MLA path
+
+- Commit `2a1eafc` adds `use_sparse_topk` through the layer/model factories and `--sparse-topk-attention` to the full-bundle benchmark. The dense masked MLA path remains default.
+- Focused synthetic/model tests passed `19/19`. On a real layer-10 compressed-state probe with context `16,385` and 128 selected positions, attention fell from `12.154 ms` to `2.040 ms` (`83.2%`), with relative L2 drift `0.0278%`. This is experimental until the full model quality/TPS gate.

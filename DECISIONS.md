@@ -497,3 +497,11 @@
 - Evidence: the new parity test and the focused MLA/layer/model suite pass (`17 passed`). On the real five-shard layer-10 CUDA probe, the exact attention boundary measured `2.298938 ms` with the duplicate projection and `2.224939 ms` with reuse, a `3.22%` reduction in that bounded sample; output maximum absolute difference was `0.0`.
 - Accepted because: it removes a verified duplicate GEMM without changing routing, attention state, logits, or the default standalone API. The result is a bounded layer optimization, not an end-to-end TPS claim.
 - Revisit: after the complete 78-layer CUDA gate reports per-layer timing, decide whether the same residual should be carried into a fused C++/CUDA layer handoff.
+
+## D-0063 -- Keep DSA sparse Top-K MLA attention opt-in
+
+- Decision: add `use_sparse_topk` and the benchmark flag `--sparse-topk-attention`. When enabled and DSA indices are present, MLA gathers only the selected compressed KV positions before the `kv_b_proj`; the dense masked path remains the default reference.
+- Alternatives: always project the full historical KV sequence, make sparse gather the default immediately, or change the DSA router/index selection itself.
+- Evidence: synthetic prefill and incremental dense-vs-sparse parity tests pass, and the model-factory propagation test passes. On the real five-shard RTX 5080 layer-10 probe at context `16,385` with 128 selected positions, the attention boundary fell from `12.154 ms` to `2.040 ms` (`83.2%` lower); output maximum absolute difference was `0.000244140625` and relative L2 difference was `0.0278%`. A short context sample was slower, so no unconditional promotion is justified.
+- Accepted because: it preserves natural DSA indices and exact dense fallback while removing full-context KV projection and attention work for long contexts. The measured BF16 drift is explicitly recorded and the quality mode remains controlled by the switch.
+- Revisit: after the full 78-layer gate measures long-context quality, prefill/decode tok/s, and VRAM traffic. Promote only if the quality suite accepts the BF16 numerical drift and the full-model speedup is stable.
