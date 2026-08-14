@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a multi-layer CPU reference with final logits and greedy incremental parity, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, an explicit GLM SiLU path, on-demand model layer loading, shared bundle readers, opt-in lazy payload validation, opt-in bounded trunk-layer caching, and an explicit dense-MLP path for the first three GLM-5.2 layers are implemented over five bounded real shards. The current verified HEAD is `fb3aa7d`; public correctness `31826654966` and CodeQL `31826655082` are green. Full real-checkpoint execution, MTP, CUDA final logits, and end-to-end tok/s remain unmeasured.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a multi-layer CPU reference with final logits and greedy incremental parity, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, an explicit GLM SiLU path, on-demand model layer loading, shared bundle readers, opt-in lazy payload validation, opt-in bounded trunk-layer caching, an explicit dense-MLP path for the first three GLM-5.2 layers, and a configuration-driven all-layer bundle factory are implemented over five bounded real shards. The current verified implementation HEAD is `fb3aa7d`; public correctness `31826654966` and CodeQL `31826655082` are green. The new factory commit `1f123ca` is locally green and awaiting its public checks. Full real-checkpoint execution, MTP, CUDA final logits, and end-to-end tok/s remain unmeasured.
 
 ## Completed
 
@@ -57,10 +57,11 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Added opt-in `K3XReader`/`GLM5XExpertBundle` lazy admission. Directory metadata is checked immediately, selected tensor CRCs are verified on first read, and strict eager payload/root verification remains the default correctness mode.
 - Added an opt-in bounded LRU for validated reference trunk layers. Capacity zero preserves strict layer-at-a-time loading; positive capacity removes repeated layer-provider calls without changing logits. Expert payload residency remains a separate policy.
 - Added `GLM5XDenseMlpReference` and explicit `mlp_type="dense"` bundle loading for GLM-5.2's first three dense layers. The path uses official SwiGLU, preserves the decoder output schema, and reports empty routing with zero expert loads.
+- Added `GLM5XDecoderModelReference.from_bundle`, which resolves official dense/sparse MLP types and shared-indexer sources while keeping decoder layers provider-owned. Bounded probes can override only missing head tensors; real decoder-layer payloads remain exact and lazy.
 
 ## In progress
 
-- Load all real GLM layers into the model-level reference state contract and add MTP state once the required tensor roles are available.
+- Load all real GLM layers into the model-level reference state contract and add MTP state once the required tensor roles are available. The configuration-driven provider now exists; complete payload coverage is the remaining gate.
 - Extend the layer-10 exact q-residual/MLA/DSA boundary to the remaining layers, final logits, and MTP state.
 - Rename user-facing runtime and benchmark commands where that does not break the inherited storage ABI.
 - Connect the exact layer-10 reference's MLA/DSA hidden state to the learned router/expert-major CUDA grid while retaining strict natural Top-8 verification.
@@ -93,7 +94,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 
 ## Latest verified state
 
-- Focused GLM descriptor, manifest, CLI, toy/reference graph, TurboQuant, DSA, official indexer, shard-converter, bundle loader, exact MLA/DSA layer/model reference, dense first-three-layer path, lazy layer/bundle admission, bounded trunk-layer caching, and multi-shard tests: `306 passed, 124 skipped` in WSL Python (`73.57 s`). The Windows Python interpreter still lacks pytest; the CUDA Python test remains skipped on Windows because the WSL ELF binary is not a Windows executable.
+- Focused GLM descriptor, manifest, CLI, toy/reference graph, TurboQuant, DSA, official indexer, shard-converter, bundle loader, exact MLA/DSA layer/model reference, dense first-three-layer path, configuration-driven bundle factory, lazy layer/bundle admission, bounded trunk-layer caching, and multi-shard tests: `307 passed, 124 skipped` in WSL Python (`71.86 s`). Host CTest is `15/15`. The Windows Python interpreter still lacks pytest; the CUDA Python test remains skipped on Windows because the WSL ELF binary is not a Windows executable.
 - CUDA CMake build: successful in WSL with CUDA 13.3 and RTX 5080 compute capability 12.0.
 - CTest: 27/27 tests passed in WSL, including `glm5x_activation`.
 - CPU WSL CTest: 15/15 tests passed after the expert-major CUDA API change.
@@ -139,4 +140,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Last known-good implementation HEAD: `f07d78c` (`feat: align GLM MoE activation with SiLU`). WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the complete WSL Python suite `301 passed, 124 skipped in 71.25 s` are green. Public Linux correctness `31812923197` and CodeQL `31812923191` also passed.
 - Last known-good implementation/docs HEAD: `761b881` (`test: cover trunk cache eviction`). WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the complete WSL Python suite `305 passed, 124 skipped` are green. Public correctness `31825623428` and CodeQL `31825623418` also passed.
 - Last known-good implementation/docs HEAD: `fb3aa7d` (`feat: support dense GLM MLP layers`). WSL focused tests passed `3/3`, the complete Python suite passed `306/124`, and public correctness `31826654966` plus CodeQL `31826655082` passed. The Linux job took about 7 minutes 10 seconds because the hosted Python step ran for about 5 minutes 19 seconds; this is a successful run, not a timeout failure.
+- Latest local implementation HEAD: `1f123ca` (`feat: build model reference from GLM bundle`). WSL model-reference tests passed `4/4`, full Python passed `307/124`, host CTest passed `15/15`, and the real five-shard layer-0 gate measured `4.278880 s` admission plus `0.036846 s` one-token CPU forward. Public checks for this commit are pending; no full-model tok/s is claimed.
 - Next bottleneck: load the real all-layer tensors into the new model reference, export the exact layer-10 q-residual/MLA/DSA hidden state into `GLM5XACT`, verify nonzero full-layer parity, then add pinned/asynchronous raw H2D, direct tensor-core selection, MTP, and VRAM-pressure-aware residency. Full weights remain intentionally absent, so no end-to-end tok/s is claimed.

@@ -335,6 +335,13 @@
 - `GLM5XDecoderLayerReference.from_bundle` and `bundle_layer_loader` now accept `mlp_type="dense"` plus an optional `indexer_source_layer`; sparse MoE remains the default. Dense forwards report empty routing and zero expert loads rather than inventing a router result.
 - Focused layer-reference tests passed `3/3`; the WSL Python suite passed `306 passed, 124 skipped` in `73.57 s`. No real all-layer weights, final logits, MTP, CUDA logits, or tok/s were measured.
 
+## 2026-08-15 -- Configuration-driven real bundle model factory
+
+- Added `GLM5XDecoderModelReference.from_bundle`, which retains one cross-shard bundle reader and creates layers on demand from the official configuration. It resolves explicit `mlp_layer_types` or `first_k_dense_replace`, and maps each `shared` indexer layer to its nearest preceding `full` source.
+- The factory reads embedding/final norm/LM-head tensors when present and accepts explicit head overrides for bounded partial probes. It never treats those overrides as a full-checkpoint result.
+- A synthetic three-layer bundle exercised dense/dense/sparse selection, shared indexer reuse, sparse expert loading, and full-vs-incremental logits. Full WSL Python passed `307 passed, 124 skipped`; host CTest passed `15/15`.
+- On the five bounded real artifacts, lazy factory setup took `0.066806 s`, layer-0 admission took `4.278880 s`, and a one-token real layer-0 CPU forward took `0.036846 s` with `[1,1,6144]` output. This is not full-model throughput.
+
 ## 2026-08-15 -- Dense-layer public verification
 
 - Pushed implementation commit `fb3aa7d`. GitHub correctness `31826654966` passed C++ configure/build/CTest and the full Python/cross-language suite; CodeQL `31826655082` also passed.

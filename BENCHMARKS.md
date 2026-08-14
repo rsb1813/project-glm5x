@@ -571,3 +571,14 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Correctness: focused layer-reference tests passed `3/3`; the full WSL Python suite passed `306 passed, 124 skipped` in `73.57 s`. The dense bundle path produced zero expert loads and retained the decoder-layer shape/state contract.
 - Performance/traffic: decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, and quality were not measured. This is a model-graph correctness boundary only.
 - Status: implemented in the reference path; public correctness `31826654966` and CodeQL `31826655082` both passed. The hosted Linux job took about 7 minutes 10 seconds, including a roughly 5 minute 19 second Python step; this is CI wall time, not model throughput.
+
+## 2026-08-15 -- Configuration-driven real GLM bundle factory
+
+- Date: 2026-08-15.
+- Commit: `1f123ca`.
+- Hardware/model: WSL2 Ubuntu-24.04 CPU reference; five bounded `zai-org/GLM-5.2` `.k3x` probe artifacts; no full checkpoint.
+- Mode: `GLM5XDecoderModelReference.from_bundle`, `verify_payloads=False`, `verify_root=False`, explicit small head-tensor overrides because the bounded bundle does not contain `model.norm.weight` or the complete final head. The decoder provider still reads real layer payloads.
+- Synthetic correctness: three-layer bundle with dense/dense/sparse MLPs and a shared indexer passed model prefill/incremental parity; full WSL Python passed `307 passed, 124 skipped`; host CTest passed `15/15`.
+- Real layer-0 gate: factory setup `0.066806 s`; layer-0 dense admission `4.278880 s`; one-token layer forward `0.036846 s`; output shape `[1,1,6144]`; DSA Top-K shape `[1,1,1]`; MoE routing shape `[1,1,0]` because layer 0 is dense.
+- Performance/traffic: no full-model decode tok/s, prefill tok/s, TTFT, quality score, full VRAM, full RAM, NVMe GB/token, H2D GB/token, or final-token result was measured. These are real-layer admission/reference timings only.
+- Interpretation: the next bottleneck is complete all-layer payload availability and exact final-head state, followed by CUDA hidden-state handoff and asynchronous layer overlap.

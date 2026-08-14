@@ -400,3 +400,11 @@
 - Evidence: a direct BF16 SwiGLU parity test and a bundle-backed decoder-layer test passed; the full WSL Python suite passed `306 passed, 124 skipped` in `73.57 s`. This is a reference correctness boundary, not a full-checkpoint or throughput result.
 - Accepted because: GLM-5.2 declares the first three layers as dense, so forcing a router/expert bundle there would make an all-layer loader incorrect. The explicit switch keeps the distinction visible and reversible.
 - Revisit: when all 78 real layers are loaded, verify the official shared-indexer mapping and compare full-layer logits before connecting CUDA execution.
+
+## D-0051 -- Add a configuration-driven GLM bundle model factory
+
+- Decision: add `GLM5XDecoderModelReference.from_bundle`. It opens one cross-shard bundle, reads model-head tensors once, keeps decoder layers provider-owned, and resolves dense/sparse MLP type plus nearest preceding shared-indexer source from the official config. Permit explicit embedding/final-norm/LM-head overrides only for bounded partial probes.
+- Alternatives: require callers to hand-build a 78-entry layer loader, assume every layer is sparse and every indexer is local, or materialize every decoder layer during factory construction.
+- Evidence: the synthetic three-layer bundle test exercised dense layer 0, dense layer 1 with a shared indexer from layer 0, and sparse layer 2 with exact incremental-logit parity. Full WSL Python passed `307 passed, 124 skipped`; host CTest passed `15/15`. On five real probe artifacts, lazy factory setup took `0.0668 s`, real layer-0 admission took `4.2789 s`, and one-token CPU layer forward took `0.03685 s` with output `[1,1,6144]`.
+- Accepted because: this is the first model-level boundary that can request real GLM layers in execution order without loading all decoder weights. Partial-head overrides are explicit and cannot silently be used for a full checkpoint.
+- Revisit: when all 78 layers and final head tensors are available, replace probe overrides with exact bundle tensors, compare full logits, and hand the provider to CUDA/pinned staging.
