@@ -555,7 +555,7 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 ## 2026-08-15 -- Reference trunk-layer cache contract
 
 - Date: 2026-08-15.
-- Commit: working-tree implementation after `ae7172f`; no CUDA or full checkpoint.
+- Commit: `761b881`; no CUDA or full checkpoint.
 - Hardware/model: WSL2 Ubuntu-24.04 CPU reference, synthetic GLM5X-compatible two-layer graph.
 - Mode: `GLM5XDecoderModelReference.from_layer_loader`, two forwards over the same two layers, `layer_cache_capacity=0` versus `2`.
 - Correctness: both modes produced identical logits. Capacity 2 retained two validated layer objects and the loader call sequence over two forwards was `[0, 1]`; the no-cache regression remains `[0, 1, 0, 1]`.
