@@ -36,6 +36,7 @@
 - [x] Add and parity-test an opt-in BF16-output raw resident grid; keep FP32 output as the default.
 - [x] Expose a bounded cublasLt workspace tuning knob and measure it on the real BF16 expert grid.
 - [x] Add and parity-test packed per-expert raw-BF16 grid inputs for future expert-major routing.
+- [x] Add model-neutral expert-major packed slab preparation with explicit route metadata.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [ ] Validate BF16 dequantized execution against nonzero real GLM shard data and quality metrics.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.

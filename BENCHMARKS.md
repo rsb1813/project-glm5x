@@ -328,3 +328,13 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Result: CPU BF16-rounded parity passed within the existing `2e-2` test tolerance. Activation H2D was 12 bytes and FP32 output D2H was 16 bytes; four resident-grid launches were recorded.
 - Decode tok/s, prefill tok/s, TTFT, cache hit rate, natural Top-K, speculative acceptance, and task quality: not measured.
 - Caveat: this validates per-expert pointer/input addressing only. It does not benchmark a ragged GLM route distribution or claim end-to-end throughput.
+
+## 2026-08-14 -- Expert-major packed-plan correctness gate
+
+- Commit: `f87bbdc`.
+- Hardware: host C++ reference path; no CUDA and no checkpoint.
+- Model/checkpoint: tiny synthetic hidden-state slab with two routed positions and three expert assignments.
+- Mode: `build_expert_major_packed_plan`, stable first-use expert grouping, exact assignment metadata retained.
+- Result: one expert received one `[hidden]` slab and another received two slabs in route order; the test verified hidden values, expert IDs, assignment count, and contributions metadata.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, H2D/NVMe traffic, cache hit rate, Top-K quality, speculative acceptance, and task quality: not measured.
+- Caveat: this is scheduler preparation correctness, not a CUDA or end-to-end throughput result.

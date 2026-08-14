@@ -178,3 +178,8 @@
 - Added `raw_bf16_situ_mlp_grid_packed` without changing the existing common-input API. The caller supplies a flat `[expert][candidate][hidden]` slab; the backend uploads the slab once and points each pointer-array B operand at its expert segment. Scalar fallback also offsets each expert input correctly.
 - `test_cuda_dense` uses two nonzero experts with distinct one-token slabs and compares each result to the rounded CPU reference. It also checks 12 bytes of packed activation H2D and 16 bytes of FP32 output D2H on the tiny fixture.
 - This is the kernel/scheduling contract needed before exact GLM route assignment can be connected. It is not yet a ragged scheduler or a throughput result.
+
+## 2026-08-14 Expert-major packed-plan preparation
+
+- Added `build_expert_major_packed_plan` next to the existing stable first-use grouping. It validates the `[token][hidden]` input slab, copies each assignment's hidden state into its expert's assignment order, and retains token index, router slot, and contribution.
+- The implementation is model-neutral and CPU-only. It deliberately does not infer routes, load GLM tensors, or hide route scatter in CUDA. The next integration step is to bucket these groups by assignment count and feed their slabs to the packed raw-BF16 grid.

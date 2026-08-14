@@ -224,3 +224,11 @@
 - Evidence: `test_cuda_dense` now runs two nonzero experts with different one-token input slabs, checks CPU BF16-rounded parity, and verifies the packed activation/output byte counters. The test passed with the full WSL CUDA suite before documentation.
 - Accepted because: natural MoE routing produces different assignment lists per expert, and this contract removes the forced common-input assumption without changing the exact weights or route decisions. Padding/scatter policy remains explicit in the future scheduler rather than hidden in the kernel.
 - Revisit: when GLM DSA/router state is connected and a ragged expert-major benchmark can compare packed assignment counts against the common-input grid.
+
+## D-0029 -- Keep expert-major packing model-neutral
+
+- Decision: implement `build_expert_major_packed_plan` beside the existing route grouping utility. It copies token hidden states into per-expert assignment order and preserves token/router-slot/contribution metadata; it does not depend on GLM tensor names or CUDA.
+- Alternatives: embed packing inside the CUDA backend, make the backend infer routing from raw scores, or add a GLM-specific scheduler before the exact router exists.
+- Evidence: the C++ expert-major test covers a route where one expert receives one token and another receives two, and verifies both slab contents and assignment count.
+- Accepted because: the same packed representation can feed raw-BF16 CUDA, CPU reference, or a future MTP verifier without weakening natural routing. Keeping route scatter outside the kernel makes quality/audit telemetry possible.
+- Revisit: when the GLM runtime has real router scores and can bucket groups by assignment count for a measured ragged block.
