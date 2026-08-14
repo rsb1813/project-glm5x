@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, and the portable `GLM5XACT` activation handoff are implemented over five bounded real shards. The implementation evidence is in `30bf5d4`; public Linux correctness `31806277016` and CodeQL `31806277022` are green.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, and the portable `GLM5XACT` activation handoff are implemented over five bounded real shards. The implementation evidence is in `30bf5d4`; public Linux correctness `31806277016` and CodeQL `31806277022` are green, and the documentation head is `8c7351f`.
 
 ## Completed
 
@@ -109,7 +109,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Sparse-packed probe: deterministic 8-expert/2-token pattern measured 965,550 ns/block versus 1,040,559 ns for the common-input rerun; this is not learned routing or end-to-end throughput.
 - Latest rerun at `1f43e1a`: common 927,744 ns/block versus sparse-packed 939,149 ns/block, so sparse-packed was about 1.2% slower in this sample. The direction changed from the earlier sample; no stable packed speedup is assumed.
 - Historical K3X evidence checks are explicitly skipped when their absent `results/` artifacts are not shipped; the Linux workflow still builds C++, runs CTest, and runs all new GLM5X tests. The Windows local environment still lacks the Linux-built executable for one cross-language test.
-- Public Linux correctness workflow `31806277016` and CodeQL workflow `31806277022` both passed for implementation commit `30bf5d4`. The workflows still emit non-failing Node 20 and CodeQL v3 deprecation annotations.
+- Public Linux correctness workflow `31806277016` and CodeQL workflow `31806277022` both passed for implementation commit `30bf5d4`; documentation head `8c7351f` also passed correctness `31806748306` and CodeQL `31806748296`. The workflows still emit non-failing Node 20 and CodeQL v3 deprecation annotations.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
 - Resident expert-major batch result: 8 groups x 4 candidates, 1,641,591 ns/candidate token, cold weight H2D 160,432,128 bytes and warm weight H2D 0 bytes.
@@ -120,5 +120,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
-- Last known-good implementation HEAD: `30bf5d4` (`feat: expose GLM MoE activation inputs`); this documentation update is the next commit. WSL CUDA CTest 27/27 is green; the public Python/cross-language suite passed, while the Windows interpreter lacks pytest for a local rerun. Public Linux correctness `31806277016` and CodeQL `31806277022` both passed.
+- Last known-good implementation HEAD: `30bf5d4` (`feat: expose GLM MoE activation inputs`); latest documentation HEAD: `8c7351f` (`docs: record activation boundary and CI recovery`). WSL CUDA CTest 27/27 is green; the public Python/cross-language suite passed, while the Windows interpreter lacks pytest for a local rerun. Public Linux correctness `31806277016`, CodeQL `31806277022`, documentation correctness `31806748306`, and documentation CodeQL `31806748296` all passed.
 - Next bottleneck: export the exact layer-10 q-residual/MLA/DSA hidden state into `GLM5XACT`, run the expected-output parity path on a real bounded artifact, then add pinned/asynchronous raw H2D, direct tensor-core algorithm selection, all-layer exact state, nonzero full-layer parity, and VRAM-pressure-aware residency; full weights remain intentionally absent.
