@@ -83,3 +83,23 @@ def test_model_reference_can_retain_trunk_layers_between_forwards() -> None:
     assert calls == [0, 1]
     assert model.layer_cache_capacity == 2
     assert model.cached_layer_count == 2
+
+    evicted_calls: list[int] = []
+
+    def load_evicted(layer_id: int):
+        evicted_calls.append(layer_id)
+        return layer
+
+    evicted_model = GLM5XDecoderModelReference.from_layer_loader(
+        embedding=model.embedding,
+        layer_count=2,
+        layer_loader=load_evicted,
+        final_norm=model.final_norm,
+        lm_head=model.lm_head,
+        rope_dim=2,
+        layer_cache_capacity=1,
+    )
+    evicted_model.forward_tokens(torch.tensor([1, 2]))
+    evicted_model.forward_tokens(torch.tensor([1, 2]))
+    assert evicted_calls == [0, 1, 0, 1]
+    assert evicted_model.cached_layer_count == 1
