@@ -425,3 +425,14 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Paired sparse-packed result: `1,631,127 ns` warm median/block, `192,610,519 ns` cold latency, `603,979,776` resident bytes, and `0.00146589963697` maximum CPU-relative difference.
 - Relative result: the expert-major bucket/scatter path was approximately `16.4%` lower warm block latency than common in this sample. This is a bounded FFN scheduling measurement, not a decode tok/s estimate.
 - Not measured: end-to-end decode/prefill tok/s, TTFT, full-layer quality, natural Top-K quality, speculative acceptance, cache hit rate, NVMe GB/token, system RAM, and full-model VRAM pressure.
+
+## 2026-08-14 -- Learned GLM router to raw-BF16 expert-major CUDA
+
+- Commit: `e599dfb`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: five bounded `zai-org/GLM-5.2` probe artifacts, complete layer-10 expert union; no full checkpoint.
+- Mode: official router tensors from the shard (`gate.weight` BF16 and `e_score_correction_bias` FP32), float32 sigmoid scores, natural Top-8, routed scale 2.5, raw-BF16 expert-major bucket/scatter, 20 warmups and 100 measured iterations, synchronous transfers.
+- Two-token result: 15 unique expert groups, 16 assignments, `1,905,668 ns` warm median/block, `214,569,151 ns` cold latency, `9,619,390,326 ns` host load, `1,132,462,080` expert bytes resident, `3,146,752` router bytes read, `1,132,462,080` cold weight H2D bytes, `0` warm weight H2D bytes, and `0.000865828245878` maximum CPU-relative difference. VRAM admission budget was 2 GiB.
+- Four-token result: 29 unique expert groups, 32 assignments, `3,757,986 ns` warm median/block, `327,788,285 ns` cold latency, `18,399,328,859 ns` host load, `2,189,426,688` expert bytes resident, `3,146,752` router bytes read, `2,189,426,688` cold weight H2D bytes, `0` warm weight H2D bytes, and `0.000666717009153` maximum CPU-relative difference. VRAM admission budget was 4 GiB.
+- BF16-output cross-check: two tokens measured `1,937,250 ns` and `0.00194821879268` maximum CPU-relative difference, so BF16 output remains opt-in rather than a default quality path.
+- Interpretation: this is the first real routing-aware GLM MoE/FFN measurement. The route and expert union are real, but MLA/DSA, trunk residuals, logits, and token generation are not included; no end-to-end tok/s claim follows.

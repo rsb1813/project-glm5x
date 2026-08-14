@@ -224,3 +224,9 @@
 - WSL CUDA CTest passed 26/26 and CPU CTest passed 14/14. The Windows Python interpreter has no pytest module, so the focused 42/42 Python result remains the last WSL Python evidence rather than a new local rerun.
 - On five bounded real GLM-5.2 shard artifacts, deterministic 8-group/10-assignment/2-token expert-major measured `1,380,314 ns` warm median per block versus `1,651,193 ns` common and `1,631,127 ns` sparse-packed. Maximum CPU-relative error was `0.1471%`, resident bytes `603,979,776`, and warm weight H2D `0`.
 - This is an executable ragged FFN scheduling boundary, not learned GLM routing, a full layer, or end-to-end tok/s. The next bottleneck is connecting exact router/MLA/DSA outputs and measuring pinned asynchronous staging.
+
+## 2026-08-14 Learned GLM router expert-major probe
+
+- Extended the real-expert benchmark with `learned-expert-major`. It validates and reads the actual layer-10 router BF16 matrix plus FP32 correction bias, uses the already-tested natural Top-8 policy, computes routed contributions with scale 2.5, and loads only the selected expert union.
+- A 2 GiB budget was required for two tokens because the real route selected 15 experts and 1.132 GB of BF16 expert roles. The 20-warmup/100-iteration FP32-output run measured 1.905668 ms/block, 0.0866% maximum CPU-relative difference, and zero warm weight H2D. A 4-token run selected 29 experts and measured 3.757986 ms/block with 0.0667% relative difference under a 4 GiB budget.
+- The earlier deterministic route is now clearly separated from this learned route. Neither includes MLA/DSA, trunk residuals, logits, or generation, so neither is a model tok/s result.

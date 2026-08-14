@@ -41,6 +41,8 @@
 - [x] Add stable ragged expert-major packed-batch bucketing for CUDA dispatch.
 - [x] Add exact expert-major contribution scatter after packed CUDA outputs.
 - [x] Connect ragged expert-major buckets and weighted scatter to the raw-BF16 CUDA grid API; keep learned GLM routing separate.
+- [x] Add official GLM-5.2 router-weight/correction-bias loading and learned natural Top-8 expert-major CUDA benchmark mode.
+- [x] Add explicit resident VRAM budget control for the learned expert-union probe.
 - [x] Make Linux correctness reproducible when migrated historical benchmark evidence is absent; keep new GLM tests active.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [x] Add lazy official-router/shared-SwiGLU layer-10 reference over the bounded five-shard bundle.
@@ -51,3 +53,4 @@
 - [ ] Add MTP/DSpark expert-major verification to the GLM path.
 - [ ] Run real GLM-5.2 quality and throughput benchmarks.
 - [ ] Feed the exact layer-10 GLM router/MLA/DSA output into the CUDA expert-major plan and verify nonzero full-layer parity.
+- [ ] Feed the exact layer-10 MLA/DSA hidden state into the learned router benchmark and compare complete layer output against Python reference.
