@@ -20,6 +20,8 @@
 - [x] Add explicit descriptor-shaped DSA query/key projection boundary.
 - [x] Resolve official GLM indexer full/shared tensor roles from the safetensors index.
 - [x] Validate one real GLM-5.2 shard header against the manifest without materializing payloads.
+- [x] Stream one real BF16 GLM-5.2 shard into an aligned artifact and read it from Python/C++.
+- [ ] Add resumable multi-shard GLM conversion and expert-role directories.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [ ] Validate BF16 dequantized execution against nonzero real GLM shard data and quality metrics.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.

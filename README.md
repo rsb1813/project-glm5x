@@ -15,6 +15,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - `GLM5XTensorManifest` validation for safetensors shard maps and source byte totals before conversion.
 - Official manifest role resolution for GLM indexer `full/shared` layers and `wk/wq_b/weights_proj/k_norm` tensor names without opening a shard.
 - Header-only safetensors parity inspection for a bounded real GLM shard; names, shapes, and dtypes are checked without loading its 5.3 GB payload into RAM.
+- Experimental `glm5x-convert convert-shard` streams one validated shard into aligned BF16 extents and emits a tensor-name sidecar; the first real shard passed both Python and WSL C++ reader checks.
 - A GLM-5.2-shaped CUDA expert benchmark for hidden size 6144 and expert intermediate size 2048, including 1/2/4/8-token expert-major batching.
 - Exact resident MXFP4 reuse for CUDA expert-major batches; warm batches avoid re-uploading packed/scales weights.
 - Opt-in resident BF16 dequantized expert-grid path using cublasLt; the native exact MXFP4 path remains the default. Historical bounded samples measured 2.58 ms/block versus 5.39 ms native, and the latest rerun measured 4.386 ms versus 5.511 ms native. Both used about 604 MB instead of 160 MB for resident selected weights; neither is an end-to-end tok/s claim.
@@ -70,6 +71,15 @@ The converter CLI is intentionally data-free in this milestone.
 python -m glm5x_converter.cli --help
 ```
 
+After a config, safetensors index, and one local shard are available, the bounded experimental writer is invoked as follows. It does not download missing shards.
+
+```bash
+python -m glm5x_converter.cli convert-shard \
+  model-00001-of-00282.safetensors build/first-shard.k3x \
+  --config config.json --index model.safetensors.index.json \
+  --shard-name model-00001-of-00282.safetensors
+```
+
 On the RTX 5080 WSL build, the bounded expert-grid comparison is explicit about its execution mode.
 
 ```bash
@@ -88,7 +98,7 @@ The BF16 mode is experimental and can fall back to native MXFP4 when the configu
 1. GLM-5.2 descriptor, manifest, and tiny reference graph. (Descriptor/manifest and bounded CUDA baseline are complete.)
 2. TurboQuant reference KV parity and packed paged-KV contract. (Reference path is complete; packed CUDA storage is pending.)
 3. GLM-5.2 DSA/indexer state and 600k/1M capacity smoke. (Descriptor-shaped CPU/reference projections, metadata roles, and first-shard header parity are complete; conversion and learned parity are pending.)
-4. Exact CPU runtime and profiler.
+4. Resumable multi-shard conversion and exact CPU runtime/profiler. (Single-shard bounded writer is experimental.)
 5. CUDA DSA/MLA, Top-8 MoE, and compressed-KV kernels.
 6. Three-tier asynchronous expert pipeline.
 7. MTP/AURORA and DSpark-compatible expert-major verification.

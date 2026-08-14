@@ -58,6 +58,16 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality score: not measured.
 - Caveat: this validates the first shard's header and names only. It does not run GLM projections, load the 1.5 TB checkpoint, or establish model quality/throughput.
 
+## 2026-08-14 -- First bounded GLM5X shard artifact round-trip
+
+- Commit: `b4e9b19`.
+- Hardware: Windows Python converter plus WSL C++ reader; no full-model load.
+- Model/checkpoint: `zai-org/GLM-5.2`, only `model-00001-of-00282.safetensors`; source SHA-256 `004bf9404964da8ea71ea2d3ebf02148fa766b956bd4fca3f54b093e58a6a74c`.
+- Mode: `glm5x-convert convert-shard`, aligned raw BF16 extents, CRC32C per tensor, directory SHA-256/root SHA-256, and JSON sidecar name map; chunk size 8,388,608 bytes.
+- Result: 35 tensors converted to `build-glm5x-hf-probe/first-shard.k3x` (5,342,863,616 bytes), 78 layer records, 0 expert records, and `maximum_source_read_bytes=8,388,608`. Python `K3XReader.open` passed all checksums; WSL C++ `test_reader` returned exit 0.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality score: not measured.
+- Caveat: this is an experimental single-shard storage artifact. It does not yet provide resumable multi-shard conversion, expert bundle directories for raw BF16, quantization, DSA/MLA execution, or full-model throughput.
+
 ## 2026-08-14 -- GLM-5.2-shaped resident expert grid
 
 - Commit: `31678d1`.

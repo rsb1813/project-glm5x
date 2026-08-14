@@ -96,3 +96,11 @@
 - Evidence: the first 5,342,821,416-byte shard validated all 35 names and representative BF16 shapes without materializing payloads; the local machine has no complete checkpoint.
 - Accepted because: it gives a real checkpoint boundary with bounded memory and catches index/header drift before conversion.
 - Revisit: when a streaming converter can transform the same shard ranges into GLM5X extents.
+
+## D-0013 -- Reuse K3X extents for the first real GLM shard
+
+- Decision: use the existing aligned K3X extent/directory/checksum layout for a bounded raw-BF16 GLM shard, add `DType.BF16`, and keep tensor names in a GLM5X sidecar until the model-specific directory is complete.
+- Alternatives: convert BF16 to FP32 immediately, invent a second binary container before a reader exists, or wait for the complete 1.5 TB checkpoint.
+- Evidence: the first 5,342,821,416-byte shard converted with an 8 MiB maximum source read; Python checks passed and the WSL C++ reader returned exit 0 on the 5,342,863,616-byte artifact.
+- Accepted because: it proves real shard streaming and reader compatibility without loading the full model, while keeping the native K3X storage core and a reversible experimental boundary.
+- Revisit: when resumability, expert directories, and BF16 CUDA consumption are implemented.

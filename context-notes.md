@@ -60,7 +60,7 @@
 
 - The local HF metadata cache identifies `zai-org/GLM-5.2`; `hf download --dry-run` reports 295 files totaling about 1.5 TB. No shard payload was downloaded. XET support is installed and enabled.
 - The official index contains 59,585 tensors across 282 shards and a 78-entry `indexer_types` list. `GLM5XTensorManifest` now resolves shared indexer layers to the nearest preceding full layer and validates the observed component names.
-- Example metadata-only resolutions: layer 3 uses layer 2's indexer tensors, layer 7 uses layer 6's, and layer 77 uses layer 74's. Shape/dtype parity still requires a bounded real shard.
+- Example metadata-only resolutions: layer 3 uses layer 2's indexer tensors, layer 7 uses layer 6's, and layer 77 uses layer 74's. The first bounded shard now supplies the initial shape/dtype parity gate.
 - Focused GLM Python coverage becomes 23 passing tests after the role-resolution and header-parity regressions.
 
 ## 2026-08-14 First real shard header gate
@@ -68,3 +68,9 @@
 - Downloaded only `model-00001-of-00282.safetensors` (5,342,821,416 bytes) using XET high-performance mode; no other model shard was downloaded.
 - Header-only inspection validated all 35 index-listed names. The observed indexer shapes are BF16 `wk=(128,6144)`, `wq_b=(4096,2048)`, `weights_proj=(32,6144)`, and `k_norm=(128,)` for layers 0 and 1.
 - Added `inspect_safetensors_shard` and `GLM5XTensorManifest.validate_safetensors_shard`; both compare headers without materializing tensor payloads. The next boundary is bounded streaming conversion, not a full checkpoint load.
+
+## 2026-08-14 First bounded GLM shard artifact
+
+- Added `glm5x-convert convert-shard` and a raw BF16 bounded writer that reuses K3X aligned extents, CRC32C, directory/root SHA-256, and a name-preserving sidecar.
+- Converted only `model-00001-of-00282.safetensors` with an 8 MiB chunk limit. The artifact contains 35 tensors and 78 layer records; Python checksum/root verification and WSL C++ `test_reader` both passed.
+- `DType.BF16` is now accepted by the portable reader, but no CUDA BF16 weight consumption or expert-directory semantics are claimed yet. The next task is resumable multi-shard conversion.
