@@ -78,6 +78,11 @@ def test_expert_bundle_joins_roles_from_independent_artifacts(tmp_path) -> None:
     payload = GLM5XExpertBundle.open(artifact_dir / "experts.json").read_expert(0, 0)
     assert set(payload) == {"gate_proj", "up_proj", "down_proj"}
     assert all(len(value) == 16 for value in payload.values())
+    lazy_bundle = GLM5XExpertBundle.open(
+        artifact_dir / "experts.json", verify_payloads=False, verify_root=False
+    )
+    lazy_payload = lazy_bundle.read_expert(0, 0)
+    assert lazy_payload == payload
 
 
 def test_expert_bundle_rejects_reference_offset_tampering(tmp_path) -> None:

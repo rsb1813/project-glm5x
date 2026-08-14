@@ -180,10 +180,10 @@ def test_decoder_layer_bundle_loader_reads_attention_and_experts(monkeypatch, tm
     original_open = GLM5XExpertBundle.open
     open_count = 0
 
-    def count_bundle_open(path):
+    def count_bundle_open(path, **kwargs):
         nonlocal open_count
         open_count += 1
-        return original_open(path)
+        return original_open(path, **kwargs)
 
     monkeypatch.setattr(GLM5XExpertBundle, "open", staticmethod(count_bundle_open))
     layer = GLM5XDecoderLayerReference.from_bundle(

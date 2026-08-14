@@ -74,8 +74,12 @@ class GLM5XDecoderLayerReference:
         expert_intermediate_size: int = 2048,
         hidden_size: int = 6144,
         rms_norm_eps: float = 1e-5,
+        verify_payloads: bool = True,
+        verify_root: bool = True,
     ) -> "GLM5XDecoderLayerReference":
-        bundle = GLM5XExpertBundle.open(bundle_path)
+        bundle = GLM5XExpertBundle.open(
+            bundle_path, verify_payloads=verify_payloads, verify_root=verify_root
+        )
         return cls.from_open_bundle(
             bundle,
             tensor_refs=_collect_tensor_refs(bundle),
@@ -109,9 +113,13 @@ class GLM5XDecoderLayerReference:
         expert_intermediate_size: int = 2048,
         hidden_size: int = 6144,
         rms_norm_eps: float = 1e-5,
+        verify_payloads: bool = True,
+        verify_root: bool = True,
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
         """Open and validate one bundle once, then provide individual layers."""
-        bundle = GLM5XExpertBundle.open(bundle_path)
+        bundle = GLM5XExpertBundle.open(
+            bundle_path, verify_payloads=verify_payloads, verify_root=verify_root
+        )
         refs = _collect_tensor_refs(bundle)
 
         def load(layer_id: int) -> "GLM5XDecoderLayerReference":

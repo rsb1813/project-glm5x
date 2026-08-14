@@ -104,6 +104,22 @@ def test_reader_rejects_payload_corruption(synthetic_source: Path, tmp_path: Pat
         K3XReader.open(artifact)
 
 
+def test_reader_can_defer_payload_crc_until_tensor_read(
+    synthetic_source: Path, tmp_path: Path
+) -> None:
+    artifact = tmp_path / "synthetic.k3x"
+    convert(synthetic_source, artifact, chunk_bytes=257)
+    reader = K3XReader.open(artifact, verify_payloads=False, verify_root=False)
+    first = reader.tensor_records[0]
+    with artifact.open("r+b") as stream:
+        stream.seek(first.data_offset)
+        original = stream.read(1)
+        stream.seek(first.data_offset)
+        stream.write(bytes([original[0] ^ 1]))
+    with pytest.raises(K3XError, match="DATA_CRC_MISMATCH"):
+        reader.read_tensor_extents(first)
+
+
 def test_reader_rejects_unknown_required_feature(synthetic_source: Path, tmp_path: Path) -> None:
     artifact = tmp_path / "synthetic.k3x"
     convert(synthetic_source, artifact, chunk_bytes=257)

@@ -40,7 +40,13 @@ class GLM5XExpertBundle:
     experts: Mapping[tuple[int, int], Mapping[str, Mapping[str, object]]]
 
     @classmethod
-    def open(cls, path: str | Path) -> "GLM5XExpertBundle":
+    def open(
+        cls,
+        path: str | Path,
+        *,
+        verify_payloads: bool = True,
+        verify_root: bool = True,
+    ) -> "GLM5XExpertBundle":
         path = Path(path)
         try:
             metadata = json.loads(path.read_text(encoding="utf-8"))
@@ -62,7 +68,11 @@ class GLM5XExpertBundle:
             artifact = (path.parent / relative).resolve()
             if not artifact.is_file():
                 raise K3XError("EXPERT_BUNDLE_ARTIFACT_MISSING", str(artifact))
-            reader = K3XReader.open(artifact)
+            reader = K3XReader.open(
+                artifact,
+                verify_payloads=verify_payloads,
+                verify_root=verify_root,
+            )
             if (
                 item.get("file_uuid") != reader.superblock.file_uuid.hex()
                 or item.get("root_sha256") != reader.superblock.root_sha256.hex()

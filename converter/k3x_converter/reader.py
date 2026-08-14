@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 
 import google_crc32c
 
@@ -43,9 +44,18 @@ class K3XReader:
     layer_records: tuple[LayerRecord, ...]
     expert_records: tuple[ExpertRecord, ...]
     model_config: bytes
+    payloads_verified: bool = True
+    _verified_tensor_ids: set[int] = field(default_factory=set, repr=False, compare=False)
+    _validation_lock: Lock = field(default_factory=Lock, repr=False, compare=False)
 
     @classmethod
-    def open(cls, path: Path, *, verify_root: bool = True) -> "K3XReader":
+    def open(
+        cls,
+        path: Path,
+        *,
+        verify_root: bool = True,
+        verify_payloads: bool = True,
+    ) -> "K3XReader":
         path = Path(path)
         actual_length = path.stat().st_size
         with path.open("rb") as stream:
@@ -71,15 +81,16 @@ class K3XReader:
             expert_records = tuple(ExpertRecord.decode(item) for item in
                                    decode_directory(expert_bytes, b"EXPT", EXPERT_RECORD_BYTES))
             validate_extent_layout(tensor_records, actual_length, 4096)
-            for record in tensor_records:
-                data = _read_exact(stream, record.data_offset, record.data_length, actual_length)
-                if google_crc32c.value(data) != record.data_crc32c:
-                    raise K3XError("DATA_CRC_MISMATCH")
-                if record.auxiliary_length:
-                    auxiliary = _read_exact(stream, record.auxiliary_offset,
-                                            record.auxiliary_length, actual_length)
-                    if google_crc32c.value(auxiliary) != record.auxiliary_crc32c:
-                        raise K3XError("AUXILIARY_CRC_MISMATCH")
+            if verify_payloads:
+                for record in tensor_records:
+                    data = _read_exact(stream, record.data_offset, record.data_length, actual_length)
+                    if google_crc32c.value(data) != record.data_crc32c:
+                        raise K3XError("DATA_CRC_MISMATCH")
+                    if record.auxiliary_length:
+                        auxiliary = _read_exact(stream, record.auxiliary_offset,
+                                                record.auxiliary_length, actual_length)
+                        if google_crc32c.value(auxiliary) != record.auxiliary_crc32c:
+                            raise K3XError("AUXILIARY_CRC_MISMATCH")
             directory_digest = hashlib.sha256(
                 tensor_bytes + layer_bytes + expert_bytes + config
             ).digest()
@@ -87,7 +98,15 @@ class K3XReader:
                 raise K3XError("DIRECTORY_SHA256_MISMATCH")
             if verify_root and root_sha256(stream, actual_length) != superblock.root_sha256:
                 raise K3XError("ROOT_SHA256_MISMATCH")
-        return cls(path, superblock, tensor_records, layer_records, expert_records, config)
+        return cls(
+            path,
+            superblock,
+            tensor_records,
+            layer_records,
+            expert_records,
+            config,
+            verify_payloads,
+        )
 
     def read_tensor_extents(self, record: TensorRecord) -> tuple[bytes, bytes]:
         with self.path.open("rb") as stream:
@@ -98,4 +117,12 @@ class K3XReader:
                             self.superblock.file_length)
                 if record.auxiliary_length else b""
             )
+        if not self.payloads_verified:
+            with self._validation_lock:
+                if record.tensor_id not in self._verified_tensor_ids:
+                    if google_crc32c.value(data) != record.data_crc32c:
+                        raise K3XError("DATA_CRC_MISMATCH")
+                    if auxiliary and google_crc32c.value(auxiliary) != record.auxiliary_crc32c:
+                        raise K3XError("AUXILIARY_CRC_MISMATCH")
+                    self._verified_tensor_ids.add(record.tensor_id)
         return data, auxiliary
