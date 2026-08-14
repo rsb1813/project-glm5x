@@ -15,6 +15,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - Experimental bounded GLM shard writer that reuses K3X aligned extents, CRC/root checks, BF16 dtype metadata, and a name-preserving sidecar; the first real shard round-trips through Python and C++ readers.
 - The GLM writer is resumable per shard. Its atomic `.partial` plus `.resume.json` ledger binds the source SHA-256, converter/configuration fingerprint, canonical extent order, source CRC, and partial-file CRC before reuse. `convert-shards` schedules manifest shards as independent restartable units and verifies already finalized outputs instead of rewriting them.
 - Complete raw-BF16 `gate_proj/up_proj/down_proj` groups are represented by `EXPT` directory records with tensor-ID links. A shard containing only a subset of an expert's roles does not create a misleading directory record; its role names remain in the sidecar until a complete bundle is available.
+- `assemble-experts` creates a copy-free `glm5x-expert-bundle-v1` index across finalized shard artifacts. Each complete `(layer, expert)` triple points to its artifact, tensor ID, aligned offset, length, dtype, quantization, and CRC; incomplete groups are reported instead of fabricated.
 - The portable C++ reader accepts both native MXFP4 expert records and validated raw-BF16 staging records. The storage-slice loader remains MXFP4-only until the GLM BF16 execution path is connected, so metadata acceptance cannot be mistaken for runtime payload support.
 - A bounded RTX 5080 CUDA benchmark for GLM-5.2 expert dimensions (`hidden=6144`, `expert_intermediate=2048`, `group=32`) using the resident expert-grid backend.
 - Resident expert-major batch execution now admits packed/scales through the shared `ResidentWeightTable`; repeated candidate batches can reuse exact MXFP4 weights without another weight H2D upload.
@@ -26,10 +27,9 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 
 ### In progress
 
-- GLM model-specific extent roles and streaming conversion from the validated manifest.
 - GLM-5.2 reference graph with exact DSA/MLA and MoE routing.
 - Synthetic GLM-5.2 checkpoint round-trip.
-- Exact DSA/MLA graph around the official indexer, q-residual production projection, nonzero real-shard parity, quantization/calibration, and cross-shard expert bundling beyond complete same-shard triples.
+- Exact DSA/MLA graph around the official indexer, q-residual production projection, nonzero real-shard parity, quantization/calibration, and runtime consumption of the cross-shard expert bundle.
 - Wiring GLM DSA/MTP state and exact routing around the existing expert-major batch path.
 
 ### Experimental

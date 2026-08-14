@@ -96,3 +96,10 @@
 - The reader now accepts only two expert payload classes: native `dtype=UINT8, quantization=MXFP4`, or raw `dtype=BF16, quantization=NONE` with no auxiliary extent or checksum. Other expert metadata remains rejected.
 - A metadata-only mode was added to `test_reader` so multi-gigabyte real artifacts can exercise directory validation without rescanning every payload checksum. Both downloaded GLM probe artifacts now pass this gate; the full 26-test CTest suite and 31 focused GLM Python tests remain green.
 - This does not enable BF16 CUDA execution. `load_storage_expert` deliberately remains native-MXFP4-only until a separate GLM payload path is implemented and benchmarked.
+
+## 2026-08-14 Cross-shard expert bundle index
+
+- Added `glm5x-convert assemble-experts`, which opens finalized shard artifacts, validates their sidecar source digest and tensor IDs, and emits a copy-free `glm5x-expert-bundle-v1` JSON index.
+- Each complete `(layer, expert)` record contains the three role names plus artifact-relative path, tensor ID, dtype, quantization, aligned data offset, byte length, logical length, and data CRC. Duplicate roles are rejected and incomplete role groups are listed separately.
+- The two downloaded GLM probe artifacts were indexed in about 12 seconds on the Windows host. The result covers 2 artifacts, 247 tensors, and 70 complete experts with no incomplete groups. This is storage/indexer evidence, not a model execution or throughput result.
+- The bundle does not copy or quantize payload bytes. The next runtime boundary is a bounded exact BF16 expert loader that consumes these references, followed by cross-shard nonzero numerical parity.

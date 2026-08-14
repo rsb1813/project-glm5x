@@ -128,3 +128,11 @@
 - Evidence: the second real GLM shard produced 70 complete raw-BF16 expert records. Python reader validation passed, while the C++ reader rejected the same artifact because its expert-directory check required `quantization=1`. After the narrow validator change, both 5.3 GB probe artifacts pass C++ metadata-only validation.
 - Accepted because: the directory now describes the actual staging payload without weakening global tensor validation or falsely enabling the K3 MXFP4 loader.
 - Revisit: when cross-shard expert bundles and the exact GLM BF16 execution path are connected; the native MXFP4 path remains the production reference.
+
+## D-0017 -- Assemble cross-shard experts as a copy-free index
+
+- Decision: keep each converted safetensors shard as an independent `.k3x` artifact and emit a separate `glm5x-expert-bundle-v1` JSON index that references complete `gate_proj/up_proj/down_proj` roles by artifact-relative path and exact extent metadata.
+- Alternatives: concatenate all shard payloads into one new file, duplicate split roles into every shard, or make the runtime scan every sidecar on each expert request.
+- Evidence: the two downloaded probe artifacts index in about 12 seconds and yield 70 complete experts across 247 tensors without a payload copy. Duplicate roles are rejected and incomplete groups are explicit.
+- Accepted because: it preserves restartable shard ownership and avoids another multi-gigabyte write while giving the future runtime deterministic random access to all three roles.
+- Revisit: when object-store URLs, bundle relocation, cross-process locking, and exact BF16 expert loading are implemented.

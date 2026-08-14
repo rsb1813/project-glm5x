@@ -16,6 +16,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - Official manifest role resolution for GLM indexer `full/shared` layers and `wk/wq_b/weights_proj/k_norm` tensor names without opening a shard.
 - Header-only safetensors parity inspection for a bounded real GLM shard; names, shapes, and dtypes are checked without loading its 5.3 GB payload into RAM.
 - Experimental `glm5x-convert convert-shard` streams one validated shard into aligned BF16 extents, emits a tensor-name sidecar, and resumes after a worker interruption through a source/config-fingerprinted ledger. Complete `gate_proj/up_proj/down_proj` triples receive `EXPT` directory records; partial role groups remain sidecar-only.
+- `glm5x-convert assemble-experts` builds a copy-free cross-shard expert index. It records artifact-relative paths and exact tensor offsets/CRCs, so a later runtime can fetch one expert's three roles without merging multi-gigabyte payloads.
 - The portable C++ reader validates raw-BF16 `EXPT` staging records as well as native MXFP4 records. This is a metadata/format gate only; GLM BF16 payload execution is still pending.
 - `glm5x-convert convert-shards` treats every manifest shard as an independently restartable unit, skips already verified artifacts, and leaves completed shards intact when a later shard fails.
 - A GLM-5.2-shaped CUDA expert benchmark for hidden size 6144 and expert intermediate size 2048, including 1/2/4/8-token expert-major batching.

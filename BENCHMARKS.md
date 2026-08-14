@@ -6,6 +6,16 @@ The first benchmark record must include the commit, hardware, model/checkpoint i
 
 The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 31 passing tests. It is not a performance measurement.
 
+## 2026-08-14 -- Cross-shard expert bundle index
+
+- Commit: working tree after `4d596f5`; code change pending commit.
+- Hardware: Windows host Python converter/indexer; no CUDA execution and no full-model load.
+- Model/checkpoint: `zai-org/GLM-5.2`, the two bounded probe artifacts only.
+- Mode: `glm5x-convert assemble-experts`, sidecar/source digest validation, Python K3X directory and payload checks, copy-free role index emission.
+- Result: 2 artifacts and 247 tensors indexed in approximately 11.9 seconds; 70 complete experts and 0 incomplete groups. The output JSON is 72,668 bytes and contains artifact-relative paths, tensor IDs, offsets, lengths, dtypes, quantization tags, and CRC32C values.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
+- Interpretation: this measures metadata/index construction only. It does not copy payloads, load BF16 experts into CUDA, or establish end-to-end throughput.
+
 ## 2026-08-14 -- Raw-BF16 expert directory C++ reader gate
 
 - Commit: working tree after `1b22bcb`; code change pending commit.
