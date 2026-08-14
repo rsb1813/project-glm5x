@@ -183,3 +183,9 @@
 
 - Added `build_expert_major_packed_plan` next to the existing stable first-use grouping. It validates the `[token][hidden]` input slab, copies each assignment's hidden state into its expert's assignment order, and retains token index, router slot, and contribution.
 - The implementation is model-neutral and CPU-only. It deliberately does not infer routes, load GLM tensors, or hide route scatter in CUDA. The next integration step is to bucket these groups by assignment count and feed their slabs to the packed raw-BF16 grid.
+
+## 2026-08-14 Sparse-packed real-shard probe
+
+- Added `--input-mode common|sparse-packed` to `k3x_cuda_glm5x_real_expert_bench`. The sparse mode is deliberately constrained to BF16-rounded, two logical tokens, and alternates token 0/1 across the selected experts before calling the packed raw grid.
+- On the two downloaded probe artifacts, common 8-expert/2-token input measured 1,040,559 ns warm median; sparse-packed measured 965,550 ns. The lower latency is a bounded input-addressing result, not a claim about GLM's learned router or full decode.
+- BF16-output sparse-packed measured 995,611 ns with 0.3967% maximum CPU-relative difference, so FP32 output remains the safer default for quality-sensitive modes.

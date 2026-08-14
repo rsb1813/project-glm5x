@@ -319,6 +319,18 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, cache hit rate, natural Top-K, speculative acceptance, and task quality: not measured.
 - Caveat: this is a bounded expert FFN block, not full-layer or end-to-end throughput.
 
+## 2026-08-14 -- Sparse-packed real-shard probe
+
+- Commit: `2d22579`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: two bounded GLM-5.2 probe artifacts, layer 10, experts 0-7, exact raw BF16 payloads; no full checkpoint.
+- Mode: 10 warmups, 30 measured iterations, FP32 output, synchronous transfer. `common` broadcasts a 2-token block to every expert; `sparse-packed` alternates two logical tokens across experts and sends one packed token slab per expert. The assignment pattern is deterministic and not learned GLM routing.
+- Common result: 1,040,559 ns warm median/block, 0.00177719456 maximum CPU-relative difference.
+- Sparse-packed result: 965,550 ns warm median/block, 0.00166274444 maximum CPU-relative difference; zero warm weight H2D and the same 603,979,776 resident bytes.
+- BF16-output sparse-packed cross-check: 995,611 ns warm median/block and 0.00396688282 maximum CPU-relative difference.
+- Relative result: sparse-packed was approximately 7.2% lower latency in this paired sample, but it evaluates one candidate per expert instead of two and therefore is not a direct quality or tokens/s claim.
+- Decode tok/s, prefill tok/s, TTFT, natural Top-K, speculative acceptance, and task quality: not measured.
+
 ## 2026-08-14 -- Packed raw expert-grid correctness gate
 
 - Commit: `d7638af`.

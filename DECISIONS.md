@@ -232,3 +232,11 @@
 - Evidence: the C++ expert-major test covers a route where one expert receives one token and another receives two, and verifies both slab contents and assignment count.
 - Accepted because: the same packed representation can feed raw-BF16 CUDA, CPU reference, or a future MTP verifier without weakening natural routing. Keeping route scatter outside the kernel makes quality/audit telemetry possible.
 - Revisit: when the GLM runtime has real router scores and can bucket groups by assignment count for a measured ragged block.
+
+## D-0030 -- Add a deterministic sparse-packed real-shard benchmark mode
+
+- Decision: extend the bounded real-expert benchmark with `--input-mode sparse-packed`. For the explicit two-token probe, experts alternate between token 0 and token 1 and execute through `raw_bf16_situ_mlp_grid_packed`; `common` remains the default.
+- Alternatives: infer a route pattern from expert IDs, overload `--tokens` with hidden semantics, or claim the synthetic assignment pattern represents learned GLM routing.
+- Evidence: the RTX 5080 two-shard probe measured 1,040,559 ns warm median for common 8-expert/2-token input and 965,550 ns for sparse-packed one-token slabs per expert (about 7.2% lower block latency). CPU relative differences were 0.1777% and 0.1663%, respectively. BF16-output sparse-packed measured 995,611 ns with 0.3967% relative difference.
+- Accepted because: the mode measures the new packed-addressing contract with real payload bytes while labeling the route pattern as deterministic and non-learned. It cannot alter the default benchmark or quality claims.
+- Revisit: replace the deterministic pattern with exact GLM router assignments once DSA/MLA/trunk state is connected, then report real assignment-count distributions.
