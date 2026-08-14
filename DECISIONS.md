@@ -216,3 +216,11 @@
 - Evidence: on the RTX 5080 real 8-expert/4-token probe, a paired FP32-output run measured 994,529 ns with zero workspace and 967,790 ns with 64 MiB. An 8 MiB run measured 986,393 ns and a 16 MiB run 1,073,612 ns. The 64 MiB BF16-output run measured 1,080,469 ns versus 1,034,950 ns without workspace, so the result is mode- and shape-sensitive.
 - Accepted because: the option enables measured per-workload tuning without changing the default path or routing/output semantics. The reusable workspace is bounded and accounted for by normal CUDA scratch allocation.
 - Revisit: after a larger shape sweep, native tensor-core algorithm profiling, and full-layer scheduling. Do not infer end-to-end tok/s from this block-level knob.
+
+## D-0028 -- Add a packed-input raw BF16 grid contract
+
+- Decision: add `raw_bf16_situ_mlp_grid_packed` for expert-major schedulers. The input slab is `[expert][candidate][hidden]`, each pointer-array B operand selects one expert's slab, and the output remains one slab per expert for caller-owned route scatter. Keep the existing common-input grid API unchanged.
+- Alternatives: continue broadcasting one input block to every expert, add a separate GEMM launch per expert assignment, or silently infer per-expert token counts from a ragged container.
+- Evidence: `test_cuda_dense` now runs two nonzero experts with different one-token input slabs, checks CPU BF16-rounded parity, and verifies the packed activation/output byte counters. The test passed with the full WSL CUDA suite before documentation.
+- Accepted because: natural MoE routing produces different assignment lists per expert, and this contract removes the forced common-input assumption without changing the exact weights or route decisions. Padding/scatter policy remains explicit in the future scheduler rather than hidden in the kernel.
+- Revisit: when GLM DSA/router state is connected and a ragged expert-major benchmark can compare packed assignment counts against the common-input grid.

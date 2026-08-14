@@ -172,3 +172,9 @@
 - Added `cuda_cublas_workspace_bytes` and `--workspace-bytes` for the raw pointer-array grid only. The backend reserves one reusable device scratch buffer and passes it to the three projection calls; the default remains zero.
 - On the real RTX 5080 probe, zero/8 MiB/16 MiB/64 MiB FP32-output medians were 994,529/986,393/1,073,612/967,790 ns for the same 8-expert/4-token command. The 64 MiB BF16-output run was 1,080,469 ns versus 1,034,950 ns without workspace.
 - The workspace preference changes cublasLt heuristic selection and is therefore shape- and output-mode-sensitive. It is exposed for explicit tuning, not enabled globally.
+
+## 2026-08-14 Packed raw expert-grid inputs
+
+- Added `raw_bf16_situ_mlp_grid_packed` without changing the existing common-input API. The caller supplies a flat `[expert][candidate][hidden]` slab; the backend uploads the slab once and points each pointer-array B operand at its expert segment. Scalar fallback also offsets each expert input correctly.
+- `test_cuda_dense` uses two nonzero experts with distinct one-token slabs and compares each result to the rounded CPU reference. It also checks 12 bytes of packed activation H2D and 16 bytes of FP32 output D2H on the tiny fixture.
+- This is the kernel/scheduling contract needed before exact GLM route assignment can be connected. It is not yet a ragged scheduler or a throughput result.

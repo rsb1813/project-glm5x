@@ -318,3 +318,13 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Interpretation: workspace can improve FP32-output selection by about 2.7% in this sample, but the effect is not monotonic and can regress BF16 output. Keep it runtime-selectable and default-off.
 - Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, cache hit rate, natural Top-K, speculative acceptance, and task quality: not measured.
 - Caveat: this is a bounded expert FFN block, not full-layer or end-to-end throughput.
+
+## 2026-08-14 -- Packed raw expert-grid correctness gate
+
+- Commit: `d7638af`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: two-expert nonzero synthetic BF16 fixture with GLM-shaped API dimensions reduced to a tiny test matrix; no full checkpoint.
+- Mode: `raw_bf16_situ_mlp_grid_packed`, two experts, one candidate slab per expert, distinct input slab for each expert, pointer-array grid, synchronous transfer.
+- Result: CPU BF16-rounded parity passed within the existing `2e-2` test tolerance. Activation H2D was 12 bytes and FP32 output D2H was 16 bytes; four resident-grid launches were recorded.
+- Decode tok/s, prefill tok/s, TTFT, cache hit rate, natural Top-K, speculative acceptance, and task quality: not measured.
+- Caveat: this validates per-expert pointer/input addressing only. It does not benchmark a ragged GLM route distribution or claim end-to-end throughput.
