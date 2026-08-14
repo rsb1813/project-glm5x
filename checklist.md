@@ -23,6 +23,7 @@
 - [x] Validate one real GLM-5.2 shard header against the manifest without materializing payloads.
 - [x] Stream one real BF16 GLM-5.2 shard into an aligned artifact and read it from Python/C++.
 - [x] Add resumable multi-shard GLM conversion and complete same-shard expert-role directories.
+- [x] Make the C++ reader accept validated raw-BF16 expert directories while keeping the MXFP4 storage loader strict.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [ ] Validate BF16 dequantized execution against nonzero real GLM shard data and quality metrics.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.

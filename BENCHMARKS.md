@@ -6,6 +6,16 @@ The first benchmark record must include the commit, hardware, model/checkpoint i
 
 The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 31 passing tests. It is not a performance measurement.
 
+## 2026-08-14 -- Raw-BF16 expert directory C++ reader gate
+
+- Commit: working tree after `1b22bcb`; code change pending commit.
+- Hardware: Windows host conversion plus WSL C++ reader; no full-model load.
+- Model/checkpoint: `zai-org/GLM-5.2`, two bounded probe artifacts from `model-00001-of-00282.safetensors` and `model-00002-of-00282.safetensors` only.
+- Mode: C++ `test_reader <artifact> metadata`, which validates superblock, directories, tensor metadata, layer/expert links, extents, and root/directory hashes without rereading every payload checksum.
+- Result: both 5.3 GB artifacts accepted. The second artifact contains 212 tensors and 70 complete raw-BF16 expert records; the first contains 35 tensors. Full CTest result was 26/26 passed and focused GLM Python result was 31/31 passed.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
+- Interpretation: this proves the portable directory contract for raw-BF16 staging experts. It does not prove BF16 CUDA payload execution or end-to-end GLM throughput.
+
 ## 2026-08-14 -- Official GLM DSA indexer reference and real-shard payload gate
 
 - Commit: `8824307`.

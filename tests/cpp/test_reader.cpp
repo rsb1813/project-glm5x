@@ -10,6 +10,17 @@
 int main(int argc, char** argv) {
     if (argc != 2 && argc != 3) return 2;
     const auto path = std::filesystem::path(argv[1]);
+    if (argc == 3 && std::string_view(argv[2]) == "metadata") {
+        const auto metadata_reader = k3x::Reader::open(
+            path, k3x::VerifyMode::metadata_only);
+        if (!metadata_reader || metadata_reader.value().tensors().empty()) {
+            if (!metadata_reader) {
+                std::cerr << k3x::error_code_name(metadata_reader.error()) << '\n';
+            }
+            return 12;
+        }
+        return 0;
+    }
     if (argc == 3 &&
         (std::string_view(argv[2]) == "io-uring" ||
          std::string_view(argv[2]) == "direct" ||

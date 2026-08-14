@@ -612,8 +612,15 @@ Result<Reader> Reader::open(const std::filesystem::path& path,
             const auto id = little<std::uint64_t>(record, offset);
             const auto tensor = std::find_if(reader.tensors_.begin(), reader.tensors_.end(),
                                              [id](const auto& item) { return item.tensor_id == id; });
+            const bool native_mxfp4 = tensor != reader.tensors_.end() &&
+                tensor->dtype == 2 && tensor->quantization == 1;
+            const bool staged_bf16 = tensor != reader.tensors_.end() &&
+                tensor->dtype == 3 && tensor->quantization == 0 &&
+                tensor->auxiliary_length == 0 && tensor->auxiliary_offset == 0 &&
+                tensor->auxiliary_crc32c == 0;
             if (tensor == reader.tensors_.end() || tensor->layer_id != static_cast<std::int32_t>(layer) ||
-                tensor->expert_id != static_cast<std::int32_t>(expert) || tensor->quantization != 1) {
+                tensor->expert_id != static_cast<std::int32_t>(expert) ||
+                (!native_mxfp4 && !staged_bf16)) {
                 return Result<Reader>::failure(ErrorCode::invalid_directory);
             }
         }

@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5080 resident native/BF16 expert-grid baselines, and resumable independent shard conversion.
+GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5080 resident native/BF16 expert-grid baselines, and resumable independent shard conversion with raw-BF16 C++ directory parity.
 
 ## Completed
 
@@ -20,6 +20,7 @@ GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5
 - Added `glm5x-convert convert-shard`, bounded raw BF16 extent writing, sidecar tensor names, and BF16 reader metadata support; the first real shard round-trips through Python and C++ readers.
 - Added source/config-fingerprinted GLM shard resume ledgers with canonical extent/length/source-CRC/partial-CRC validation and crash-safe finalization recovery.
 - Added complete same-shard raw-BF16 expert-role directory records and `glm5x-convert convert-shards`, which converts manifest shards as independently restartable artifacts and verifies completed outputs on retry.
+- Updated the portable C++ reader to accept only validated raw-BF16 `EXPT` links in addition to native MXFP4 links. The storage-slice loader remains MXFP4-only, so this is a staging-format gate rather than BF16 execution.
 - Added and measured `k3x_cuda_glm5x_moe_bench` on the real RTX 5080 at GLM-5.2 expert dimensions.
 - Added an expert-major candidate-token benchmark mode for 1/2/4/8 tokens.
 - Added resident exact MXFP4 reuse to the CUDA expert-major batch backend and allowed resident weights in the CLI validation contract.
@@ -57,6 +58,7 @@ GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5
 - Focused GLM descriptor, manifest, CLI, toy reference, TurboQuant, DSA, official indexer, shard-converter, and multi-shard tests: 31 passed. The CUDA Python test remains skipped on Windows because the WSL ELF binary is not a Windows executable.
 - CUDA CMake build: successful in WSL with CUDA 13.3 and RTX 5080 compute capability 12.0.
 - CTest: 26/26 tests passed in WSL.
+- Real-shard C++ metadata gate: both downloaded GLM probe artifacts passed `test_reader ... metadata`; the second artifact contains 212 tensors and 70 complete raw-BF16 expert records.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
@@ -68,5 +70,5 @@ GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
-- Last known-good code HEAD: `8824307` (`feat: add official GLM DSA reference indexer`).
-- Next bottleneck: q-residual production projection, exact MLA/DSA state, nonzero GLM shard parity, cross-shard expert bundling, variable-union expert grouping, and VRAM-pressure-aware choice between native MXFP4 and BF16 resident execution; full weights remain intentionally absent.
+- Last known-good code HEAD before this change: `1b22bcb` (`docs: record official GLM DSA reference`); current reader compatibility change is verified but not committed yet.
+- Next bottleneck: cross-shard expert bundling, q-residual production projection, exact MLA/DSA state, nonzero GLM shard parity, variable-union expert grouping, and VRAM-pressure-aware choice between native MXFP4 and BF16 resident execution; full weights remain intentionally absent.

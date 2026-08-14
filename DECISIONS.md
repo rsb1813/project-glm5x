@@ -120,3 +120,11 @@
 - Evidence: the official Transformers implementation documents the five indexer tensors and scoring order; independent synthetic parity passes, and a bounded run loaded only the five layer-0 indexer tensors from the real first shard with shapes `wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and 128-element LayerNorm vectors.
 - Accepted because: it preserves a correct, inspectable reference mode and avoids claiming that the existing generic projection matches GLM's learned indexer. It also keeps real-shard reads bounded and reversible.
 - Revisit: when q-residual production weights, MLA latent projections, cache update semantics, and nonzero real-shard quality parity are connected.
+
+## D-0016 -- Accept raw-BF16 expert directory records in the portable reader
+
+- Decision: allow `EXPT` links to validated raw BF16 tensors (`dtype=BF16`, `quantization=NONE`, no auxiliary extent) in addition to native MXFP4 tensors. Keep the storage-slice expert loader strict until GLM BF16 execution exists.
+- Alternatives: omit `EXPT` records for raw BF16, accept every dtype/quantization combination, or convert raw BF16 experts to MXFP4 before writing the staging artifact.
+- Evidence: the second real GLM shard produced 70 complete raw-BF16 expert records. Python reader validation passed, while the C++ reader rejected the same artifact because its expert-directory check required `quantization=1`. After the narrow validator change, both 5.3 GB probe artifacts pass C++ metadata-only validation.
+- Accepted because: the directory now describes the actual staging payload without weakening global tensor validation or falsely enabling the K3 MXFP4 loader.
+- Revisit: when cross-shard expert bundles and the exact GLM BF16 execution path are connected; the native MXFP4 path remains the production reference.

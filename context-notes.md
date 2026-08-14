@@ -89,3 +89,10 @@
 - The loader uses `safe_open().get_tensor()` for only `wq_b`, `wk`, `k_norm.weight`, `k_norm.bias`, and `weights_proj`. A manual run on the real first shard loaded shapes `(4096,2048)`, `(128,6144)`, `(128,)`, `(128,)`, and `(32,6144)` without materializing the other 30 tensors.
 - Automated parity is synthetic and independent of the production method; the real run used zero activations only. No quality, full-layer, or tok/s claim is made. Focused GLM coverage is now 31 passing tests.
 - The official Transformers source is the reference boundary for this formula: `https://github.com/huggingface/transformers/blob/main/src/transformers/models/glm_moe_dsa/modeling_glm_moe_dsa.py`. q-residual production projection, MLA latent path, cache updates, and nonzero real-shard parity remain the next implementation boundary.
+
+## 2026-08-14 Raw-BF16 expert directory reader gate
+
+- The first real second shard contained complete same-shard raw-BF16 expert triples, but the C++ directory validator still required `quantization=MXFP4` for every `EXPT` link. Python accepted the artifact while the WSL C++ reader returned `INVALID_DIRECTORY`.
+- The reader now accepts only two expert payload classes: native `dtype=UINT8, quantization=MXFP4`, or raw `dtype=BF16, quantization=NONE` with no auxiliary extent or checksum. Other expert metadata remains rejected.
+- A metadata-only mode was added to `test_reader` so multi-gigabyte real artifacts can exercise directory validation without rescanning every payload checksum. Both downloaded GLM probe artifacts now pass this gate; the full 26-test CTest suite and 31 focused GLM Python tests remain green.
+- This does not enable BF16 CUDA execution. `load_storage_expert` deliberately remains native-MXFP4-only until a separate GLM payload path is implemented and benchmarked.
