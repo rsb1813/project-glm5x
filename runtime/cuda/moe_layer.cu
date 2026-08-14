@@ -3,6 +3,8 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 
 namespace k3x::cuda {
 namespace {
@@ -18,6 +20,27 @@ __global__ void ordered_expert_mix_kernel(
         value += contributions[slot] * outputs[slot * width + row];
     }
     mixed[row] = value;
+}
+
+__global__ void ragged_expert_mix_kernel(
+    const float* expert_outputs, const std::uint64_t* output_offsets,
+    const std::uint32_t* token_indices, const float* contributions,
+    float* mixed, std::size_t assignments, std::size_t token_count,
+    std::size_t width) {
+    const auto row = static_cast<std::size_t>(blockIdx.x) * blockDim.x +
+                     threadIdx.x;
+    const auto output_count = token_count * width;
+    if (row >= output_count) return;
+    const auto token = row / width;
+    const auto column = row % width;
+    float value = 0.0F;
+    for (std::size_t assignment = 0; assignment < assignments;
+         ++assignment) {
+        if (token_indices[assignment] != token) continue;
+        value += contributions[assignment] *
+                 expert_outputs[output_offsets[assignment] + column];
+    }
+    mixed[row] += value;
 }
 
 __global__ void strict_rms_norm_kernel(
@@ -64,6 +87,27 @@ cudaError_t launch_ordered_expert_mix(
     ordered_expert_mix_kernel<<<blocks, threads, 0, stream>>>(
         expert_outputs, device_contributions, mixed,
         host_contributions.size(), width);
+    return cudaGetLastError();
+}
+
+cudaError_t launch_ragged_expert_mix(
+    const float* expert_outputs, const std::uint64_t* output_offsets,
+    const std::uint32_t* token_indices, const float* device_contributions,
+    float* mixed, std::size_t assignment_count, std::size_t token_count,
+    std::size_t width, cudaStream_t stream) {
+    if (!expert_outputs || !output_offsets || !token_indices ||
+        !device_contributions || !mixed || assignment_count == 0 ||
+        token_count == 0 || width == 0 ||
+        token_count > std::numeric_limits<std::size_t>::max() / width) {
+        return cudaErrorInvalidValue;
+    }
+    constexpr unsigned threads = 256;
+    const auto output_count = token_count * width;
+    const auto blocks = static_cast<unsigned>((output_count + threads - 1) /
+                                              threads);
+    ragged_expert_mix_kernel<<<blocks, threads, 0, stream>>>(
+        expert_outputs, output_offsets, token_indices, device_contributions,
+        mixed, assignment_count, token_count, width);
     return cudaGetLastError();
 }
 

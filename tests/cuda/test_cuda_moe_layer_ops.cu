@@ -138,9 +138,89 @@ int test_validation() {
     return 0;
 }
 
+int test_ragged_mix() {
+    const std::array<float, 9> expert_outputs{
+        1.0F, 2.0F, 3.0F,
+        4.0F, 5.0F, 6.0F,
+        7.0F, 8.0F, 9.0F,
+    };
+    const std::array<std::uint64_t, 3> output_offsets{0, 3, 6};
+    const std::array<std::uint32_t, 3> token_indices{0, 1, 0};
+    const std::array<float, 3> contributions{0.5F, 1.0F, 0.25F};
+    const std::array<float, 6> expected{
+        2.25F, 3.0F, 3.75F,
+        4.0F, 5.0F, 6.0F,
+    };
+
+    float* device_outputs = nullptr;
+    std::uint64_t* device_offsets = nullptr;
+    std::uint32_t* device_tokens = nullptr;
+    float* device_contributions = nullptr;
+    float* device_mixed = nullptr;
+    if (cudaMalloc(&device_outputs, expert_outputs.size() * sizeof(float)) !=
+            cudaSuccess ||
+        cudaMalloc(&device_offsets, output_offsets.size() * sizeof(std::uint64_t)) !=
+            cudaSuccess ||
+        cudaMalloc(&device_tokens, token_indices.size() * sizeof(std::uint32_t)) !=
+            cudaSuccess ||
+        cudaMalloc(&device_contributions,
+                   contributions.size() * sizeof(float)) != cudaSuccess ||
+        cudaMalloc(&device_mixed, expected.size() * sizeof(float)) !=
+            cudaSuccess) {
+        return 20;
+    }
+    cudaMemcpy(device_outputs, expert_outputs.data(),
+               expert_outputs.size() * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(device_offsets, output_offsets.data(),
+               output_offsets.size() * sizeof(std::uint64_t),
+               cudaMemcpyHostToDevice);
+    cudaMemcpy(device_tokens, token_indices.data(),
+               token_indices.size() * sizeof(std::uint32_t),
+               cudaMemcpyHostToDevice);
+    cudaMemcpy(device_contributions, contributions.data(),
+               contributions.size() * sizeof(float), cudaMemcpyHostToDevice);
+    if (cudaMemset(device_mixed, 0, expected.size() * sizeof(float)) !=
+        cudaSuccess) {
+        return 22;
+    }
+    if (k3x::cuda::launch_ragged_expert_mix(
+            device_outputs, device_offsets, device_tokens,
+            device_contributions, device_mixed, contributions.size(), 2, 3,
+            nullptr) != cudaSuccess) {
+        return 23;
+    }
+    if (cudaDeviceSynchronize() != cudaSuccess) return 24;
+    std::array<float, 6> actual{};
+    cudaMemcpy(actual.data(), device_mixed,
+               actual.size() * sizeof(float), cudaMemcpyDeviceToHost);
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        if (!close(actual[index], expected[index])) return 25;
+    }
+    if (k3x::cuda::launch_ragged_expert_mix(
+            device_outputs, device_offsets, device_tokens,
+            device_contributions, device_mixed, contributions.size(), 2, 3,
+            nullptr) != cudaSuccess ||
+        cudaDeviceSynchronize() != cudaSuccess) {
+        return 26;
+    }
+    cudaMemcpy(actual.data(), device_mixed,
+               actual.size() * sizeof(float), cudaMemcpyDeviceToHost);
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        if (!close(actual[index], expected[index] * 2.0F)) return 27;
+    }
+
+    cudaFree(device_mixed);
+    cudaFree(device_contributions);
+    cudaFree(device_tokens);
+    cudaFree(device_offsets);
+    cudaFree(device_outputs);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
     if (const auto result = test_values()) return result;
-    return test_validation();
+    if (const auto result = test_validation()) return result;
+    return test_ragged_mix();
 }

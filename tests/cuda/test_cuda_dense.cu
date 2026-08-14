@@ -419,6 +419,74 @@ int test_bf16_resident_grid() {
         routed_stats.device_to_host_bytes != 16) {
         return 94;
     }
+    auto device_accumulate_options = options;
+    device_accumulate_options.cuda_expert_major_device_accumulate = true;
+    auto device_accumulate_backend =
+        k3x::make_cuda_backend(device_accumulate_options);
+    if (!device_accumulate_backend) return 95;
+    const auto device_accumulate_output =
+        device_accumulate_backend.value()->raw_bf16_situ_mlp_expert_major(
+            input, 2, packed_plan.value(), raw_experts, 1.0F, std::nullopt,
+            17, k3x::ProfilePhase::decode);
+    if (!device_accumulate_output ||
+        device_accumulate_output.value().size() != routed_output.value().size()) {
+        return 96;
+    }
+    for (std::size_t index = 0; index < routed_output.value().size(); ++index) {
+        if (!nearly_equal(device_accumulate_output.value()[index],
+                          routed_output.value()[index], 2.0e-2F)) {
+            std::cerr << "device expert accumulation mismatch at " << index
+                      << ": " << device_accumulate_output.value()[index]
+                      << " vs " << routed_output.value()[index] << '\n';
+            return 97;
+        }
+    }
+    const std::array<k3x::ExpertMajorTokenRoute, 2> varied_routes{{
+        {{0}, {0.25F}},
+        {{0, 1}, {0.5F, 0.5F}},
+    }};
+    const auto varied_plan = k3x::build_expert_major_packed_plan(
+        input, 2, 3, varied_routes);
+    if (!varied_plan) {
+        std::cerr << "varied plan construction failed\n";
+        return 98;
+    }
+    auto varied_baseline_backend = k3x::make_cuda_backend(options);
+    auto varied_device_backend =
+        k3x::make_cuda_backend(device_accumulate_options);
+    if (!varied_baseline_backend || !varied_device_backend) {
+        std::cerr << "varied backend construction failed\n";
+        return 99;
+    }
+    const auto varied_baseline =
+        varied_baseline_backend.value()->raw_bf16_situ_mlp_expert_major(
+            input, 2, varied_plan.value(), raw_experts, 1.0F, std::nullopt,
+            17, k3x::ProfilePhase::decode);
+    const auto varied_device =
+        varied_device_backend.value()->raw_bf16_situ_mlp_expert_major(
+            input, 2, varied_plan.value(), raw_experts, 1.0F, std::nullopt,
+            17, k3x::ProfilePhase::decode);
+    if (!varied_baseline || !varied_device ||
+        varied_baseline.value().size() != varied_device.value().size()) {
+        std::cerr << "varied output construction failed\n";
+        return 100;
+    }
+    for (std::size_t index = 0; index < varied_baseline.value().size();
+         ++index) {
+        if (!nearly_equal(varied_baseline.value()[index],
+                          varied_device.value()[index], 2.0e-2F)) {
+            std::cerr << "varied device expert accumulation mismatch at "
+                      << index << ": " << varied_device.value()[index]
+                      << " vs " << varied_baseline.value()[index] << '\n';
+            for (std::size_t dump = 0; dump < varied_baseline.value().size();
+                 ++dump) {
+                std::cerr << "  [" << dump << "] device="
+                          << varied_device.value()[dump] << " baseline="
+                          << varied_baseline.value()[dump] << '\n';
+            }
+            return 101;
+        }
+    }
     auto bf16_output_options = options;
     bf16_output_options.cuda_bf16_output = k3x::CudaBf16OutputMode::bf16;
     auto bf16_output_backend = k3x::make_cuda_backend(bf16_output_options);

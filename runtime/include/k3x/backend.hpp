@@ -39,6 +39,7 @@ struct BackendOptions {
     CudaTransferMode cuda_transfer{CudaTransferMode::synchronous};
     CudaBf16OutputMode cuda_bf16_output{CudaBf16OutputMode::fp32};
     CudaMoeFusionMode cuda_moe_fusion{CudaMoeFusionMode::none};
+    bool cuda_expert_major_device_accumulate{false};
     CudaWeightValidationMode cuda_weight_validation{
         CudaWeightValidationMode::per_call};
     std::uint64_t cuda_resident_bytes{};

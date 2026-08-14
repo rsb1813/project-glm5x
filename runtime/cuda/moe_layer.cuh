@@ -4,6 +4,7 @@
 #include <cuda_runtime_api.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 
 namespace k3x::cuda {
@@ -11,6 +12,12 @@ namespace k3x::cuda {
 cudaError_t launch_ordered_expert_mix(
     const float* expert_outputs, const float* device_contributions,
     std::span<const float> host_contributions, float* mixed,
+    std::size_t width, cudaStream_t stream);
+
+cudaError_t launch_ragged_expert_mix(
+    const float* expert_outputs, const std::uint64_t* output_offsets,
+    const std::uint32_t* token_indices, const float* device_contributions,
+    float* mixed, std::size_t assignment_count, std::size_t token_count,
     std::size_t width, cudaStream_t stream);
 
 cudaError_t launch_strict_rms_norm(

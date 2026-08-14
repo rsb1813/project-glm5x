@@ -45,6 +45,7 @@ struct Arguments {
     std::string precision{"fp32"};
     std::string output{"fp32"};
     std::string input_mode{"common"};
+    bool device_accumulate{false};
     std::filesystem::path input_bf16;
     std::filesystem::path expected_bf16;
 };
@@ -114,6 +115,12 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             result.output = value;
         } else if (key == "--input-mode") {
             result.input_mode = value;
+        } else if (key == "--device-accumulate") {
+            if (value != "0" && value != "1" && value != "false" &&
+                value != "true") {
+                return std::nullopt;
+            }
+            result.device_accumulate = value == "1" || value == "true";
         } else if (key == "--input-bf16") {
             result.input_bf16 = value;
         } else if (key == "--expected-bf16") {
@@ -352,6 +359,7 @@ int main(int argc, char** argv) {
                      "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
                      "[--workspace-bytes N] [--resident-bytes N] [--precision fp32|bf16-rounded] "
                      "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major|learned-expert-major|learned-moe-layer] "
+                     "[--device-accumulate 0|1] "
                      "[--input-bf16 FILE] [--expected-bf16 FILE]\n";
         return 2;
     }
@@ -685,6 +693,7 @@ int main(int argc, char** argv) {
     options.cuda_cublas_workspace_bytes = arguments->workspace_bytes;
     options.cuda_bf16_output = arguments->output == "bf16"
         ? k3x::CudaBf16OutputMode::bf16 : k3x::CudaBf16OutputMode::fp32;
+    options.cuda_expert_major_device_accumulate = arguments->device_accumulate;
     options.cuda_weight_validation = k3x::CudaWeightValidationMode::admission;
     options.cuda_resident_bytes = arguments->resident_bytes;
     auto cuda = k3x::make_cuda_backend(options);
@@ -910,7 +919,9 @@ int main(int argc, char** argv) {
               << ",\"shard_count\":" << paths.size()
               << ",\"precision\":\"" << arguments->precision << "\""
               << ",\"output\":\"" << arguments->output << "\""
-              << ",\"input_mode\":\"" << arguments->input_mode << "\"";
+              << ",\"input_mode\":\"" << arguments->input_mode << "\""
+              << ",\"device_expert_accumulate\":"
+              << (arguments->device_accumulate ? "true" : "false");
     emit_route_telemetry();
     std::cout
               << ",\"route_group_count\":"

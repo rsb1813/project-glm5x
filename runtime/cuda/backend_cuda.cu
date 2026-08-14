@@ -168,6 +168,12 @@ public:
           ffn_up_scratch_(&memory_stats_, &runtime_stats_),
           ffn_activation_scratch_(&memory_stats_, &runtime_stats_),
           ffn_output_scratch_(&memory_stats_, &runtime_stats_),
+          ffn_expert_major_accumulation_scratch_(&memory_stats_,
+                                                 &runtime_stats_),
+          ffn_expert_major_offsets_scratch_(&memory_stats_, &runtime_stats_),
+          ffn_expert_major_tokens_scratch_(&memory_stats_, &runtime_stats_),
+          ffn_expert_major_contributions_scratch_(&memory_stats_,
+                                                  &runtime_stats_),
           ffn_pointer_scratch_(&memory_stats_, &runtime_stats_),
           ffn_cublas_workspace_(&memory_stats_, &runtime_stats_),
           mxfp4_input_scratch_(&memory_stats_, &runtime_stats_),
@@ -1526,6 +1532,7 @@ public:
         }
         const auto output_size = expert_views.front().down.rows;
         if (output_size == 0 ||
+            token_count > std::numeric_limits<std::size_t>::max() / output_size ||
             plan.assignment_count >
                 std::numeric_limits<std::size_t>::max() / output_size) {
             return Result<std::vector<float>>::failure(
@@ -1556,6 +1563,165 @@ public:
         if (!batches) {
             return Result<std::vector<float>>::failure(
                 batches.error(), batches.message());
+        }
+        if (options_.cuda_expert_major_device_accumulate &&
+            options_.cuda_bf16_output == CudaBf16OutputMode::fp32) {
+            const auto output_count = token_count * output_size;
+            const auto output_bytes = output_count * sizeof(float);
+            if (ffn_expert_major_accumulation_scratch_.reserve(output_bytes) !=
+                    cudaSuccess ||
+                cudaMemsetAsync(ffn_expert_major_accumulation_scratch_.get(), 0,
+                                output_bytes, stream_) != cudaSuccess) {
+                return Result<std::vector<float>>::failure(
+                    ErrorCode::backend_unavailable,
+                    "CUDA ragged expert accumulation allocation failed");
+            }
+            std::size_t maximum_assignments = 0;
+            for (const auto& batch : batches.value()) {
+                if (batch.token_count == 0 ||
+                    batch.group_indices.size() >
+                        std::numeric_limits<std::size_t>::max() /
+                            batch.token_count) {
+                    return Result<std::vector<float>>::failure(
+                        ErrorCode::invalid_extent);
+                }
+                maximum_assignments = std::max(
+                    maximum_assignments,
+                    batch.group_indices.size() * batch.token_count);
+            }
+            constexpr auto metadata_element_bytes =
+                sizeof(std::uint64_t) + sizeof(std::uint32_t) + sizeof(float);
+            if (maximum_assignments >
+                std::numeric_limits<std::size_t>::max() /
+                    metadata_element_bytes) {
+                return Result<std::vector<float>>::failure(
+                    ErrorCode::invalid_extent);
+            }
+            if (ffn_expert_major_offsets_scratch_.reserve(
+                    maximum_assignments * sizeof(std::uint64_t)) != cudaSuccess ||
+                ffn_expert_major_tokens_scratch_.reserve(
+                    maximum_assignments * sizeof(std::uint32_t)) != cudaSuccess ||
+                ffn_expert_major_contributions_scratch_.reserve(
+                    maximum_assignments * sizeof(float)) != cudaSuccess) {
+                return Result<std::vector<float>>::failure(
+                    ErrorCode::backend_unavailable,
+                    "CUDA ragged expert metadata allocation failed");
+            }
+            auto* device_mixed = static_cast<float*>(
+                ffn_expert_major_accumulation_scratch_.get());
+            auto* device_offsets = static_cast<std::uint64_t*>(
+                ffn_expert_major_offsets_scratch_.get());
+            auto* device_tokens = static_cast<std::uint32_t*>(
+                ffn_expert_major_tokens_scratch_.get());
+            auto* device_contributions = static_cast<float*>(
+                ffn_expert_major_contributions_scratch_.get());
+            for (const auto& batch : batches.value()) {
+                std::vector<RawBf16MlpView> batch_views;
+                batch_views.reserve(batch.group_indices.size());
+                std::vector<std::uint64_t> output_offsets;
+                std::vector<std::uint32_t> token_indices;
+                std::vector<float> contributions;
+                const auto batch_assignments = batch.group_indices.size() *
+                    batch.token_count;
+                output_offsets.reserve(batch_assignments);
+                token_indices.reserve(batch_assignments);
+                contributions.reserve(batch_assignments);
+                for (std::size_t batch_index = 0;
+                     batch_index < batch.group_indices.size(); ++batch_index) {
+                    const auto group_index = batch.group_indices[batch_index];
+                    if (group_index >= expert_views.size()) {
+                        return Result<std::vector<float>>::failure(
+                            ErrorCode::invalid_extent);
+                    }
+                    batch_views.push_back(expert_views[group_index]);
+                    const auto& assignments =
+                        plan.groups[group_index].assignments;
+                    if (assignments.size() != batch.token_count) {
+                        return Result<std::vector<float>>::failure(
+                            ErrorCode::invalid_extent);
+                    }
+                    for (std::size_t local = 0; local < assignments.size();
+                         ++local) {
+                        const auto& assignment = assignments[local];
+                        if (assignment.token_index >= token_count ||
+                            assignment.token_index >
+                                std::numeric_limits<std::uint32_t>::max() ||
+                            !std::isfinite(assignment.contribution)) {
+                            return Result<std::vector<float>>::failure(
+                                ErrorCode::invalid_extent);
+                        }
+                        const auto output_offset =
+                            (batch_index * batch.token_count + local) *
+                            output_size;
+                        output_offsets.push_back(
+                            static_cast<std::uint64_t>(output_offset));
+                        token_indices.push_back(static_cast<std::uint32_t>(
+                            assignment.token_index));
+                        contributions.push_back(assignment.contribution);
+                    }
+                }
+                if (output_offsets.size() != batch_assignments ||
+                    batch.inputs.size() != batch_assignments * plan.hidden_size) {
+                    return Result<std::vector<float>>::failure(
+                        ErrorCode::invalid_extent);
+                }
+                if (cudaMemcpyAsync(
+                        device_offsets, output_offsets.data(),
+                        output_offsets.size() * sizeof(std::uint64_t),
+                        cudaMemcpyHostToDevice, stream_) != cudaSuccess ||
+                    cudaMemcpyAsync(
+                        device_tokens, token_indices.data(),
+                        token_indices.size() * sizeof(std::uint32_t),
+                        cudaMemcpyHostToDevice, stream_) != cudaSuccess ||
+                    cudaMemcpyAsync(
+                        device_contributions, contributions.data(),
+                        contributions.size() * sizeof(float),
+                        cudaMemcpyHostToDevice, stream_) != cudaSuccess) {
+                    return Result<std::vector<float>>::failure(
+                        ErrorCode::backend_unavailable,
+                        "CUDA ragged expert metadata upload failed");
+                }
+                float* device_batch_output = nullptr;
+                std::size_t device_batch_output_count = 0;
+                const auto outputs = raw_bf16_situ_mlp_grid_impl(
+                    batch.inputs, batch.token_count, batch_views, situ_beta,
+                    situ_linear, layer, phase, batch.inputs, activation,
+                    &device_batch_output, &device_batch_output_count);
+                if (!outputs || device_batch_output == nullptr ||
+                    device_batch_output_count < batch_assignments * output_size) {
+                    return Result<std::vector<float>>::failure(
+                        outputs ? ErrorCode::invalid_extent : outputs.error(),
+                        outputs ? "ragged expert device output mismatch"
+                                : outputs.message());
+                }
+                if (cuda::launch_ragged_expert_mix(
+                        device_batch_output, device_offsets, device_tokens,
+                        device_contributions, device_mixed,
+                        output_offsets.size(), token_count, output_size,
+                        stream_) != cudaSuccess) {
+                    return Result<std::vector<float>>::failure(
+                        ErrorCode::backend_unavailable,
+                        "CUDA ragged expert accumulation launch failed");
+                }
+                const auto metadata_bytes = output_offsets.size() *
+                    metadata_element_bytes;
+                runtime_stats_.activation_h2d_bytes += metadata_bytes;
+            }
+            std::vector<float> output(output_count);
+            const auto d2h_start = std::chrono::steady_clock::now();
+            if (cudaMemcpyAsync(output.data(), device_mixed, output_bytes,
+                                cudaMemcpyDeviceToHost, stream_) != cudaSuccess ||
+                cudaStreamSynchronize(stream_) != cudaSuccess) {
+                return Result<std::vector<float>>::failure(
+                    ErrorCode::backend_unavailable,
+                    "CUDA ragged expert accumulation output failed");
+            }
+            ++runtime_stats_.stream_synchronization_count;
+            runtime_stats_.device_to_host_bytes += output_bytes;
+            record(phase, ProfileOperation::device_to_host,
+                   NumericPrecision::bf16_rounded, layer, d2h_start, 0,
+                   output_bytes, 0, true);
+            return Result<std::vector<float>>::success(std::move(output));
         }
         std::vector<float> group_outputs(output_offset, 0.0F);
         for (const auto& batch : batches.value()) {
@@ -3327,7 +3493,8 @@ private:
         std::span<const RawBf16MlpView> experts, float situ_beta,
         std::optional<float> situ_linear, std::uint32_t layer,
         ProfilePhase phase, std::span<const float> packed_inputs,
-        MlpActivation activation) {
+        MlpActivation activation, float** device_output_out = nullptr,
+        std::size_t* device_output_count_out = nullptr) {
         constexpr auto precision = NumericPrecision::bf16_rounded;
         const auto operation_start = std::chrono::steady_clock::now();
         const bool bf16_output =
@@ -3463,7 +3630,7 @@ private:
         const auto intermediate_bytes = intermediate_count * sizeof(float);
         const auto intermediate_storage_bytes = intermediate_count *
             (bf16_output ? sizeof(__nv_bfloat16) : sizeof(float));
-        const auto activation_bytes = intermediate_count * sizeof(__nv_bfloat16);
+        const auto activation_bytes = intermediate_storage_bytes;
         const auto output_count = expert_tokens * output_width;
         const auto output_bytes = output_count *
             (bf16_output ? sizeof(__nv_bfloat16) : sizeof(float));
@@ -3685,6 +3852,34 @@ private:
             return Result<std::vector<std::vector<float>>>::failure(
                 ErrorCode::backend_unavailable,
                 "CUDA BF16 dense grid activation/down launch failed");
+        }
+        if (device_output_out != nullptr || device_output_count_out != nullptr) {
+            if (device_output_out == nullptr ||
+                device_output_count_out == nullptr || bf16_output) {
+                return Result<std::vector<std::vector<float>>>::failure(
+                    ErrorCode::invalid_extent,
+                    "device expert-major output requires FP32 output");
+            }
+            *device_output_out = static_cast<float*>(device_output);
+            *device_output_count_out = output_count;
+            runtime_stats_.activation_h2d_bytes += total_input_bytes;
+            runtime_stats_.weight_h2d_bytes += total_weight_transfer;
+            ++runtime_stats_.ffn_block_calls;
+            runtime_stats_.ffn_block_experts += experts.size();
+            ++runtime_stats_.resident_grid_calls;
+            runtime_stats_.resident_grid_experts += experts.size();
+            runtime_stats_.resident_grid_tokens += token_count;
+            runtime_stats_.resident_grid_expert_tokens += expert_tokens;
+            runtime_stats_.resident_grid_kernel_launches +=
+                use_pointer_batch ? 4 : 3 * experts.size() + 1;
+            runtime_stats_.resident_grid_descriptor_h2d_bytes +=
+                use_pointer_batch ? pointer_bytes : 0;
+            record(phase, ProfileOperation::activation_host_to_device,
+                   precision, layer, operation_start, 0, total_input_bytes, 0,
+                   true);
+            record(phase, ProfileOperation::weight_host_to_device, precision,
+                   layer, operation_start, 0, total_weight_transfer, 0, true);
+            return Result<std::vector<std::vector<float>>>::success({});
         }
         std::vector<float> flat_output(output_count);
         std::vector<__nv_bfloat16> flat_output_bf16;
@@ -4728,6 +4923,10 @@ private:
     cuda::ScratchBuffer ffn_up_scratch_;
     cuda::ScratchBuffer ffn_activation_scratch_;
     cuda::ScratchBuffer ffn_output_scratch_;
+    cuda::ScratchBuffer ffn_expert_major_accumulation_scratch_;
+    cuda::ScratchBuffer ffn_expert_major_offsets_scratch_;
+    cuda::ScratchBuffer ffn_expert_major_tokens_scratch_;
+    cuda::ScratchBuffer ffn_expert_major_contributions_scratch_;
     cuda::ScratchBuffer ffn_pointer_scratch_;
     cuda::ScratchBuffer ffn_cublas_workspace_;
     cuda::ScratchBuffer mxfp4_input_scratch_;
