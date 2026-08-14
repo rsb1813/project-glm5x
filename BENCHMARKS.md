@@ -663,3 +663,14 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Four-token full layer: loop warm median `18.676 ms`; expert-major warm median `20.082 ms`; this is a reference-layer timing, not decode tok/s.
 - Memory: loop added about `0.20 MB` peak over its cached baseline; expert-major added about `1.97 GB` peak because it stacks selected expert weights for batched `bmm`.
 - Interpretation: the grouped reference path is an opt-in experiment only. It is not enabled by default, not a full-model throughput result, and not a reason to claim a 15--25 tok/s target.
+
+## 2026-08-15 -- Opt-in parallel exact expert reads
+
+- Date: 2026-08-15.
+- Commit: `db2e180`.
+- Hardware/model: RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.3, five-shard official GLM-5.2 probe bundle, layer 10, exact raw-BF16 expert roles.
+- Mode: one BF16 hidden-state token through `GLM5XLayer10MoEReference._from_open_bundle`, lazy bundle admission, `cache_experts=false`, loop routing, same input for both runs. The serial reference used `expert_load_workers=1`; the overlap experiment used `expert_load_workers=4` and a bounded thread pool for payload reads only.
+- Cold MoE sublayer wall time: `5.403227270 s` with one worker versus `2.126850501 s` with four workers, approximately `60.6%` lower in this single cold sample. Eight natural selected experts were loaded in both runs.
+- Peak CUDA allocated bytes: `719,413,248` for both modes. The same input produced output maximum absolute difference `0.0`; route and loaded-expert counts matched.
+- Decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, H2D GB/token, cache hit rate, speculative acceptance, and quality benchmark were not measured. This is an exact one-layer I/O boundary result, not a full-model throughput result.
+- Interpretation: retain the serial default and expose four workers only for the full-bundle gate. Re-measure on all 78 layers with real cold/warm traffic before promoting the policy; concurrent reads may contend with compute or filesystem cache.
