@@ -100,3 +100,43 @@ def test_glm5x_moe_loads_each_selected_expert_once() -> None:
     assert result.expert_load_count == len(calls)
     model(hidden)
     assert len(calls) == result.expert_load_count
+
+
+def test_glm5x_expert_major_matches_reference_loop() -> None:
+    hidden = torch.tensor(
+        [
+            [0.5, -1.0, 0.25],
+            [1.0, 0.25, -0.75],
+            [-0.25, 0.75, 0.5],
+            [0.1, -0.4, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+    router_weight = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.5, 0.25]],
+        dtype=torch.float32,
+    )
+    correction_bias = torch.tensor([0.0, 0.1, -0.2, 0.05], dtype=torch.float32)
+    shared = _weights(0)
+
+    def make(mode: str) -> GLM5XLayer10MoEReference:
+        return GLM5XLayer10MoEReference(
+            router_weight=router_weight,
+            correction_bias=correction_bias,
+            expert_loader=lambda expert_id: _weights(expert_id),
+            shared_expert=shared,
+            top_k=2,
+            routed_scaling_factor=2.5,
+            n_group=1,
+            topk_group=1,
+            execution_mode=mode,
+        )
+
+    reference = make("loop")(hidden)
+    grouped = make("expert_major")(hidden)
+
+    torch.testing.assert_close(grouped.router_logits, reference.router_logits)
+    torch.testing.assert_close(grouped.topk_indices, reference.topk_indices)
+    torch.testing.assert_close(grouped.topk_weights, reference.topk_weights)
+    torch.testing.assert_close(grouped.output, reference.output, rtol=1e-5, atol=1e-5)
+    assert grouped.loaded_experts == reference.loaded_experts

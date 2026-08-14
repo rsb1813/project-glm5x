@@ -107,6 +107,7 @@ class GLM5XLayer10MoEReference:
         topk_group: int = 1,
         norm_topk_prob: bool = True,
         cache_experts: bool = True,
+        execution_mode: str = "loop",
     ) -> None:
         router_weight = torch.as_tensor(router_weight)
         correction_bias = torch.as_tensor(correction_bias)
@@ -131,6 +132,8 @@ class GLM5XLayer10MoEReference:
             raise ValueError("GLM5X_INVALID_ROUTED_SCALE")
         if not isinstance(cache_experts, bool):
             raise ValueError("GLM5X_INVALID_EXPERT_CACHE_FLAG")
+        if execution_mode not in {"loop", "expert_major"}:
+            raise ValueError("GLM5X_INVALID_EXECUTION_MODE")
         self.router_weight = router_weight
         self.correction_bias = correction_bias.to(torch.float32)
         self.expert_loader = expert_loader
@@ -141,6 +144,7 @@ class GLM5XLayer10MoEReference:
         self.topk_group = topk_group
         self.norm_topk_prob = bool(norm_topk_prob)
         self.cache_experts = cache_experts
+        self.execution_mode = execution_mode
         self._expert_cache: dict[int, GLM5XExpertWeights] = {}
 
     @property
@@ -204,14 +208,13 @@ class GLM5XLayer10MoEReference:
         topk_weights = topk_weights * self.routed_scaling_factor
         return logits, topk_indices, topk_weights
 
-    def __call__(self, hidden_states: torch.Tensor) -> GLM5XMoEForward:
-        hidden_states = torch.as_tensor(hidden_states)
-        if hidden_states.ndim < 2 or hidden_states.shape[-1] != self.hidden_size:
-            raise ValueError("GLM5X_MOE_HIDDEN_SHAPE")
-        original_shape = hidden_states.shape
-        flat = hidden_states.reshape(-1, self.hidden_size)
-        logits, topk_indices, topk_weights = self._route(flat)
-        output = torch.zeros_like(flat)
+    def _run_loop(
+        self,
+        flat: torch.Tensor,
+        topk_indices: torch.Tensor,
+        topk_weights: torch.Tensor,
+        output: torch.Tensor,
+    ) -> tuple[int, ...]:
         loaded: list[int] = []
         for expert_id_tensor in torch.unique(topk_indices, sorted=True):
             expert_id = int(expert_id_tensor)
@@ -221,8 +224,100 @@ class GLM5XLayer10MoEReference:
             slot_mask = topk_indices == expert_id
             token_indices, slots = torch.where(slot_mask)
             routed = self._mlp(flat[token_indices], expert)
-            weighted = routed * topk_weights[token_indices, slots].to(routed.dtype).unsqueeze(-1)
+            weighted = routed * topk_weights[token_indices, slots].to(
+                routed.dtype
+            ).unsqueeze(-1)
             output.index_add_(0, token_indices, weighted.to(output.dtype))
+        return tuple(loaded)
+
+    def _run_expert_major(
+        self,
+        flat: torch.Tensor,
+        topk_indices: torch.Tensor,
+        topk_weights: torch.Tensor,
+        output: torch.Tensor,
+    ) -> tuple[int, ...]:
+        assignments: list[tuple[int, GLM5XExpertWeights, torch.Tensor, torch.Tensor]] = []
+        loaded: list[int] = []
+        for expert_id_tensor in torch.unique(topk_indices, sorted=True):
+            expert_id = int(expert_id_tensor)
+            expert, did_load = self._load_expert(expert_id)
+            if did_load:
+                loaded.append(expert_id)
+            slot_mask = topk_indices == expert_id
+            token_indices, slots = torch.where(slot_mask)
+            assignments.append((expert_id, expert, token_indices, slots))
+
+        if not assignments:
+            return tuple(loaded)
+
+        shapes = {
+            (
+                expert.gate_proj.dtype,
+                tuple(expert.gate_proj.shape),
+                tuple(expert.down_proj.shape),
+            )
+            for _, expert, _, _ in assignments
+        }
+        if len(shapes) != 1:
+            for _, expert, token_indices, slots in assignments:
+                routed = self._mlp(flat[token_indices], expert)
+                weighted = routed * topk_weights[token_indices, slots].to(
+                    routed.dtype
+                ).unsqueeze(-1)
+                output.index_add_(0, token_indices, weighted.to(output.dtype))
+            return tuple(loaded)
+
+        work_dtype = assignments[0][1].gate_proj.dtype
+        max_assignments = max(
+            int(token_indices.numel()) for _, _, token_indices, _ in assignments
+        )
+        expert_count = len(assignments)
+        hidden_batch = torch.zeros(
+            (expert_count, max_assignments, self.hidden_size),
+            dtype=work_dtype,
+            device=flat.device,
+        )
+        for group_index, (_, _, token_indices, _) in enumerate(assignments):
+            hidden_batch[group_index, : token_indices.numel()] = flat[
+                token_indices
+            ].to(dtype=work_dtype)
+
+        gate_weight = torch.stack(
+            [expert.gate_proj for _, expert, _, _ in assignments], dim=0
+        ).to(device=flat.device, dtype=work_dtype)
+        up_weight = torch.stack(
+            [expert.up_proj for _, expert, _, _ in assignments], dim=0
+        ).to(device=flat.device, dtype=work_dtype)
+        down_weight = torch.stack(
+            [expert.down_proj for _, expert, _, _ in assignments], dim=0
+        ).to(device=flat.device, dtype=work_dtype)
+        gate = torch.bmm(hidden_batch, gate_weight.transpose(1, 2))
+        up = torch.bmm(hidden_batch, up_weight.transpose(1, 2))
+        routed = torch.bmm(
+            F.silu(gate) * up,
+            down_weight.transpose(1, 2),
+        )
+        for group_index, (_, _, token_indices, slots) in enumerate(assignments):
+            count = token_indices.numel()
+            weighted = routed[group_index, :count] * topk_weights[
+                token_indices, slots
+            ].to(routed.dtype).unsqueeze(-1)
+            output.index_add_(0, token_indices, weighted.to(output.dtype))
+        return tuple(loaded)
+
+    def __call__(self, hidden_states: torch.Tensor) -> GLM5XMoEForward:
+        hidden_states = torch.as_tensor(hidden_states)
+        if hidden_states.ndim < 2 or hidden_states.shape[-1] != self.hidden_size:
+            raise ValueError("GLM5X_MOE_HIDDEN_SHAPE")
+        original_shape = hidden_states.shape
+        flat = hidden_states.reshape(-1, self.hidden_size)
+        logits, topk_indices, topk_weights = self._route(flat)
+        output = torch.zeros_like(flat)
+        if self.execution_mode == "loop":
+            loaded = self._run_loop(flat, topk_indices, topk_weights, output)
+        else:
+            loaded = self._run_expert_major(flat, topk_indices, topk_weights, output)
         output += self._mlp(flat, self.shared_expert).to(output.dtype)
         return GLM5XMoEForward(
             output=output.reshape(original_shape),
@@ -246,6 +341,7 @@ class GLM5XLayer10MoEReference:
         norm_topk_prob: bool = True,
         expert_intermediate_size: int = 2048,
         hidden_size: int = 6144,
+        execution_mode: str = "loop",
     ) -> "GLM5XLayer10MoEReference":
         bundle = GLM5XExpertBundle.open(bundle_path)
         return cls._from_open_bundle(
@@ -260,6 +356,7 @@ class GLM5XLayer10MoEReference:
             norm_topk_prob=norm_topk_prob,
             expert_intermediate_size=expert_intermediate_size,
             hidden_size=hidden_size,
+            execution_mode=execution_mode,
         )
 
     @classmethod
@@ -278,6 +375,7 @@ class GLM5XLayer10MoEReference:
         expert_intermediate_size: int = 2048,
         hidden_size: int = 6144,
         device: torch.device | str | None = None,
+        execution_mode: str = "loop",
     ) -> "GLM5XLayer10MoEReference":
 
         prefix = f"model.layers.{layer_id}.mlp"
@@ -326,6 +424,7 @@ class GLM5XLayer10MoEReference:
             topk_group=topk_group,
             norm_topk_prob=norm_topk_prob,
             cache_experts=cache_experts,
+            execution_mode=execution_mode,
         )
 
     @staticmethod

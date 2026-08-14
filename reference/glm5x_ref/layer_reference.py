@@ -82,6 +82,7 @@ class GLM5XDecoderLayerReference:
         indexer_source_layer: int | None = None,
         indexer_rope_interleave: bool = True,
         device: torch.device | str | None = None,
+        execution_mode: str = "loop",
     ) -> "GLM5XDecoderLayerReference":
         bundle = GLM5XExpertBundle.open(
             bundle_path, verify_payloads=verify_payloads, verify_root=verify_root
@@ -105,6 +106,7 @@ class GLM5XDecoderLayerReference:
             indexer_source_layer=indexer_source_layer,
             indexer_rope_interleave=indexer_rope_interleave,
             device=device,
+            execution_mode=execution_mode,
         )
 
     @classmethod
@@ -129,6 +131,7 @@ class GLM5XDecoderLayerReference:
         indexer_source_layer: int | None = None,
         indexer_rope_interleave: bool = True,
         device: torch.device | str | None = None,
+        execution_mode: str = "loop",
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
         """Open and validate one bundle once, then provide individual layers."""
         bundle = GLM5XExpertBundle.open(
@@ -156,6 +159,7 @@ class GLM5XDecoderLayerReference:
                 indexer_source_layer=indexer_source_layer,
                 indexer_rope_interleave=indexer_rope_interleave,
                 device=device,
+                execution_mode=execution_mode,
             )
 
         return load
@@ -182,6 +186,7 @@ class GLM5XDecoderLayerReference:
         indexer_source_layer: int | None = None,
         indexer_rope_interleave: bool = True,
         device: torch.device | str | None = None,
+        execution_mode: str = "loop",
     ) -> "GLM5XDecoderLayerReference":
         if mlp_type not in {"dense", "sparse"}:
             raise ValueError("GLM5X_LAYER_MLP_TYPE")
@@ -240,6 +245,7 @@ class GLM5XDecoderLayerReference:
                 expert_intermediate_size=expert_intermediate_size,
                 hidden_size=hidden_size,
                 device=target,
+                execution_mode=execution_mode,
             )
         return cls(
             input_layernorm=read(f"{prefix}.input_layernorm.weight"),
