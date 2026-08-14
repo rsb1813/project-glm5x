@@ -1520,6 +1520,32 @@ public:
         std::optional<float> situ_linear, std::uint32_t layer,
         ProfilePhase phase,
         MlpActivation activation = MlpActivation::situ) override {
+        return raw_bf16_situ_mlp_expert_major_impl(
+            token_hidden, token_count, plan, expert_views, nullptr,
+            situ_beta, situ_linear, layer, phase, activation);
+    }
+
+    Result<std::vector<float>> raw_bf16_situ_mlp_expert_major_with_shared(
+        std::span<const float> token_hidden, std::size_t token_count,
+        const ExpertMajorPackedPlan& plan,
+        std::span<const RawBf16MlpView> expert_views,
+        RawBf16MlpView shared_view, float situ_beta,
+        std::optional<float> situ_linear, std::uint32_t layer,
+        ProfilePhase phase,
+        MlpActivation activation = MlpActivation::situ) override {
+        return raw_bf16_situ_mlp_expert_major_impl(
+            token_hidden, token_count, plan, expert_views, &shared_view,
+            situ_beta, situ_linear, layer, phase, activation);
+    }
+
+private:
+    Result<std::vector<float>> raw_bf16_situ_mlp_expert_major_impl(
+        std::span<const float> token_hidden, std::size_t token_count,
+        const ExpertMajorPackedPlan& plan,
+        std::span<const RawBf16MlpView> expert_views,
+        const RawBf16MlpView* shared_view, float situ_beta,
+        std::optional<float> situ_linear, std::uint32_t layer,
+        ProfilePhase phase, MlpActivation activation) {
         if (token_count == 0 || plan.hidden_size == 0 ||
             plan.hidden_size != 0 &&
                 token_count > std::numeric_limits<std::size_t>::max() /
@@ -1537,6 +1563,44 @@ public:
                 std::numeric_limits<std::size_t>::max() / output_size) {
             return Result<std::vector<float>>::failure(
                 ErrorCode::invalid_extent);
+        }
+        if (shared_view != nullptr) {
+            if (!options_.cuda_expert_major_device_accumulate ||
+                options_.cuda_bf16_output != CudaBf16OutputMode::fp32 ||
+                shared_view->gate.tensor_id == 0 ||
+                shared_view->up.tensor_id == 0 ||
+                shared_view->down.tensor_id == 0 ||
+                shared_view->gate.cols != plan.hidden_size ||
+                shared_view->up.cols != plan.hidden_size ||
+                shared_view->gate.rows != shared_view->up.rows ||
+                shared_view->down.cols != shared_view->gate.rows ||
+                shared_view->down.rows != output_size ||
+                shared_view->gate.values.size() !=
+                    shared_view->gate.rows * shared_view->gate.cols *
+                        sizeof(__nv_bfloat16) ||
+                shared_view->up.values.size() !=
+                    shared_view->up.rows * shared_view->up.cols *
+                        sizeof(__nv_bfloat16) ||
+                shared_view->down.values.size() !=
+                    shared_view->down.rows * shared_view->down.cols *
+                        sizeof(__nv_bfloat16)) {
+                return Result<std::vector<float>>::failure(
+                    ErrorCode::invalid_extent,
+                    "invalid shared GLM expert view");
+            }
+            std::unordered_set<std::uint64_t> tensor_ids;
+            for (const auto& expert : expert_views) {
+                tensor_ids.insert(expert.gate.tensor_id);
+                tensor_ids.insert(expert.up.tensor_id);
+                tensor_ids.insert(expert.down.tensor_id);
+            }
+            if (tensor_ids.contains(shared_view->gate.tensor_id) ||
+                tensor_ids.contains(shared_view->up.tensor_id) ||
+                tensor_ids.contains(shared_view->down.tensor_id)) {
+                return Result<std::vector<float>>::failure(
+                    ErrorCode::invalid_extent,
+                    "shared GLM expert tensor id collides with routed expert");
+            }
         }
         std::vector<std::size_t> group_offsets(plan.groups.size());
         std::size_t output_offset = 0;
@@ -1707,6 +1771,30 @@ public:
                     metadata_element_bytes;
                 runtime_stats_.activation_h2d_bytes += metadata_bytes;
             }
+            if (shared_view != nullptr) {
+                const std::array<RawBf16MlpView, 1> shared_views{*shared_view};
+                float* device_shared = nullptr;
+                std::size_t device_shared_count = 0;
+                const auto shared_outputs = raw_bf16_situ_mlp_grid_impl(
+                    token_hidden, token_count, shared_views, situ_beta,
+                    situ_linear, layer, phase, {}, activation, &device_shared,
+                    &device_shared_count);
+                if (!shared_outputs || device_shared == nullptr ||
+                    device_shared_count < output_count) {
+                    return Result<std::vector<float>>::failure(
+                        shared_outputs ? ErrorCode::invalid_extent
+                                       : shared_outputs.error(),
+                        shared_outputs ? "shared GLM device output mismatch"
+                                       : shared_outputs.message());
+                }
+                if (cuda::launch_vector_add(
+                        device_mixed, device_shared, device_mixed, output_count,
+                        stream_) != cudaSuccess) {
+                    return Result<std::vector<float>>::failure(
+                        ErrorCode::backend_unavailable,
+                        "shared GLM device accumulation launch failed");
+                }
+            }
             std::vector<float> output(output_count);
             const auto d2h_start = std::chrono::steady_clock::now();
             if (cudaMemcpyAsync(output.data(), device_mixed, output_bytes,
@@ -1761,6 +1849,7 @@ public:
             plan, token_count, output_size, group_outputs);
     }
 
+public:
     Result<std::vector<std::vector<float>>> mxfp4_situ_mlp_group(
         std::span<const float> input, std::span<const Mxfp4MlpView> experts,
         float situ_beta, std::optional<float> situ_linear,

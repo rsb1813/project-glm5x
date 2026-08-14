@@ -46,6 +46,7 @@ struct Arguments {
     std::string output{"fp32"};
     std::string input_mode{"common"};
     bool device_accumulate{false};
+    bool fuse_shared{false};
     std::filesystem::path input_bf16;
     std::filesystem::path expected_bf16;
 };
@@ -121,6 +122,12 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
                 return std::nullopt;
             }
             result.device_accumulate = value == "1" || value == "true";
+        } else if (key == "--fuse-shared") {
+            if (value != "0" && value != "1" && value != "false" &&
+                value != "true") {
+                return std::nullopt;
+            }
+            result.fuse_shared = value == "1" || value == "true";
         } else if (key == "--input-bf16") {
             result.input_bf16 = value;
         } else if (key == "--expected-bf16") {
@@ -148,6 +155,11 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
         return std::nullopt;
     }
     if (!result.expected_bf16.empty() && result.input_bf16.empty()) {
+        return std::nullopt;
+    }
+    if (result.fuse_shared &&
+        (result.input_mode != "learned-moe-layer" ||
+         !result.device_accumulate || result.output != "fp32")) {
         return std::nullopt;
     }
     return result;
@@ -360,6 +372,7 @@ int main(int argc, char** argv) {
                      "[--workspace-bytes N] [--resident-bytes N] [--precision fp32|bf16-rounded] "
                      "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major|learned-expert-major|learned-moe-layer] "
                      "[--device-accumulate 0|1] "
+                     "[--fuse-shared 0|1] "
                      "[--input-bf16 FILE] [--expected-bf16 FILE]\n";
         return 2;
     }
@@ -760,6 +773,12 @@ int main(int argc, char** argv) {
     }
     const auto execute = [&]() {
         if (learned_moe_layer) {
+            if (arguments->fuse_shared) {
+                return cuda.value()->raw_bf16_situ_mlp_expert_major_with_shared(
+                    input, arguments->tokens, *expert_major_plan,
+                    expert_major_views, shared_fixture.raw, 1.0F, std::nullopt,
+                    arguments->layer, k3x::ProfilePhase::decode, activation);
+            }
             auto routed = cuda.value()->raw_bf16_situ_mlp_expert_major(
                 input, arguments->tokens, *expert_major_plan,
                 expert_major_views, 1.0F, std::nullopt, arguments->layer,
@@ -921,7 +940,9 @@ int main(int argc, char** argv) {
               << ",\"output\":\"" << arguments->output << "\""
               << ",\"input_mode\":\"" << arguments->input_mode << "\""
               << ",\"device_expert_accumulate\":"
-              << (arguments->device_accumulate ? "true" : "false");
+              << (arguments->device_accumulate ? "true" : "false")
+              << ",\"fused_shared\":"
+              << (arguments->fuse_shared ? "true" : "false");
     emit_route_telemetry();
     std::cout
               << ",\"route_group_count\":"

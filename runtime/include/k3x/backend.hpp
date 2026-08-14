@@ -223,6 +223,15 @@ public:
         return Result<std::vector<float>>::failure(
             ErrorCode::backend_unavailable);
     }
+    virtual Result<std::vector<float>>
+    raw_bf16_situ_mlp_expert_major_with_shared(
+        std::span<const float>, std::size_t, const ExpertMajorPackedPlan&,
+        std::span<const RawBf16MlpView>, RawBf16MlpView, float,
+        std::optional<float>, std::uint32_t, ProfilePhase,
+        MlpActivation = MlpActivation::situ) {
+        return Result<std::vector<float>>::failure(
+            ErrorCode::backend_unavailable);
+    }
     virtual Result<std::vector<std::vector<float>>> mxfp4_situ_mlp_group(
         std::span<const float> input, std::span<const Mxfp4MlpView> experts,
         float situ_beta, std::optional<float> situ_linear,

@@ -441,6 +441,51 @@ int test_bf16_resident_grid() {
             return 97;
         }
     }
+    const k3x::RawBf16MlpView shared_raw{
+        {707, raw_weights[0], 2, 3},
+        {708, raw_weights[1], 2, 3},
+        {709, raw_weights[2], 2, 2},
+    };
+    auto fused_shared_backend =
+        k3x::make_cuda_backend(device_accumulate_options);
+    if (!fused_shared_backend) return 102;
+    const auto fused_shared_output =
+        fused_shared_backend.value()->raw_bf16_situ_mlp_expert_major_with_shared(
+            input, 2, packed_plan.value(), raw_experts, shared_raw, 1.0F,
+            std::nullopt, 17, k3x::ProfilePhase::decode);
+    if (!fused_shared_output ||
+        fused_shared_output.value().size() != routed_output.value().size()) {
+        std::cerr << "fused shared output construction failed\n";
+        return 103;
+    }
+    for (std::size_t token = 0; token < 2; ++token) {
+        const auto shared_expected = cpu->dense_situ_mlp(
+            std::span<const float>(rounded_input).subspan(token * 3, 3),
+            rounded_experts[0], 1.0F, std::nullopt, 17,
+            k3x::ProfilePhase::decode);
+        if (!shared_expected) return 104;
+        const auto routed_contribution = token == 0 ? 0.25F : 0.75F;
+        const auto routed_expected = cpu->dense_situ_mlp(
+            std::span<const float>(rounded_input).subspan(token * 3, 3),
+            rounded_experts[token], 1.0F, std::nullopt, 17,
+            k3x::ProfilePhase::decode);
+        if (!routed_expected) return 105;
+        for (std::size_t value = 0; value < shared_expected.value().size();
+             ++value) {
+            const auto combined = routed_contribution *
+                    routed_expected.value()[value] +
+                shared_expected.value()[value];
+            if (!nearly_equal(
+                    fused_shared_output.value()[token * 2 + value], combined,
+                    2.0e-2F)) {
+                std::cerr << "fused shared mismatch at " << token << ":"
+                          << value << "\n";
+                return 106;
+            }
+        }
+    }
+    const auto fused_shared_stats = fused_shared_backend.value()->runtime_stats();
+    if (fused_shared_stats.device_to_host_bytes != 16) return 107;
     const std::array<k3x::ExpertMajorTokenRoute, 2> varied_routes{{
         {{0}, {0.25F}},
         {{0, 1}, {0.5F, 0.5F}},
