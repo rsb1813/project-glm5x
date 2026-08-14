@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -29,6 +30,7 @@ struct Arguments {
     std::size_t iterations{1};
     std::string mode{"grid"};
     std::string execution{"native"};
+    std::string pattern{"zero"};
 };
 
 struct ExpertStorage {
@@ -65,6 +67,10 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
         }
         if (key == "--execution") {
             arguments.execution = argv[index + 1];
+            continue;
+        }
+        if (key == "--pattern") {
+            arguments.pattern = argv[index + 1];
             continue;
         }
         const auto value = parse_size(argv[index + 1]);
@@ -104,6 +110,10 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
         std::cerr << "execution must be native or dequantized-bf16\n";
         return std::nullopt;
     }
+    if (arguments.pattern != "zero" && arguments.pattern != "nonzero") {
+        std::cerr << "pattern must be zero or nonzero\n";
+        return std::nullopt;
+    }
     if (arguments.iterations == 0) {
         std::cerr << "iterations must be positive\n";
         return std::nullopt;
@@ -119,7 +129,8 @@ std::size_t scale_bytes(std::size_t rows, std::size_t cols) {
     return rows * ((cols + kGroupSize - 1) / kGroupSize);
 }
 
-void initialize(ExpertStorage& storage) {
+void initialize(ExpertStorage& storage, std::size_t seed,
+                bool nonzero) {
     storage.gate_packed.assign(
         packed_bytes(kIntermediateSize, kHiddenSize), std::byte{0});
     storage.gate_scales.assign(
@@ -132,6 +143,25 @@ void initialize(ExpertStorage& storage) {
         packed_bytes(kHiddenSize, kIntermediateSize), std::byte{0});
     storage.down_scales.assign(
         scale_bytes(kHiddenSize, kIntermediateSize), std::byte{127});
+    if (!nonzero) return;
+    const auto fill = [seed](std::vector<std::byte>& packed,
+                             std::vector<std::byte>& scales) {
+        for (std::size_t index = 0; index < packed.size(); ++index) {
+            const auto low = static_cast<std::uint8_t>(
+                1U + ((index + seed) % 7U));
+            const auto high = static_cast<std::uint8_t>(
+                8U | (1U + ((index + seed * 3U) % 7U)));
+            packed[index] = std::byte{static_cast<std::uint8_t>(
+                low | static_cast<std::uint8_t>(high << 4U))};
+        }
+        for (std::size_t index = 0; index < scales.size(); ++index) {
+            scales[index] = std::byte{static_cast<std::uint8_t>(
+                124U + ((index + seed) % 9U))};
+        }
+    };
+    fill(storage.gate_packed, storage.gate_scales);
+    fill(storage.up_packed, storage.up_scales);
+    fill(storage.down_packed, storage.down_scales);
 }
 
 std::uint64_t expert_payload_bytes() {
@@ -161,6 +191,29 @@ float maximum_absolute_value(
     return maximum;
 }
 
+float maximum_absolute_difference(
+    const std::vector<std::vector<float>>& actual,
+    const std::vector<std::vector<float>>& reference) {
+    if (actual.size() != reference.size()) return INFINITY;
+    float maximum = 0.0F;
+    for (std::size_t index = 0; index < actual.size(); ++index) {
+        if (actual[index].size() != reference[index].size()) return INFINITY;
+        for (std::size_t value = 0; value < actual[index].size(); ++value) {
+            maximum = std::max(
+                maximum, std::abs(actual[index][value] - reference[index][value]));
+        }
+    }
+    return maximum;
+}
+
+float maximum_relative_difference(
+    const std::vector<std::vector<float>>& actual,
+    const std::vector<std::vector<float>>& reference) {
+    const auto denominator = std::max(maximum_absolute_value(reference),
+                                      1.0e-6F);
+    return maximum_absolute_difference(actual, reference) / denominator;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -168,7 +221,10 @@ int main(int argc, char** argv) {
     if (!arguments) return 2;
 
     std::vector<ExpertStorage> storage(arguments->experts);
-    for (auto& expert : storage) initialize(expert);
+    for (std::size_t index = 0; index < storage.size(); ++index) {
+        initialize(storage[index], index,
+                   arguments->pattern == "nonzero");
+    }
 
     std::vector<k3x::Mxfp4MlpView> experts;
     experts.reserve(arguments->experts);
@@ -192,6 +248,10 @@ int main(int argc, char** argv) {
                 static_cast<float>(static_cast<int>((index + token) % 17) -
                                    8) *
                 0.001F;
+            if (arguments->pattern == "nonzero") {
+                input[token * kHiddenSize + index] +=
+                    static_cast<float>((index + 3 * token) % 11) * 0.017F;
+            }
         }
     }
 
@@ -218,16 +278,16 @@ int main(int argc, char** argv) {
         return 4;
     }
     auto& backend = *created.value();
-    const auto execute = [&]() {
+    const auto execute_backend = [&](k3x::ComputeBackend& target) {
         if (arguments->mode == "grid") {
-            return backend.mxfp4_situ_mlp_grid(
+            return target.mxfp4_situ_mlp_grid(
                 input, arguments->tokens, experts, 1.0F, std::nullopt, 1,
                 k3x::ProfilePhase::decode);
         }
         std::vector<std::vector<float>> outputs;
         outputs.reserve(arguments->experts * arguments->tokens);
         for (const auto& expert : experts) {
-            auto result = backend.mxfp4_situ_mlp_batch(
+            auto result = target.mxfp4_situ_mlp_batch(
                 input, arguments->tokens, expert, 1.0F, std::nullopt, 1,
                 k3x::ProfilePhase::decode);
             if (!result) {
@@ -241,6 +301,29 @@ int main(int argc, char** argv) {
         return k3x::Result<std::vector<std::vector<float>>>::success(
             std::move(outputs));
     };
+    const auto execute = [&]() { return execute_backend(backend); };
+
+    std::vector<std::vector<float>> native_reference;
+    if (arguments->pattern == "nonzero" &&
+        arguments->execution == "dequantized-bf16") {
+        auto reference_options = options;
+        reference_options.cuda_mxfp4_execution =
+            k3x::CudaMxfp4Execution::native;
+        auto reference_created =
+            k3x::make_cuda_backend(reference_options);
+        if (!reference_created) {
+            std::cerr << k3x::error_code_name(reference_created.error())
+                      << ": " << reference_created.message() << '\n';
+            return 4;
+        }
+        auto reference = execute_backend(*reference_created.value());
+        if (!reference) {
+            std::cerr << k3x::error_code_name(reference.error()) << ": "
+                      << reference.message() << '\n';
+            return 4;
+        }
+        native_reference = std::move(reference.value());
+    }
 
     const auto cold_start = std::chrono::steady_clock::now();
     auto cold = execute();
@@ -253,7 +336,8 @@ int main(int argc, char** argv) {
                   << cold.message() << '\n';
         return 4;
     }
-    if (maximum_absolute_value(cold.value()) > 1.0e-5F) {
+    if (arguments->pattern == "zero" &&
+        maximum_absolute_value(cold.value()) > 1.0e-5F) {
         std::cerr << "synthetic zero-weight validation failed\n";
         return 4;
     }
@@ -287,6 +371,7 @@ int main(int argc, char** argv) {
               << ",\"routing_semantics\":false"
               << ",\"mode\":\"" << arguments->mode << "\""
               << ",\"execution\":\"" << arguments->execution << "\""
+              << ",\"pattern\":\"" << arguments->pattern << "\""
               << ",\"hidden_size\":" << kHiddenSize
               << ",\"expert_intermediate_size\":" << kIntermediateSize
               << ",\"group_size\":" << kGroupSize
@@ -302,6 +387,20 @@ int main(int argc, char** argv) {
               << ",\"latency_nanoseconds_median\":" << median(samples)
               << ",\"maximum_absolute_error\":"
               << maximum_absolute_value(actual)
+              << ",\"native_reference_maximum_absolute_error\":";
+    if (native_reference.empty()) {
+        std::cout << "null";
+    } else {
+        std::cout << maximum_absolute_difference(actual, native_reference);
+    }
+    std::cout
+              << ",\"native_reference_maximum_relative_error\":";
+    if (native_reference.empty()) {
+        std::cout << "null";
+    } else {
+        std::cout << maximum_relative_difference(actual, native_reference);
+    }
+    std::cout
               << ",\"cold_weight_h2d_bytes\":"
               << runtime_after_cold.weight_h2d_bytes
               << ",\"resident_weight_bytes\":"

@@ -474,6 +474,64 @@ int test_dequantized_bf16_grid_resident() {
     return 0;
 }
 
+int test_dequantized_bf16_grid_nonzero_parity() {
+    std::array<float, 64> inputs{};
+    for (std::size_t index = 0; index < inputs.size(); ++index) {
+        inputs[index] = static_cast<float>(static_cast<int>(index % 13) - 6) *
+                        0.123F;
+    }
+    std::array<std::byte, 32> gate_packed{};
+    std::array<std::byte, 32> up_packed{};
+    std::array<std::byte, 32> down_packed{};
+    gate_packed.fill(std::byte{0x12});
+    up_packed.fill(std::byte{0x34});
+    down_packed.fill(std::byte{0x56});
+    std::array<std::byte, 2> scales{std::byte{127}, std::byte{128}};
+    const std::array<k3x::Mxfp4MlpView, 2> experts{{{
+        {{1101, gate_packed, scales, 2, 32, 32},
+         {1102, up_packed, scales, 2, 32, 32},
+         {1103, down_packed, scales, 2, 32, 32}},
+        {{1111, gate_packed, scales, 2, 32, 32},
+         {1112, up_packed, scales, 2, 32, 32},
+         {1113, down_packed, scales, 2, 32, 32}},
+    }}};
+
+    auto cpu = k3x::make_cpu_backend();
+    std::vector<std::vector<float>> expected(experts.size());
+    for (std::size_t token = 0; token < 2; ++token) {
+        const auto result = cpu->mxfp4_situ_mlp_group(
+            std::span<const float>(inputs).subspan(token * 32, 32), experts,
+            2.0F, 1.5F, 10, k3x::ProfilePhase::decode);
+        if (!result) return 110;
+        for (std::size_t expert = 0; expert < experts.size(); ++expert) {
+            expected[expert].insert(expected[expert].end(),
+                                    result.value()[expert].begin(),
+                                    result.value()[expert].end());
+        }
+    }
+
+    k3x::BackendOptions options;
+    options.kind = k3x::BackendKind::cuda_custom;
+    options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
+    options.cuda_allocation = k3x::CudaAllocationMode::reused;
+    options.cuda_weights = k3x::CudaWeightMode::resident;
+    options.cuda_mxfp4_execution =
+        k3x::CudaMxfp4Execution::dequantized_bf16;
+    options.cuda_batching = k3x::CudaBatchingMode::resident_grid;
+    options.cuda_resident_bytes = 2048;
+    auto backend = k3x::make_cuda_backend(options);
+    if (!backend) return 111;
+    const auto actual = backend.value()->mxfp4_situ_mlp_grid(
+        inputs, 2, experts, 2.0F, 1.5F, 10,
+        k3x::ProfilePhase::decode);
+    if (!actual || actual.value().size() != expected.size() ||
+        !nearly_equal(actual.value()[0], expected[0], 0.2F) ||
+        !nearly_equal(actual.value()[1], expected[1], 0.2F)) {
+        return 112;
+    }
+    return 0;
+}
+
 int test_exact_mxfp4_group() {
     const Mxfp4Fixture fixture;
     const auto experts = fixture.views();
@@ -717,6 +775,9 @@ int main() {
         return result;
     }
     if (const auto result = test_dequantized_bf16_grid_resident()) {
+        return result;
+    }
+    if (const auto result = test_dequantized_bf16_grid_nonzero_parity()) {
         return result;
     }
     if (const auto result = test_exact_mxfp4_group()) return result;
