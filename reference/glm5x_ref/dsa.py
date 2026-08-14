@@ -68,6 +68,49 @@ class GLM5XDSAConfig:
         return self.index_n_heads * self.index_head_dim
 
 
+@dataclass(frozen=True)
+class GLM5XDSAIndexer:
+    """Reference query/key projections for a descriptor-shaped DSA indexer."""
+
+    query_weight: torch.Tensor
+    key_weight: torch.Tensor
+
+    def __post_init__(self) -> None:
+        query_weight = torch.as_tensor(self.query_weight)
+        key_weight = torch.as_tensor(self.key_weight)
+        if query_weight.ndim != 2 or key_weight.ndim != 2:
+            raise ValueError("DSA_INDEXER_WEIGHTS_MUST_BE_RANK_TWO")
+        if query_weight.shape != key_weight.shape or query_weight.shape[0] <= 0:
+            raise ValueError("DSA_INDEXER_WEIGHT_SHAPE_MISMATCH")
+
+    @property
+    def index_width(self) -> int:
+        return torch.as_tensor(self.query_weight).shape[0]
+
+    @property
+    def hidden_size(self) -> int:
+        return torch.as_tensor(self.query_weight).shape[1]
+
+    def _project(self, hidden_states: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+        hidden_states = torch.as_tensor(hidden_states)
+        if hidden_states.ndim == 0 or hidden_states.shape[-1] != self.hidden_size:
+            raise ValueError("DSA_INDEXER_HIDDEN_WIDTH_MISMATCH")
+        weight = torch.as_tensor(weight)
+        return hidden_states.to(weight.dtype) @ weight.T
+
+    def project_query(self, hidden_state: torch.Tensor) -> torch.Tensor:
+        projected = self._project(hidden_state, self.query_weight)
+        if projected.ndim != 1:
+            raise ValueError("DSA_INDEXER_QUERY_MUST_BE_ONE_DIMENSION")
+        return projected
+
+    def project_keys(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        projected = self._project(hidden_states, self.key_weight)
+        if projected.ndim != 2:
+            raise ValueError("DSA_INDEXER_KEYS_MUST_BE_TWO_DIMENSIONS")
+        return projected
+
+
 def estimate_dsa_state_bytes(
     *,
     tokens: int,
@@ -139,6 +182,17 @@ class GLM5XDSAState:
         index_keys = index_keys.to(self.config.index_dtype).contiguous()
         self._index_keys = index_keys if self._index_keys is None else torch.cat((self._index_keys, index_keys), dim=0)
         self._kv_cache.append(keys, values)
+
+    def append_hidden(
+        self,
+        indexer: GLM5XDSAIndexer,
+        hidden_states: torch.Tensor,
+        keys: torch.Tensor,
+        values: torch.Tensor,
+    ) -> None:
+        if indexer.index_width != self.config.index_width:
+            raise ValueError("DSA_INDEXER_WIDTH_MISMATCH")
+        self.append(indexer.project_keys(hidden_states), keys, values)
 
     def _refresh(self, query: torch.Tensor) -> None:
         if self._index_keys is None or self.token_count == 0:

@@ -5,6 +5,7 @@ import torch
 
 from glm5x_ref.dsa import (
     GLM5XDSAConfig,
+    GLM5XDSAIndexer,
     GLM5XDSAState,
     estimate_dsa_state_bytes,
 )
@@ -112,3 +113,26 @@ def test_dsa_capacity_estimate_is_formula_only_and_scales_to_one_million() -> No
     assert at_600k > 0
     assert at_1m > at_600k
     assert at_1m / at_600k == pytest.approx(1_000_000 / 600_000, rel=0.01)
+
+
+def test_dsa_indexer_projection_feeds_state_without_direct_index_keys() -> None:
+    descriptor = _descriptor()
+    config = GLM5XDSAConfig.from_descriptor(
+        descriptor,
+        kv_config=TurboQuantConfig(bits=16, rotation="none"),
+        index_dtype=torch.float32,
+    )
+    key_weight = torch.arange(16, dtype=torch.float32).reshape(4, 4) / 7.0
+    query_weight = torch.flip(key_weight, dims=(0,))
+    indexer = GLM5XDSAIndexer(query_weight=query_weight, key_weight=key_weight)
+    state = GLM5XDSAState(config)
+    hidden = torch.eye(4)
+    keys = hidden.clone()
+    values = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+
+    state.append_hidden(indexer, hidden, keys, values)
+    query = indexer.project_query(hidden[2])
+    expected_keys = indexer.project_keys(hidden)
+    expected = torch.topk(query @ expected_keys.T / 4**0.5, k=3).indices
+
+    assert torch.equal(state.select(query, reference_mode=True), expected)
