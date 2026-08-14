@@ -18,6 +18,12 @@ from k3x_converter.reader import K3XReader
 from glm5x_converter.bundle import GLM5XExpertBundle
 
 
+def _tensor_from_readonly_buffer(data: bytes, dtype: torch.dtype) -> torch.Tensor:
+    """Decode large payloads without a second host copy; keep tiny fixtures warning-free."""
+    source = bytearray(data) if len(data) <= 4096 else memoryview(data)
+    return torch.frombuffer(source, dtype=dtype)
+
+
 @dataclass(frozen=True)
 class GLM5XExpertWeights:
     """한 routed/shared expert의 gate, up, down projection입니다."""
@@ -629,9 +635,9 @@ class GLM5XLayer10MoEReference:
         if auxiliary or record.quantization.name != "NONE":
             raise K3XError("GLM5X_LAYER_UNSUPPORTED_TENSOR", name)
         if record.dtype == DType.BF16:
-            values = torch.frombuffer(bytearray(data), dtype=torch.int16).view(torch.bfloat16)
+            values = _tensor_from_readonly_buffer(data, torch.int16).view(torch.bfloat16)
         elif record.dtype == DType.FP32:
-            values = torch.frombuffer(bytearray(data), dtype=torch.float32)
+            values = _tensor_from_readonly_buffer(data, torch.float32)
         else:
             raise K3XError("GLM5X_LAYER_UNSUPPORTED_DTYPE", name)
         expected = 1
@@ -670,7 +676,7 @@ class GLM5XLayer10MoEReference:
             data = payload.get(role)
             if data is None or len(data) != shape[0] * shape[1] * 2:
                 raise K3XError("GLM5X_LAYER_EXPERT_PAYLOAD", role)
-            value = torch.frombuffer(bytearray(data), dtype=torch.int16).view(torch.bfloat16).reshape(shape)
+            value = _tensor_from_readonly_buffer(data, torch.int16).view(torch.bfloat16).reshape(shape)
             return value if target is None else value.to(device=target)
 
         return GLM5XExpertWeights(

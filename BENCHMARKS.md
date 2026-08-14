@@ -725,3 +725,12 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Change: `GLM5XExpertBundle.open()` now constructs one record dictionary per artifact, and `read_expert()` resolves each role by tensor ID without a linear scan through `reader.tensor_records`.
 - Correctness: the expert-bundle, MLA, layer-reference, model-reference, and MoE focused suite passed `22/22`; payload equality and existing metadata/CRC checks remain covered.
 - Performance: no end-to-end decode tok/s, prefill tok/s, TTFT, NVMe GB/token, H2D GB/token, or full-model timing was measured. The optimization is a metadata-path reduction only until the complete bundle gate runs.
+
+## 2026-08-15 -- Zero-copy decode view for large role payloads
+
+- Date: 2026-08-15.
+- Commit: pending local implementation (focused verification before commit).
+- Hardware/model: WSL2 Ubuntu-24.04 Python reference bundle fixtures; no full checkpoint or CUDA execution.
+- Change: raw-BF16/FP32 tensor views now use `memoryview` above 4 KiB, while tiny fixtures use a writable fallback to avoid a PyTorch warning.
+- Correctness: the expert-bundle, MLA, layer-reference, model-reference, and MoE focused suite passed `16/16` with no warnings; tensor shapes, route metadata, and exact output assertions remain unchanged.
+- Performance: no end-to-end decode tok/s, prefill tok/s, TTFT, NVMe GB/token, H2D GB/token, or full-model timing was measured. The expected benefit is removal of one CPU-side payload copy before the existing device staging boundary.

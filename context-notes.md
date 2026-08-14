@@ -444,3 +444,9 @@
 - Added a per-artifact tensor-ID dictionary during `GLM5XExpertBundle.open()` and switched exact expert role reads from a linear record scan to dictionary lookup. Artifact identity, shape, dtype, extent, and CRC validation are unchanged.
 - TDD evidence: the new index assertion failed before implementation with `AttributeError: ... record_indexes`; after implementation the focused expert-bundle/MLA/layer/model/MoE suite passed `22/22` in `7.32 s`.
 - This is a bounded metadata-path optimization only. Full-model bundle-open, NVMe, H2D, and tok/s measurements remain pending the 282-shard assembly.
+
+## 2026-08-15 -- Large-payload memoryview decode
+
+- `layer10_moe.py` now creates tensor views directly from a read-only `memoryview` for role payloads larger than 4 KiB. This avoids a second Python-owned copy before dtype reinterpretation; the final CUDA transfer remains explicit and unchanged.
+- PyTorch warns on non-writable buffers in some tiny synthetic cases, so payloads up to 4 KiB use `bytearray`. This threshold is a warning workaround, not a quantization or correctness policy.
+- Focused expert-bundle/MLA/layer/model/MoE tests passed `16/16` with no warnings. Full-bundle memory and throughput evidence remains pending.

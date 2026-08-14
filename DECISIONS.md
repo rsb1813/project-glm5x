@@ -513,3 +513,11 @@
 - Evidence: the bundle reader previously scanned every shard's `tensor_records` for each of three expert roles. The new focused regression verifies an index entry for every opened record and the expert-bundle/MLA/layer/model/MoE suite passes `22/22`; no full-model timing is claimed before the 282-shard gate.
 - Accepted because: the change is format-compatible, keeps strict validation, and removes repeated metadata scans from the cold exact-expert path without changing payload bytes or routing.
 - Revisit: after the full-bundle gate records bundle-open time and per-token expert-read latency. If open-time memory is material, replace the Python dictionary with a compact sorted index while retaining the same validation contract.
+
+## D-0065 -- Avoid a duplicate host copy while decoding large role payloads
+
+- Decision: decode raw-BF16 and FP32 role bytes through a read-only `memoryview` for payloads larger than 4 KiB, with a writable `bytearray` fallback for tiny fixtures.
+- Alternatives: keep `bytearray` for every payload, suppress PyTorch's warning globally, or move the conversion into a new C++ reader before the Python reference gate is complete.
+- Evidence: the focused expert-bundle/MLA/layer/model/MoE suite passed `16/16` with no warnings after the fallback was added. The large-payload path remains a view over the reader bytes; no payload, route, or output-parity test changed. No full-model timing or host-memory measurement has been run yet.
+- Accepted because: it removes one avoidable CPU copy on the real multi-megabyte expert/trunk payload path while keeping the synthetic reference suite warning-free and preserving the existing exact validation boundary.
+- Revisit: after the 282-shard full-bundle gate records decode latency, host RSS, and H2D traffic. Replace the threshold or move the path to the native reader if Python view lifetime or allocator behavior becomes material.
