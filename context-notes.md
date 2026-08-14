@@ -320,3 +320,5 @@
 - After `0040791`, GitHub Actions correctness run `31824430721` passed in `2m43s`; C++ build/CTest and the full Python/cross-language step passed. CodeQL run `31824430714` also passed, with C++ analysis completing in `3m39s` and Python analysis in `2m29s`.
 - The CodeQL overlay-base warning was a non-failing fallback annotation. No current Linux failure or two-minute timeout is present on `main`.
 - The repository has zero open Dependabot PRs. Dependabot security alerts are disabled by repository configuration, so the API's `403` response confirms unavailable alerting rather than a confirmed vulnerability count.
+
+- The documentation-only follow-up `31fe66f` also passed Linux correctness as `31824846842`; CodeQL `31824846833` passed with C++ in `2m59s` and Python in `2m19s`. The overlay-base annotation remains non-failing.
