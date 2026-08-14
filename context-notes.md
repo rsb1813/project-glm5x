@@ -406,3 +406,8 @@
 - Focused parity passed `11/11`; the full WSL Python suite passed `319 passed, 124 skipped` in `132.68 s`.
 - Real RTX 5080 evidence was mixed: four-token direct MoE improved from `21.670 ms` to `18.652 ms`, but one-token direct MoE worsened from `5.584 ms` to `7.359 ms`, and the full four-token layer worsened from `18.676 ms` to `20.082 ms`.
 - The grouped path temporarily allocates about `1.97 GB` for stacked weights on the four-token probe. Keep it opt-in and pursue the resident-weight-aware C++ expert-major path for production.
+
+## 2026-08-15 -- Full-bundle reference benchmark gate
+
+- Added `tools/benchmark_glm5x_reference.py`. It takes `--bundle`, `--config`, and explicit comma-separated `--prompt` IDs, then measures prefill, TTFT, incremental decode, generated IDs, cache/execution settings, and CUDA peak memory.
+- Strict bundle admission is the default; `--lazy-bundle` is explicit. No tokenizer or estimated TPS is hidden inside the tool. The first real full-model JSON remains pending the 282-shard assembly.

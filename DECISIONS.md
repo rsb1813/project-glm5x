@@ -457,3 +457,11 @@
 - Evidence: the focused parity test and full WSL Python suite passed (`319 passed, 124 skipped`). On the real layer-10 partial bundle and RTX 5080, direct four-token MoE warm median was `21.670 ms` for loop versus `18.652 ms` for expert-major, but one-token warm median was `5.584 ms` versus `7.359 ms`; the complete four-token layer was `18.676 ms` versus `20.082 ms`. The grouped four-token MoE forward temporarily allocated about `1.97 GB` for stacked weights, while the loop path added about `0.20 MB`.
 - Accepted because: the switch provides a measured, parity-tested experiment without changing correctness mode or silently increasing VRAM pressure. The evidence does not justify enabling it for single-token decode or making it the production path; the existing C++ expert-major backend remains the intended optimization boundary.
 - Revisit: after connecting C++ expert-major execution to the exact full-layer hidden-state handoff, add a resident-weight-aware grouped kernel and remeasure one-token decode, four-token verification, peak VRAM, and quality.
+
+## D-0058 -- Add a standalone full-bundle reference benchmark gate
+
+- Decision: measure a completed GLM5X bundle through `tools/benchmark_glm5x_reference.py` before changing production runtime policy. The CLI accepts explicit token IDs, config and bundle paths, strict or lazy admission, expert/layer cache settings, and loop or expert-major execution.
+- Alternatives: infer full-model TPS from bounded layer/FFN timings, add tokenizer behavior before the model path is verified, or make the benchmark silently choose a fast mode.
+- Evidence: the existing model reference already has synthetic full-bundle prefill/incremental/greedy parity, while real full-checkpoint logits and decode remain unmeasured. The new CLI compiles, prints help, and its model-reference regression remains green (`4 passed`).
+- Accepted because: it creates one reproducible measured boundary for the first real full-model run and preserves explicit quality/reference settings. It does not change model semantics or claim a TPS result before execution.
+- Revisit: immediately after all 282 shards assemble; add a native CUDA runtime benchmark once exact full-model logits and hidden-state handoff are validated.
