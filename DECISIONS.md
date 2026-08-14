@@ -331,7 +331,7 @@
 
 ## D-0042 -- Reject prepared-bucket caching and shared-expert dispatch fusion as default optimizations
 
-- Decision: do not retain either unmeasured optimization in the default CUDA path. Restore per-call bucket construction and the separate routed/shared dispatches until a device-side accumulation design has a positive paired result.
+- Decision: do not retain either experimental optimization in the default CUDA path. Restore per-call bucket construction and the separate routed/shared dispatches until a device-side accumulation design has a positive paired result.
 - Alternatives: keep the prepared bucket list inside `ExpertMajorPackedPlan`, fuse the one-token shared expert into the routed expert-major plan, or enable either change behind a runtime flag.
 - Evidence: on the RTX 5080 with the same bounded layer-10 learned-MoE input, five-run token-1 medians were `1,307,995 ns` with both changes versus `1,265,441 ns` at the `f07d78c` baseline (about `3.4%` slower). For the real two-token activation, three-run medians were `2,191,291 ns` with bucket caching only versus `2,166,726 ns` at baseline (about `1.1%` slower). Shared fusion reduced the token-1 grid-call count but did not reduce the measured block latency. These are MoE-sublayer timings, not tok/s.
 - Rejected because: neither change produced a stable positive latency result, and keeping them would expand the public API and benchmark semantics without a demonstrated benefit. The code was reverted and the WSL host/CUDA/Python regression remained green (`15/15`, `27/27`, `301 passed, 124 skipped`).
