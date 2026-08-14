@@ -450,3 +450,9 @@
 - `layer10_moe.py` now creates tensor views directly from a read-only `memoryview` for role payloads larger than 4 KiB. This avoids a second Python-owned copy before dtype reinterpretation; the final CUDA transfer remains explicit and unchanged.
 - PyTorch warns on non-writable buffers in some tiny synthetic cases, so payloads up to 4 KiB use `bytearray`. This threshold is a warning workaround, not a quantization or correctness policy.
 - Focused expert-bundle/MLA/layer/model/MoE tests passed `16/16` with no warnings. Full-bundle memory and throughput evidence remains pending.
+
+## 2026-08-15 -- Current HEAD CI and dependency-alert triage
+
+- `1ff787b` is the current public HEAD. Linux correctness `31849485242` and CodeQL `31849485259` both passed; the earlier `214590b` correctness and CodeQL runs also passed.
+- The two Dependabot update jobs for the current push completed successfully without opening a new PR. All visible Dependabot PRs (`#1`--`#4`) are closed.
+- The repository's Dependabot security-alert API is disabled (`403`), so the UI alarm list cannot be interpreted as a verified vulnerability count. Local WSL dependency consistency passed with `python -m pip check`.

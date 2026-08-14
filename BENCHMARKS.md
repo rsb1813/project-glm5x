@@ -734,3 +734,11 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Change: raw-BF16/FP32 tensor views now use `memoryview` above 4 KiB, while tiny fixtures use a writable fallback to avoid a PyTorch warning.
 - Correctness: the expert-bundle, MLA, layer-reference, model-reference, and MoE focused suite passed `16/16` with no warnings; tensor shapes, route metadata, and exact output assertions remain unchanged.
 - Performance: no end-to-end decode tok/s, prefill tok/s, TTFT, NVMe GB/token, H2D GB/token, or full-model timing was measured. The expected benefit is removal of one CPU-side payload copy before the existing device staging boundary.
+
+## 2026-08-15 -- Public CI and Dependabot run verification
+
+- Commit: `1ff787b`.
+- Linux correctness run `31849485242`: success in approximately `2m36s`.
+- CodeQL run `31849485259`: success in approximately `3m37s`.
+- Dependabot pip update run `31849582869`: success; GitHub Actions update run `31849582874`: success. No update PR was opened; existing Dependabot PRs `#1`--`#4` remain closed.
+- Repository security-alert enumeration is disabled and returned HTTP `403`, so this confirms workflow/update health only, not a CVE count. Local WSL `python -m pip check` reported `No broken requirements found`.
