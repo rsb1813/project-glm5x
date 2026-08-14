@@ -29,6 +29,14 @@ void situ_glu(std::span<float> output, std::span<const float> gate,
     }
 }
 
+void silu_glu(std::span<float> output, std::span<const float> gate,
+              std::span<const float> up) {
+    for (std::size_t index = 0; index < output.size(); ++index) {
+        const auto sigmoid = 1.0F / (1.0F + std::exp(-gate[index]));
+        output[index] = gate[index] * sigmoid * up[index];
+    }
+}
+
 Result<std::vector<float>> decode_mxfp4(std::span<const std::byte> packed,
                                        std::span<const std::byte> scales,
                                        std::size_t rows, std::size_t cols,

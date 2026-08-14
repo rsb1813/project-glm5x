@@ -18,4 +18,12 @@ cudaError_t launch_situ_glu_bf16(
     __nv_bfloat16* output, std::size_t count, float beta,
     bool has_linear_beta, float linear_beta, cudaStream_t stream);
 
+cudaError_t launch_silu_glu(
+    const float* gate, const float* up, void* output,
+    std::size_t count, bool output_bf16, cudaStream_t stream);
+
+cudaError_t launch_silu_glu_bf16(
+    const __nv_bfloat16* gate, const __nv_bfloat16* up,
+    __nv_bfloat16* output, std::size_t count, cudaStream_t stream);
+
 }  // namespace k3x::cuda

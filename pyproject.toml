@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 glm5x-convert = "glm5x_converter.cli:main"
+glm5x-export-moe-activation = "glm5x_ref.activation_export:main"
 
 [project.optional-dependencies]
 dev = [

@@ -11,6 +11,7 @@ build-results/
 artifacts/
 *.k3x.partial
 *.k3x.resume.json
+*.gmlxact
 
 # Never commit model data or local GLM artifacts.
 models/

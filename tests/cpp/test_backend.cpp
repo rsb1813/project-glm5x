@@ -186,6 +186,23 @@ int main() {
         std::abs(dense_block.value()[1] - dense_expected[1]) > 1.0e-6F) {
         return 62;
     }
+    const auto dense_silu_block = backend->dense_situ_mlp(
+        dense_input, dense_mlp, 2.0F, 1.5F, 13,
+        k3x::ProfilePhase::decode, k3x::MlpActivation::silu);
+    if (!dense_silu_block || dense_silu_block.value().size() != 2) return 620;
+    std::array<float, 2> dense_silu_activation{};
+    k3x::silu_glu(dense_silu_activation, dense_gate_output,
+                  dense_up_output);
+    const std::array<float, 2> dense_silu_expected{
+        dense_silu_activation[0] + 2.0F * dense_silu_activation[1],
+        -dense_silu_activation[0] + 0.5F * dense_silu_activation[1],
+    };
+    if (std::abs(dense_silu_block.value()[0] - dense_silu_expected[0]) >
+            1.0e-6F ||
+        std::abs(dense_silu_block.value()[1] - dense_silu_expected[1]) >
+            1.0e-6F) {
+        return 621;
+    }
 
     std::array<std::byte, 512> expert_gate{};
     std::array<std::byte, 512> expert_up{};

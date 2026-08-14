@@ -14,6 +14,8 @@ void rms_norm(std::span<float> output, std::span<const float> input,
 void situ_glu(std::span<float> output, std::span<const float> gate,
               std::span<const float> up, float beta,
               std::optional<float> linear_beta);
+void silu_glu(std::span<float> output, std::span<const float> gate,
+              std::span<const float> up);
 Result<std::vector<float>> decode_mxfp4(std::span<const std::byte> packed,
                                        std::span<const std::byte> scales,
                                        std::size_t rows, std::size_t cols,

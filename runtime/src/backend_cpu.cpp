@@ -107,7 +107,8 @@ public:
     Result<std::vector<float>> dense_situ_mlp(
         std::span<const float> input, DenseMlpView weights,
         float situ_beta, std::optional<float> situ_linear,
-        std::uint32_t layer, ProfilePhase phase) override {
+        std::uint32_t layer, ProfilePhase phase,
+        MlpActivation activation = MlpActivation::situ) override {
         if (!valid_dense_mlp(input, weights)) {
             return Result<std::vector<float>>::failure(ErrorCode::invalid_extent);
         }
@@ -117,7 +118,12 @@ public:
             return Result<std::vector<float>>::failure(ErrorCode::invalid_extent);
         }
         std::vector<float> activated(weights.gate.rows);
-        situ_glu(activated, gate.value(), up.value(), situ_beta, situ_linear);
+        if (activation == MlpActivation::silu) {
+            silu_glu(activated, gate.value(), up.value());
+        } else {
+            situ_glu(activated, gate.value(), up.value(), situ_beta,
+                     situ_linear);
+        }
         return dense_matvec(activated, weights.down, layer, phase);
     }
 

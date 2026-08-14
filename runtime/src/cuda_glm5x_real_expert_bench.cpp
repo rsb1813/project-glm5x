@@ -694,6 +694,7 @@ int main(int argc, char** argv) {
         return 7;
     }
     auto cpu = k3x::make_cpu_backend();
+    constexpr auto activation = k3x::MlpActivation::silu;
     std::vector<float> cpu_reference;
     cpu_reference.reserve(grid_token_count * kHiddenSize);
     const auto reference_token_count = sparse_packed ? 1 : arguments->tokens;
@@ -711,7 +712,7 @@ int main(int argc, char** argv) {
                     assignment.token_index * kHiddenSize, kHiddenSize);
                 const auto reference = cpu->dense_situ_mlp(
                     token_input, fixture->dense, 1.0F, std::nullopt,
-                    arguments->layer, k3x::ProfilePhase::decode);
+                    arguments->layer, k3x::ProfilePhase::decode, activation);
                 if (!reference) return 8;
                 auto output = std::span<float>(cpu_reference).subspan(
                     assignment.token_index * kHiddenSize, kHiddenSize);
@@ -727,7 +728,7 @@ int main(int argc, char** argv) {
                     token * kHiddenSize, kHiddenSize);
                 const auto shared = cpu->dense_situ_mlp(
                     token_input, shared_fixture.dense, 1.0F, std::nullopt,
-                    arguments->layer, k3x::ProfilePhase::decode);
+                    arguments->layer, k3x::ProfilePhase::decode, activation);
                 if (!shared) return 8;
                 auto output = std::span<float>(cpu_reference).subspan(
                     token * kHiddenSize, kHiddenSize);
@@ -743,7 +744,7 @@ int main(int argc, char** argv) {
             logical_token * kHiddenSize, kHiddenSize);
         const auto reference = cpu->dense_situ_mlp(
             token_input, fixtures.back().dense, 1.0F, std::nullopt,
-            arguments->layer, k3x::ProfilePhase::decode);
+            arguments->layer, k3x::ProfilePhase::decode, activation);
         if (!reference) return 8;
         cpu_reference.insert(cpu_reference.end(), reference.value().begin(),
                              reference.value().end());
@@ -753,13 +754,13 @@ int main(int argc, char** argv) {
             auto routed = cuda.value()->raw_bf16_situ_mlp_expert_major(
                 input, arguments->tokens, *expert_major_plan,
                 expert_major_views, 1.0F, std::nullopt, arguments->layer,
-                k3x::ProfilePhase::decode);
+                k3x::ProfilePhase::decode, activation);
             if (!routed) return routed;
             const std::array<k3x::RawBf16MlpView, 1> shared_views{
                 shared_fixture.raw};
             auto shared = cuda.value()->raw_bf16_situ_mlp_grid(
                 input, arguments->tokens, shared_views, 1.0F, std::nullopt,
-                arguments->layer, k3x::ProfilePhase::decode);
+                arguments->layer, k3x::ProfilePhase::decode, activation);
             if (!shared) {
                 return k3x::Result<std::vector<float>>::failure(
                     shared.error(), shared.message());
@@ -779,17 +780,17 @@ int main(int argc, char** argv) {
             return cuda.value()->raw_bf16_situ_mlp_expert_major(
                 input, arguments->tokens, *expert_major_plan,
                 expert_major_views, 1.0F, std::nullopt, arguments->layer,
-                k3x::ProfilePhase::decode);
+                k3x::ProfilePhase::decode, activation);
         }
         if (use_grid) {
             auto outputs = sparse_packed
                 ? cuda.value()->raw_bf16_situ_mlp_grid_packed(
                       packed_input, grid_token_count, raw_views, 1.0F,
                       std::nullopt, arguments->layer,
-                      k3x::ProfilePhase::decode)
+                      k3x::ProfilePhase::decode, activation)
                 : cuda.value()->raw_bf16_situ_mlp_grid(
                       input, grid_token_count, raw_views, 1.0F, std::nullopt,
-                      arguments->layer, k3x::ProfilePhase::decode);
+                      arguments->layer, k3x::ProfilePhase::decode, activation);
             if (!outputs) {
                 return k3x::Result<std::vector<float>>::failure(
                     outputs.error(), outputs.message());
@@ -807,7 +808,7 @@ int main(int argc, char** argv) {
             for (const auto& fixture : fixtures) {
                 token_output = cuda.value()->dense_situ_mlp(
                     token_input, fixture.dense, 1.0F, std::nullopt,
-                    arguments->layer, k3x::ProfilePhase::decode);
+                    arguments->layer, k3x::ProfilePhase::decode, activation);
                 if (!token_output) return token_output;
             }
             last.insert(last.end(), token_output.value().begin(),
@@ -846,14 +847,51 @@ int main(int argc, char** argv) {
     const auto stats_after = cuda.value()->runtime_stats();
     const auto cpu_abs = maximum_absolute_difference(actual, cpu_reference);
     const auto cpu_scale = std::max(maximum_absolute_value(cpu_reference), 1.0e-6F);
+    std::optional<float> cpu_expected_abs;
+    std::optional<float> cpu_expected_rel;
     std::optional<float> expected_abs;
     std::optional<float> expected_rel;
     if (expected_output) {
-        expected_abs = maximum_absolute_difference(actual, *expected_output);
+        cpu_expected_abs = maximum_absolute_difference(cpu_reference, *expected_output);
+        const auto cpu_expected_scale = std::max(
+            maximum_absolute_value(*expected_output), 1.0e-6F);
+        cpu_expected_rel = *cpu_expected_abs / cpu_expected_scale;
+        auto expected_actual = actual;
+        if (arguments->precision == "bf16-rounded") {
+            for (auto& value : expected_actual) value = round_to_bf16(value);
+        }
+        expected_abs = maximum_absolute_difference(
+            expected_actual, *expected_output);
         const auto expected_scale = std::max(
             maximum_absolute_value(*expected_output), 1.0e-6F);
         expected_rel = *expected_abs / expected_scale;
     }
+    const auto emit_route_telemetry = [&]() {
+        if (!learned_route_mode) return;
+        std::cout << ",\"route_experts\":[";
+        for (std::size_t token = 0; token < learned_routes.size(); ++token) {
+            if (token != 0) std::cout << ',';
+            std::cout << '[';
+            for (std::size_t slot = 0;
+                 slot < learned_routes[token].expert_ids.size(); ++slot) {
+                if (slot != 0) std::cout << ',';
+                std::cout << learned_routes[token].expert_ids[slot];
+            }
+            std::cout << ']';
+        }
+        std::cout << "],\"route_contributions\":[";
+        for (std::size_t token = 0; token < learned_routes.size(); ++token) {
+            if (token != 0) std::cout << ',';
+            std::cout << '[';
+            for (std::size_t slot = 0;
+                 slot < learned_routes[token].contributions.size(); ++slot) {
+                if (slot != 0) std::cout << ',';
+                std::cout << learned_routes[token].contributions[slot];
+            }
+            std::cout << ']';
+        }
+        std::cout << ']';
+    };
     std::cout << std::setprecision(12)
               << "{\"artifact_kind\":\""
               << ((expert_major || learned_route_mode)
@@ -872,7 +910,9 @@ int main(int argc, char** argv) {
               << ",\"shard_count\":" << paths.size()
               << ",\"precision\":\"" << arguments->precision << "\""
               << ",\"output\":\"" << arguments->output << "\""
-              << ",\"input_mode\":\"" << arguments->input_mode << "\""
+              << ",\"input_mode\":\"" << arguments->input_mode << "\"";
+    emit_route_telemetry();
+    std::cout
               << ",\"route_group_count\":"
               << ((expert_major || learned_route_mode)
                       ? expert_major_plan->groups.size() : 0)
@@ -892,6 +932,19 @@ int main(int argc, char** argv) {
               << ",\"latency_nanoseconds_median\":" << median(samples)
               << ",\"gpu_cpu_max_absolute_error\":" << cpu_abs
               << ",\"gpu_cpu_max_relative_error\":" << cpu_abs / cpu_scale
+              << ",\"cpu_expected_max_absolute_error\":";
+    if (cpu_expected_abs) {
+        std::cout << *cpu_expected_abs;
+    } else {
+        std::cout << "null";
+    }
+    std::cout << ",\"cpu_expected_max_relative_error\":";
+    if (cpu_expected_rel) {
+        std::cout << *cpu_expected_rel;
+    } else {
+        std::cout << "null";
+    }
+    std::cout
               << ",\"expected_max_absolute_error\":";
     if (expected_abs) {
         std::cout << *expected_abs;

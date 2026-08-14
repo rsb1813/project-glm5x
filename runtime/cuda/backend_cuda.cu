@@ -1166,7 +1166,8 @@ public:
     Result<std::vector<float>> dense_situ_mlp(
         std::span<const float> input, DenseMlpView weights, float situ_beta,
         std::optional<float> situ_linear, std::uint32_t layer,
-        ProfilePhase phase) override {
+        ProfilePhase phase,
+        MlpActivation activation = MlpActivation::situ) override {
         const auto operation_start = std::chrono::steady_clock::now();
         const auto precision = numeric_precision();
         if (options_.kind != BackendKind::cuda_custom ||
@@ -1379,14 +1380,22 @@ public:
             return Result<std::vector<float>>::failure(
                 ErrorCode::backend_unavailable, "CUDA FFN up failed");
         }
+        const auto activation_status = activation == MlpActivation::silu
+            ? cuda::launch_silu_glu(
+                  static_cast<const float*>(device_gate),
+                  static_cast<const float*>(device_up), device_activation,
+                  intermediate_count,
+                  options_.dense_precision == DensePrecision::bf16_rounded,
+                  stream_)
+            : cuda::launch_situ_glu(
+                  static_cast<const float*>(device_gate),
+                  static_cast<const float*>(device_up), device_activation,
+                  intermediate_count, situ_beta, situ_linear.has_value(),
+                  situ_linear.value_or(0.0F),
+                  options_.dense_precision == DensePrecision::bf16_rounded,
+                  stream_);
         if (cudaEventRecord(situ_start.get(), stream_) != cudaSuccess ||
-            cuda::launch_situ_glu(
-                static_cast<const float*>(device_gate),
-                static_cast<const float*>(device_up), device_activation,
-                intermediate_count, situ_beta, situ_linear.has_value(),
-                situ_linear.value_or(0.0F),
-                options_.dense_precision == DensePrecision::bf16_rounded,
-                stream_) != cudaSuccess ||
+            activation_status != cudaSuccess ||
             cudaEventRecord(situ_end.get(), stream_) != cudaSuccess) {
             return Result<std::vector<float>>::failure(
                 ErrorCode::backend_unavailable, "CUDA FFN SiTU failed");
@@ -1454,7 +1463,8 @@ public:
         std::span<const float> inputs, std::size_t token_count,
         std::span<const DenseMlpView> experts, float situ_beta,
         std::optional<float> situ_linear, std::uint32_t layer,
-        ProfilePhase phase) override {
+        ProfilePhase phase,
+        MlpActivation activation = MlpActivation::situ) override {
         std::vector<RawBf16MlpView> raw_experts;
         raw_experts.reserve(experts.size());
         for (const auto& expert : experts) {
@@ -1471,17 +1481,18 @@ public:
         }
         return raw_bf16_situ_mlp_grid_impl(
             inputs, token_count, raw_experts, situ_beta, situ_linear, layer,
-            phase, {});
+            phase, {}, activation);
     }
 
     Result<std::vector<std::vector<float>>> raw_bf16_situ_mlp_grid(
         std::span<const float> inputs, std::size_t token_count,
         std::span<const RawBf16MlpView> experts, float situ_beta,
         std::optional<float> situ_linear, std::uint32_t layer,
-        ProfilePhase phase) override {
+        ProfilePhase phase,
+        MlpActivation activation = MlpActivation::situ) override {
         return raw_bf16_situ_mlp_grid_impl(
             inputs, token_count, experts, situ_beta, situ_linear, layer,
-            phase, {});
+            phase, {}, activation);
     }
 
     Result<std::vector<std::vector<float>>>
@@ -1489,10 +1500,11 @@ public:
         std::span<const float> expert_inputs, std::size_t token_count,
         std::span<const RawBf16MlpView> experts, float situ_beta,
         std::optional<float> situ_linear, std::uint32_t layer,
-        ProfilePhase phase) override {
+        ProfilePhase phase,
+        MlpActivation activation = MlpActivation::situ) override {
         return raw_bf16_situ_mlp_grid_impl(
             expert_inputs, token_count, experts, situ_beta, situ_linear,
-            layer, phase, expert_inputs);
+            layer, phase, expert_inputs, activation);
     }
 
     Result<std::vector<float>> raw_bf16_situ_mlp_expert_major(
@@ -1500,7 +1512,8 @@ public:
         const ExpertMajorPackedPlan& plan,
         std::span<const RawBf16MlpView> expert_views, float situ_beta,
         std::optional<float> situ_linear, std::uint32_t layer,
-        ProfilePhase phase) override {
+        ProfilePhase phase,
+        MlpActivation activation = MlpActivation::situ) override {
         if (token_count == 0 || plan.hidden_size == 0 ||
             plan.hidden_size != 0 &&
                 token_count > std::numeric_limits<std::size_t>::max() /
@@ -1557,7 +1570,7 @@ public:
             }
             const auto outputs = raw_bf16_situ_mlp_grid_packed(
                 batch.inputs, batch.token_count, batch_views, situ_beta,
-                situ_linear, layer, phase);
+                situ_linear, layer, phase, activation);
             if (!outputs || outputs.value().size() != batch_views.size()) {
                 return Result<std::vector<float>>::failure(
                     outputs ? ErrorCode::invalid_extent : outputs.error(),
@@ -3313,7 +3326,8 @@ private:
         std::span<const float> inputs, std::size_t token_count,
         std::span<const RawBf16MlpView> experts, float situ_beta,
         std::optional<float> situ_linear, std::uint32_t layer,
-        ProfilePhase phase, std::span<const float> packed_inputs) {
+        ProfilePhase phase, std::span<const float> packed_inputs,
+        MlpActivation activation) {
         constexpr auto precision = NumericPrecision::bf16_rounded;
         const auto operation_start = std::chrono::steady_clock::now();
         const bool bf16_output =
@@ -3635,20 +3649,34 @@ private:
             !launch_projection(1, 1, gate_plan, intermediate_width,
                                intermediate_width, device_up, device_up) ||
             cudaEventRecord(resident_grid_events_[4].get(), stream_) !=
-                cudaSuccess ||
-            (bf16_output
-                 ? cuda::launch_situ_glu_bf16(
-                       static_cast<const __nv_bfloat16*>(device_gate),
-                       static_cast<const __nv_bfloat16*>(device_up),
-                       device_activation, intermediate_count, situ_beta,
-                       situ_linear.has_value(), situ_linear.value_or(0.0F),
-                       stream_)
-                 : cuda::launch_situ_glu(
-                       static_cast<const float*>(device_gate),
-                       static_cast<const float*>(device_up), device_activation,
-                       intermediate_count, situ_beta,
-                       situ_linear.has_value(), situ_linear.value_or(0.0F),
-                       true, stream_)) != cudaSuccess ||
+                cudaSuccess) {
+            return Result<std::vector<std::vector<float>>>::failure(
+                ErrorCode::backend_unavailable,
+                "CUDA BF16 dense grid gate/up launch failed");
+        }
+        const auto activation_status = bf16_output
+            ? (activation == MlpActivation::silu
+                   ? cuda::launch_silu_glu_bf16(
+                         static_cast<const __nv_bfloat16*>(device_gate),
+                         static_cast<const __nv_bfloat16*>(device_up),
+                         device_activation, intermediate_count, stream_)
+                   : cuda::launch_situ_glu_bf16(
+                         static_cast<const __nv_bfloat16*>(device_gate),
+                         static_cast<const __nv_bfloat16*>(device_up),
+                         device_activation, intermediate_count, situ_beta,
+                         situ_linear.has_value(), situ_linear.value_or(0.0F),
+                         stream_))
+            : (activation == MlpActivation::silu
+                   ? cuda::launch_silu_glu(
+                         static_cast<const float*>(device_gate),
+                         static_cast<const float*>(device_up),
+                         device_activation, intermediate_count, true, stream_)
+                   : cuda::launch_situ_glu(
+                         static_cast<const float*>(device_gate),
+                         static_cast<const float*>(device_up), device_activation,
+                         intermediate_count, situ_beta, situ_linear.has_value(),
+                         situ_linear.value_or(0.0F), true, stream_));
+        if (activation_status != cudaSuccess ||
             cudaEventRecord(resident_grid_events_[5].get(), stream_) !=
                 cudaSuccess ||
             !launch_projection(3, 2, down_plan, output_width,
@@ -3656,7 +3684,7 @@ private:
                                device_output)) {
             return Result<std::vector<std::vector<float>>>::failure(
                 ErrorCode::backend_unavailable,
-                "CUDA BF16 dense grid launch failed");
+                "CUDA BF16 dense grid activation/down launch failed");
         }
         std::vector<float> flat_output(output_count);
         std::vector<__nv_bfloat16> flat_output_bf16;

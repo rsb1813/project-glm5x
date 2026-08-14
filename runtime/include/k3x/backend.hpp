@@ -26,6 +26,7 @@ enum class CudaTransferMode { synchronous, prefetch };
 enum class CudaBf16OutputMode { fp32, bf16 };
 enum class CudaMoeFusionMode { none, routed_accumulate };
 enum class CudaWeightValidationMode { per_call, admission };
+enum class MlpActivation { situ, silu };
 
 struct BackendOptions {
     BackendKind kind{BackendKind::cpu};
@@ -186,18 +187,21 @@ public:
     virtual Result<std::vector<float>> dense_situ_mlp(
         std::span<const float> input, DenseMlpView weights,
         float situ_beta, std::optional<float> situ_linear,
-        std::uint32_t layer, ProfilePhase phase) = 0;
+        std::uint32_t layer, ProfilePhase phase,
+        MlpActivation activation = MlpActivation::situ) = 0;
     virtual Result<std::vector<std::vector<float>>> dense_situ_mlp_grid(
         std::span<const float>, std::size_t,
         std::span<const DenseMlpView>, float,
-        std::optional<float>, std::uint32_t, ProfilePhase) {
+        std::optional<float>, std::uint32_t, ProfilePhase,
+        MlpActivation = MlpActivation::situ) {
         return Result<std::vector<std::vector<float>>>::failure(
             ErrorCode::backend_unavailable);
     }
     virtual Result<std::vector<std::vector<float>>> raw_bf16_situ_mlp_grid(
         std::span<const float>, std::size_t,
         std::span<const RawBf16MlpView>, float,
-        std::optional<float>, std::uint32_t, ProfilePhase) {
+        std::optional<float>, std::uint32_t, ProfilePhase,
+        MlpActivation = MlpActivation::situ) {
         return Result<std::vector<std::vector<float>>>::failure(
             ErrorCode::backend_unavailable);
     }
@@ -205,14 +209,16 @@ public:
     raw_bf16_situ_mlp_grid_packed(
         std::span<const float>, std::size_t,
         std::span<const RawBf16MlpView>, float,
-        std::optional<float>, std::uint32_t, ProfilePhase) {
+        std::optional<float>, std::uint32_t, ProfilePhase,
+        MlpActivation = MlpActivation::situ) {
         return Result<std::vector<std::vector<float>>>::failure(
             ErrorCode::backend_unavailable);
     }
     virtual Result<std::vector<float>> raw_bf16_situ_mlp_expert_major(
         std::span<const float>, std::size_t,
         const ExpertMajorPackedPlan&, std::span<const RawBf16MlpView>, float,
-        std::optional<float>, std::uint32_t, ProfilePhase) {
+        std::optional<float>, std::uint32_t, ProfilePhase,
+        MlpActivation = MlpActivation::situ) {
         return Result<std::vector<float>>::failure(
             ErrorCode::backend_unavailable);
     }
