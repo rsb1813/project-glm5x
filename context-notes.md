@@ -428,3 +428,8 @@
 - Verified public head `bbc554e`: Linux correctness run `31844710975` and CodeQL run `31844710947` both completed successfully. The 37 red `correctness workflow run failed` notifications map to stale historical runs, with `31795400168` on `b94c8b8` failing because migrated `results/` fixtures were absent (`50 failed, 294 passed, 74 skipped`); no current-main failure was reproduced.
 - Verified Dependabot update PRs 1--4 are closed. The repository Dependabot alert endpoint is disabled and returns `403`; the visible dependency notifications are closed PR state changes, not a verified CVE count.
 - Refreshed the live local estimate at 07:04 KST: 97/282 source-deleted markers, approximately 39.1 shards/hour over the latest monitor samples, 1.204 TB decimal free space, and approximately 0.535 TB of current K3X output. The first complete-bundle reference gate is estimated for approximately 12:00--13:30 KST; this remains an estimate and full-model tok/s is still unmeasured.
+
+## 2026-08-15 -- Remove duplicate DSA/MLA q-residual projection
+
+- Commit `7c79976` adds an optional q-residual argument to the MLA reference and passes the decoder layer's DSA residual through it. The focused MLA/layer/model suite passed `17/17`.
+- On the real layer-10 CUDA probe, the synchronized median attention boundary fell from `2.298938 ms` to `2.224939 ms` (`3.22%`), with output maximum absolute difference `0.0`. This remains a bounded layer result, not an end-to-end TPS claim.

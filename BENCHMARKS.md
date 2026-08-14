@@ -696,3 +696,13 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Correctness: output maximum absolute difference between cold and warm calls was `0.0`; selected expert count and route were unchanged. Peak CUDA allocated bytes were `719,427,584`.
 - Decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, H2D GB/token, speculative acceptance, and quality benchmark were not measured. This is a bounded exact sublayer residency result, not a full-model throughput result.
 - Interpretation: the device cache removes repeat H2D and decode work when the same experts recur, but 1 GiB only holds a small subset of the full model. The full gate will compare it against the cold path before any policy change.
+
+## 2026-08-15 -- Reuse q-residual between DSA and MLA
+
+- Date: 2026-08-15.
+- Commit: `7c79976`.
+- Hardware/model: RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.3, official GLM-5.2 five-shard probe bundle, layer 10 attention boundary, one BF16 token.
+- Mode: identical hidden state and natural DSA Top-K inputs for both runs. The baseline computed q-residual for DSA and let MLA recompute it; the optimized path passed the already computed q-residual into MLA. Ten synchronized warm samples were compared by median.
+- Baseline/reuse: `2.298938 ms` versus `2.224939 ms`, approximately `3.22%` lower for the optimized attention boundary.
+- Correctness: output maximum absolute difference was `0.0`; route inputs and state construction were unchanged.
+- Full-model decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, H2D GB/token, speculative acceptance, and quality benchmark were not measured. This is a bounded exact attention result, not a full-model throughput result.

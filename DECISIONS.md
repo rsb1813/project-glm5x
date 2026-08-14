@@ -489,3 +489,11 @@
 - Evidence: on the five-shard real layer-10 probe with four parallel readers, the same eight experts took `3.124653389 s` cold and `0.003793419 s` on the second call with a 1,000,000,000-byte device cache. Output maximum absolute difference was `0.0`; peak CUDA allocation was `719,427,584` bytes and the device cache reported 8 hits, 8 misses, and 0 evictions.
 - Accepted because: it removes repeat H2D and decode work without altering exact weights or routing, while capacity makes the 16 GB VRAM trade-off explicit.
 - Revisit: after the full 78-layer cold/cached gate records VRAM peak, H2D GB/token, cache hit rate, and decode tok/s. The cached quality path must remain exact before any default promotion.
+
+## D-0062 -- Reuse the decoder q-residual between DSA and MLA
+
+- Decision: let `GLM5XMLAReference.__call__` accept an optional precomputed `q_residual`, and pass the value already produced for DSA from `GLM5XDecoderLayerReference`. Keep the standalone MLA path unchanged when the argument is absent.
+- Alternatives: recompute the projection for the existing simple API, fuse DSA and MLA into a new kernel before full-layer parity, or cache a residual beyond the current forward.
+- Evidence: the new parity test and the focused MLA/layer/model suite pass (`17 passed`). On the real five-shard layer-10 CUDA probe, the exact attention boundary measured `2.298938 ms` with the duplicate projection and `2.224939 ms` with reuse, a `3.22%` reduction in that bounded sample; output maximum absolute difference was `0.0`.
+- Accepted because: it removes a verified duplicate GEMM without changing routing, attention state, logits, or the default standalone API. The result is a bounded layer optimization, not an end-to-end TPS claim.
+- Revisit: after the complete 78-layer CUDA gate reports per-layer timing, decide whether the same residual should be carried into a fused C++/CUDA layer handoff.
