@@ -112,3 +112,11 @@
 - Evidence: the new red-green tests resume a two-tensor shard after one completed extent, reject changed/corrupted state through the existing K3X error boundary, record complete same-shard expert triples in `EXPT`, and convert two manifest shards independently; the focused GLM suite passes 28 tests.
 - Accepted because: Cloud Run/local worker preemption can retry a bounded shard without requiring full-model RAM/VRAM residency, while canonical validation prevents a syntactically valid but stale ledger from silently producing a wrong artifact.
 - Revisit: when cross-shard expert bundles, resumable object-store uploads, and full GLM quality parity are implemented.
+
+## D-0015 -- Keep the official GLM DSA indexer separate from the generic DSA state
+
+- Decision: add `GLM5XOfficialDSAIndexer` as a separate reference boundary. It consumes `q_resid` through `wq_b`, projects hidden states through `wk` plus LayerNorm, applies the configured indexer RoPE convention, computes per-head ReLU scores and `weights_proj` aggregation, then applies causal masking and Top-K. The existing equal-width `GLM5XDSAIndexer/State` remains available for descriptor-shaped cache experiments.
+- Alternatives: force official `[32,128]` queries and `[128]` keys into the old flattened index-width API, silently approximate the indexer with a single projection, or wait for the entire checkpoint before fixing the formula.
+- Evidence: the official Transformers implementation documents the five indexer tensors and scoring order; independent synthetic parity passes, and a bounded run loaded only the five layer-0 indexer tensors from the real first shard with shapes `wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and 128-element LayerNorm vectors.
+- Accepted because: it preserves a correct, inspectable reference mode and avoids claiming that the existing generic projection matches GLM's learned indexer. It also keeps real-shard reads bounded and reversible.
+- Revisit: when q-residual production weights, MLA latent projections, cache update semantics, and nonzero real-shard quality parity are connected.

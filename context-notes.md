@@ -82,3 +82,10 @@
 - `convert_glm5x_shards` treats every manifest shard as an independent unit and skips only finalized artifacts whose sidecar/source SHA-256 and K3X reader metadata match. This is the local equivalent of a restartable Cloud Run worker unit; object-store uploads and multi-worker scheduling remain future work.
 - Complete same-shard GLM raw-BF16 expert role triples receive `EXPT` records linked to their tensor IDs. Incomplete triples stay in the sidecar to avoid fabricating cross-shard links.
 - Focused GLM coverage is now 28 passing tests. No end-to-end GLM decode or conversion-throughput benchmark was added; the next bottleneck is exact learned DSA/indexer projection and cross-shard expert assembly.
+
+## 2026-08-14 Official DSA indexer reference
+
+- Added a separate `GLM5XOfficialDSAIndexer` rather than flattening GLM's `[heads, head_dim]` query and `[head_dim]` key into the earlier equal-width DSA experiment. The reference follows the official order: `wq_b`, `wk` + LayerNorm, indexer RoPE, per-head dot products, ReLU, `weights_proj` aggregation, causal mask, and Top-K.
+- The loader uses `safe_open().get_tensor()` for only `wq_b`, `wk`, `k_norm.weight`, `k_norm.bias`, and `weights_proj`. A manual run on the real first shard loaded shapes `(4096,2048)`, `(128,6144)`, `(128,)`, `(128,)`, and `(32,6144)` without materializing the other 30 tensors.
+- Automated parity is synthetic and independent of the production method; the real run used zero activations only. No quality, full-layer, or tok/s claim is made. Focused GLM coverage is now 31 passing tests.
+- The official Transformers source is the reference boundary for this formula: `https://github.com/huggingface/transformers/blob/main/src/transformers/models/glm_moe_dsa/modeling_glm_moe_dsa.py`. q-residual production projection, MLA latent path, cache updates, and nonzero real-shard parity remain the next implementation boundary.

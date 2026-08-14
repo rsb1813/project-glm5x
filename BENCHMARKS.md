@@ -4,7 +4,18 @@ No end-to-end GLM-5.2 throughput or quality benchmark has been run yet. The boun
 
 The first benchmark record must include the commit, hardware, model/checkpoint identity, mode, context length, decode and prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, quality result, and enabled optimizations.
 
-The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 28 passing tests. It is not a performance measurement.
+The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 31 passing tests. It is not a performance measurement.
+
+## 2026-08-14 -- Official GLM DSA indexer reference and real-shard payload gate
+
+- Commit: `8824307`.
+- Hardware: Windows CPU reference path; no CUDA execution and no full-model load.
+- Model/checkpoint: `zai-org/GLM-5.2`, only the already downloaded `model-00001-of-00282.safetensors` payload for the manual gate; synthetic tensors for automated parity.
+- Mode: official-shaped `wq_b/wk/k_norm/weights_proj` reference, interleaved indexer RoPE, ReLU score aggregation, causal mask, and Top-K. The bounded loader materialized only five indexer tensors.
+- Real payload shapes: `wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, `k_norm.weight=(128,)`, and `k_norm.bias=(128,)`.
+- Correctness result: 3 focused official-indexer tests passed. The manual real-payload smoke produced causal Top-K `[[[0,1],[0,1]]]` for two zero activation positions with `index_topk=4`; this checks loading and execution boundaries only.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality benchmark: not measured.
+- Interpretation: this is real weight shape/loading evidence plus synthetic formula parity. It is not a GLM quality or throughput result.
 
 ## 2026-08-14 -- Resumable GLM shard conversion gate
 

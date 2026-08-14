@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, DSA/indexer CPU reference state, RTX 5080 resident native/BF16 expert-grid baselines, and resumable independent shard conversion.
+GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5080 resident native/BF16 expert-grid baselines, and resumable independent shard conversion.
 
 ## Completed
 
@@ -25,10 +25,12 @@ GLM-5.2 shape/manifest boundary, DSA/indexer CPU reference state, RTX 5080 resid
 - Added resident exact MXFP4 reuse to the CUDA expert-major batch backend and allowed resident weights in the CLI validation contract.
 - Added opt-in resident BF16 dequantized expert-grid execution through cublasLt, with native MXFP4 fallback when resident capacity is insufficient.
 - Added `GLM5XDSAConfig`, `GLM5XDSAIndexer`, and `GLM5XDSAState`, connecting descriptor index metadata and explicit query/key projections to compressed KV blocks, exact top-k refresh, and a separately marked stale fast refresh cadence.
+- Added `GLM5XOfficialDSAIndexer` with official-shaped `wq_b/wk/k_norm/weights_proj` tensors, interleaved/non-interleaved indexer RoPE, ReLU score aggregation, causal masking, and Top-K reference parity. Its safetensors loader reads only the five indexer tensors needed for a selected layer.
 
 ## In progress
 
 - Build the tiny GLM-5.2-compatible reference graph and greedy parity tests.
+- Connect the official indexer to the production q-residual path and exact MLA/DSA state.
 - Rename user-facing runtime and benchmark commands where that does not break the inherited storage ABI.
 - Add cross-shard expert bundle assembly and learned projection/reference parity.
 - Connect the now-resident expert-major batch backend to exact GLM DSA/MTP state and retain strict natural Top-8 verification.
@@ -52,7 +54,7 @@ GLM-5.2 shape/manifest boundary, DSA/indexer CPU reference state, RTX 5080 resid
 
 ## Latest verified state
 
-- Focused GLM descriptor, manifest, CLI, toy reference, TurboQuant, DSA, shard-converter, and multi-shard tests: 28 passed. The CUDA Python test remains skipped on Windows because the WSL ELF binary is not a Windows executable.
+- Focused GLM descriptor, manifest, CLI, toy reference, TurboQuant, DSA, official indexer, shard-converter, and multi-shard tests: 31 passed. The CUDA Python test remains skipped on Windows because the WSL ELF binary is not a Windows executable.
 - CUDA CMake build: successful in WSL with CUDA 13.3 and RTX 5080 compute capability 12.0.
 - CTest: 26/26 tests passed in WSL.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
@@ -65,5 +67,6 @@ GLM-5.2 shape/manifest boundary, DSA/indexer CPU reference state, RTX 5080 resid
 - Official manifest metadata probe: 59,585 tensors across 282 shards; shared indexer layer mapping is resolved without opening payloads.
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
-- Last known-good code HEAD: `3400c35` (`feat: make GLM shard conversion resumable`).
-- Next bottleneck: exact learned DSA/indexer projections, nonzero GLM shard parity, cross-shard expert bundling, variable-union expert grouping, and VRAM-pressure-aware choice between native MXFP4 and BF16 resident execution; full weights remain intentionally absent.
+- Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
+- Last known-good code HEAD: `8824307` (`feat: add official GLM DSA reference indexer`).
+- Next bottleneck: q-residual production projection, exact MLA/DSA state, nonzero GLM shard parity, cross-shard expert bundling, variable-union expert grouping, and VRAM-pressure-aware choice between native MXFP4 and BF16 resident execution; full weights remain intentionally absent.

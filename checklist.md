@@ -16,6 +16,7 @@
 - [x] Measure native versus BF16 resident grid latency and VRAM on the RTX 5080 shaped fixture.
 - [x] Validate BF16 dequantized execution against a nonzero synthetic packed MXFP4 native reference.
 - [x] Connect descriptor DSA metadata to a CPU/reference index-key plus compressed-KV state.
+- [x] Add official-shape GLM DSA indexer reference and bounded five-tensor real-shard load gate.
 - [x] Add exact top-k refresh and separately marked stale fast refresh tests.
 - [x] Add explicit descriptor-shaped DSA query/key projection boundary.
 - [x] Resolve official GLM indexer full/shared tensor roles from the safetensors index.

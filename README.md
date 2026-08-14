@@ -22,6 +22,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - Opt-in resident BF16 dequantized expert-grid path using cublasLt; the native exact MXFP4 path remains the default. Historical bounded samples measured 2.58 ms/block versus 5.39 ms native, and the latest rerun measured 4.386 ms versus 5.511 ms native. Both used about 604 MB instead of 160 MB for resident selected weights; neither is an end-to-end tok/s claim.
 - The shaped benchmark can compare a deterministic nonzero packed pattern against a native GPU reference with `--pattern nonzero`; this is numerical parity evidence, not a GLM quality score.
 - CPU/reference `GLM5XDSAIndexer` and `GLM5XDSAState` now bind explicit query/key projections and descriptor index metadata to compressed KV blocks, exact top-k refresh, and an explicit stale fast-refresh experiment; its 600k/1M figures are formula-only.
+- An official-shape `GLM5XOfficialDSAIndexer` reference now implements `wq_b`, `wk`, LayerNorm, optional interleaved indexer RoPE, `weights_proj`, ReLU score aggregation, causal masking, and Top-K selection. It can load only the five indexer tensors needed from a safetensors shard; it does not load the full checkpoint.
 - CPU/reference TurboQuant-style KV cache with asymmetric K/V bits and 600k–1M capacity arithmetic. This does not compress model weights and is not yet a CUDA performance path.
 - A `glm5x-convert` entry point that wraps the proven storage converter while model-specific extent roles are completed.
 - Strict separation between implemented code, experiments, proposals, and measurements.
@@ -109,7 +110,7 @@ The BF16 mode is experimental and can fall back to native MXFP4 when the configu
 
 1. GLM-5.2 descriptor, manifest, and tiny reference graph. (Descriptor/manifest and bounded CUDA baseline are complete.)
 2. TurboQuant reference KV parity and packed paged-KV contract. (Reference path is complete; packed CUDA storage is pending.)
-3. GLM-5.2 DSA/indexer state and 600k/1M capacity smoke. (Descriptor-shaped CPU/reference projections, metadata roles, and first-shard header parity are complete; conversion and learned parity are pending.)
+3. GLM-5.2 DSA/indexer state and 600k/1M capacity smoke. (Official-shape CPU/reference indexer parity and a bounded real-shard weight-read gate are complete; main MLA, learned q-residual production path, and full quality parity are pending.)
 4. Resumable multi-shard conversion and exact CPU runtime/profiler. (Independent shard conversion is implemented; exact runtime/profiler remains pending.)
 5. CUDA DSA/MLA, Top-8 MoE, and compressed-KV kernels.
 6. Three-tier asynchronous expert pipeline.
