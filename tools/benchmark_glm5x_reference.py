@@ -110,6 +110,9 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
     generated: list[int] = []
     decode_seconds = 0.0
     first_decode_seconds: float | None = None
+    decode_step_seconds: list[float] = []
+    decode_step_cache_hits: list[int] = []
+    decode_step_device_cache_hits: list[int] = []
     with torch.inference_mode():
         for index in range(arguments.new_tokens):
             token = int(torch.argmax(prefill.logits[:, -1, :], dim=-1).item())
@@ -120,6 +123,9 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             if first_decode_seconds is None:
                 first_decode_seconds = elapsed
             decode_seconds += elapsed
+            decode_step_seconds.append(elapsed)
+            decode_step_cache_hits.append(model.expert_payload_cache_stats.hits)
+            decode_step_device_cache_hits.append(model.expert_device_cache_stats.hits)
             generated.append(token)
             state = step.state
             prefill = step
@@ -138,6 +144,10 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         "ttft_seconds": prefill_seconds + (first_decode_seconds or 0.0),
         "decode_seconds": decode_seconds,
         "decode_tok_s": arguments.new_tokens / decode_seconds,
+        "decode_step_seconds": decode_step_seconds,
+        "decode_step_tok_s": [1.0 / value for value in decode_step_seconds],
+        "decode_step_expert_cache_hits": decode_step_cache_hits,
+        "decode_step_expert_device_cache_hits": decode_step_device_cache_hits,
         "prompt": arguments.prompt,
         "generated_tokens": generated,
         "cache_experts": arguments.cache_experts,
