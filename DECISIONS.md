@@ -176,3 +176,11 @@
 - Evidence: eight real layer-10 experts used 603,979,776 BF16 resident bytes and measured 1,854,140 ns sequential warm median with zero warm H2D. FP32 required 1,207,959,552 bytes, exceeded the 1 GiB configured budget, transferred 3,019,898,880 warm bytes, and measured 13,153,048 ns.
 - Accepted because: BF16 is the only tested representation that keeps an 8-expert bank resident under the current budget. Quality remains an explicit gate because the per-expert relative numerical difference is 0.1828%.
 - Revisit: after expert-major batched GEMM, direct raw-BF16 storage, and full-layer quality comparison.
+
+## D-0023 -- Use an opt-in dense BF16 grid for real candidate blocks
+
+- Decision: add a dense `resident_grid` API for validated GLM raw-BF16 experts and use it for real-shard candidate-token blocks when `precision=bf16-rounded`. Keep FP32 and native MXFP4 on their existing scalar/exact reference paths until their own batched kernels are measured.
+- Alternatives: keep real experts sequential, route FP32 through the BF16 grid, or convert the raw shard to MXFP4 before the first nonzero grid gate.
+- Evidence: the two probe artifacts supplied 8 complete layer-10 experts. On the RTX 5080, 8 experts x 4 candidate tokens measured 1,758,739 ns/block with 603,979,776 resident bytes, zero warm weight H2D, and maximum relative CPU difference 0.00135118968 (0.135%). The two-token tiny CUDA regression and the full 26-test CTest suite passed.
+- Accepted because: the grid amortizes one activation transfer and schedules the expert union as a single candidate block without changing routing or payload bytes. It remains opt-in because this is one FFN block and the BF16 quality gap is not a full-model quality result.
+- Revisit: after direct raw-BF16 tensor-core storage, full natural Top-8 routing, nonzero layer parity, and end-to-end decode measurements.

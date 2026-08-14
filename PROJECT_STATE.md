@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5080 resident native/BF16 expert-grid baselines, and the first real-expert CUDA execution bridge.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bounded real-shard RTX 5080 BF16 expert-major candidate grid. Full model routing, attention, quality, and end-to-end throughput remain open.
 
 ## Completed
 
@@ -25,6 +25,8 @@ GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5
 - Added `GLM5XExpertBundle`, which rechecks artifact identities and role extents before returning exact BF16 bytes. Layer 10 expert 0 from the second real shard matches all three source roles byte-for-byte.
 - Added `k3x::load_glm5x_bf16_expert` and a C++ real-artifact gate. It finds GLM role IDs across multiple readers, validates released dimensions and CRC32C, and returns three host payload vectors.
 - Added `k3x_cuda_glm5x_real_expert_bench`, which feeds one exact real expert into the resident CUDA dense SiTU path and compares output against the CPU reference.
+- Added a dense BF16 `resident_grid` backend path for real GLM experts, with candidate-token batching, resident-table admission, one activation upload, and CPU-parity regression coverage.
+- Extended the real-expert benchmark with `--tokens`; 8 real experts over 4 candidate tokens now run through the BF16 grid while FP32 keeps the scalar numerical reference path.
 - Added and measured `k3x_cuda_glm5x_moe_bench` on the real RTX 5080 at GLM-5.2 expert dimensions.
 - Added an expert-major candidate-token benchmark mode for 1/2/4/8 tokens.
 - Added resident exact MXFP4 reuse to the CUDA expert-major batch backend and allowed resident weights in the CLI validation contract.
@@ -37,13 +39,14 @@ GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5
 - Build the tiny GLM-5.2-compatible reference graph and greedy parity tests.
 - Connect the official indexer to the production q-residual path and exact MLA/DSA state.
 - Rename user-facing runtime and benchmark commands where that does not break the inherited storage ABI.
-- Add cross-shard expert bundle assembly and learned projection/reference parity.
-- Connect the now-resident expert-major batch backend to exact GLM DSA/MTP state and retain strict natural Top-8 verification.
-- Validate the dequantized resident-GEMM path against nonzero GLM shard data and measure VRAM-bank pressure before considering a default.
+- Connect the real expert-major grid to exact GLM DSA/MTP state and retain strict natural Top-8 verification.
+- Validate nonzero full-layer routing/MLA/DSA parity and measure VRAM-bank pressure before considering BF16 grid mode a default.
+- Replace host float decode plus conversion with direct raw-BF16/tensor-core storage views where quality permits.
 
 ## Known blockers
 
-- No GLM-5.2 weights are present, so full checkpoint correctness and local TPS are not measured.
+- No full GLM-5.2 checkpoint is present; only two bounded probe shards are available, so full checkpoint correctness and local TPS are not measured.
+- Only two bounded GLM-5.2 probe shards are present; no full checkpoint download or Cloud Run conversion has been authorized or attempted.
 - The migrated C++ runtime still has K3-oriented names and graph assumptions in several files.
 - CUDA build and bounded RTX 5080 kernel measurements are validated in WSL; native Linux end-to-end throughput has not been measured.
 - The TurboQuant implementation is CPU/reference only; it does not yet contain a packed CUDA kernel or full PolarQuant/QJL production path.
@@ -62,12 +65,14 @@ GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5
 - Focused GLM descriptor, manifest, CLI, toy reference, TurboQuant, DSA, official indexer, shard-converter, bundle loader, and multi-shard tests: 35 passed. The CUDA Python test remains skipped on Windows because the WSL ELF binary is not a Windows executable.
 - CUDA CMake build: successful in WSL with CUDA 13.3 and RTX 5080 compute capability 12.0.
 - CTest: 26/26 tests passed in WSL.
+- Focused CUDA regression now includes a nonzero two-expert/two-token BF16 resident-grid parity case; the 26-test CTest count is unchanged because it extends `cuda_dense`.
 - Real-shard C++ metadata gate: both downloaded GLM probe artifacts passed `test_reader ... metadata`; the second artifact contains 212 tensors and 70 complete raw-BF16 expert records.
 - Cross-shard bundle gate: 2 probe artifacts and 247 tensors indexed in approximately 11.9 seconds, producing 70 complete experts and 0 incomplete groups without copying payload bytes.
 - Real BF16 payload gate: layer 10 expert 0 returned three 25,165,824-byte roles that matched source safetensors bytes exactly; a tampered offset is rejected.
 - C++ host loader gate: 75,497,472 bytes loaded and CRC-checked in 465,087,758 ns under WSL; no CUDA execution or token generation.
 - Real CUDA expert gate: FP32 resident rerun warm median 271,493 ns with 150,994,944 resident bytes and CPU max absolute error `8.38190317154e-09`; cached BF16-rounded rerun warm median 236,593 ns with 75,497,472 resident bytes and 0.1828% max relative error. These are one-expert FFN records only.
 - Multi-expert pressure gate: 8 real layer-10 experts measured 1,854,140 ns sequential warm median with BF16/604 MB resident and zero warm H2D; FP32 exceeded the 1 GiB budget and measured 13,153,048 ns with 3.02 GB warm H2D.
+- Real expert-major gate: 8 real layer-10 experts over 4 candidate tokens measured 1,758,739 ns BF16 grid warm median (approximately 439,685 ns per candidate), 603,979,776 resident bytes, zero warm H2D, and 0.1351% maximum relative CPU error.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
@@ -79,5 +84,5 @@ GLM-5.2 shape/manifest boundary, official DSA/indexer CPU reference state, RTX 5
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
-- Last known-good code HEAD before this change: `718cc1e` (`perf: cache resident BF16 host conversion`); the multi-expert probe extension is verified but not committed yet.
-- Next bottleneck: expert-major batched BF16 GEMM, direct raw-BF16/tensor-core CUDA weights, q-residual production projection, exact MLA/DSA state, nonzero GLM layer parity, and VRAM-pressure-aware multi-expert residency; full weights remain intentionally absent.
+- Last known-good code HEAD: `399556d` (`feat: add real BF16 expert-major grid`). Focused Python and WSL CTest gates are green.
+- Next bottleneck: direct raw-BF16/tensor-core CUDA weights, q-residual production projection, exact MLA/DSA state, natural Top-8 routing, nonzero full-layer parity, and VRAM-pressure-aware multi-expert residency; full weights remain intentionally absent.

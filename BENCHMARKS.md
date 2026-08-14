@@ -83,6 +83,17 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Decode tok/s, prefill tok/s, TTFT, quality result, and cache hit rate: not measured.
 - Interpretation: the configured 1 GiB resident budget forces FP32 bypass/eviction for this bank. This is the numerical reference, not the recommended multi-expert placement.
 
+## 2026-08-14 -- Real GLM BF16 expert-major grid
+
+- Commit: `399556d`.
+- Hardware: NVIDIA GeForce RTX 5080, CUDA 13.3, WSL; host CPU/RAM used for exact shard loading and CPU reference only.
+- Model/checkpoint: `zai-org/GLM-5.2`, two bounded probe artifacts, layer 10, first 8 available real experts (IDs 0, 1, 2, 3, 4, 5, 6, 15).
+- Mode: `k3x_cuda_glm5x_real_expert_bench --experts 8 --tokens 4 --precision bf16-rounded`, resident dense BF16 expert-major grid, cublasLt gate/up/down projections, synchronous transfer, 5 warmups and 20 measured iterations. No proxy, pruning, router, or speculative acceptance was used.
+- Context length: 4 candidate tokens in the FFN block; this is not a prefill or decode context benchmark.
+- Result: warm block latency median 1,758,739 ns (approximately 439,685 ns per candidate token); cold latency 759,804,032 ns; host payload load 4,803,323,065 ns; cold weight H2D 603,979,776 bytes; warm weight H2D 0; resident weight bytes 603,979,776; last-expert CPU maximum relative error 0.00135118968 (0.135%).
+- Decode tok/s, prefill tok/s, TTFT, GPU utilization, VRAM peak, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality benchmark: not measured.
+- Interpretation: this is the first nonzero real-shard expert-major candidate-block gate. It proves payload-to-grid parity for one FFN block and removes repeated weight movement, but it is not a full GLM layer, routing result, or end-to-end tok/s claim. The command's `--tokens` argument is now bounded to 1..65535 and uses the exact scalar FP32 path when BF16 grid mode is not selected.
+
 ## 2026-08-14 -- Raw-BF16 expert directory C++ reader gate
 
 - Commit: working tree after `1b22bcb`; code change pending commit.

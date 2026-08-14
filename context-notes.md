@@ -136,3 +136,11 @@
 - Eight layer-10 experts in BF16-rounded mode loaded 603,979,776 payload bytes, took 4,859,331,588 ns for the cold host reads, and measured 1,854,140 ns warm median over 20 iterations with warm H2D 0 and resident bytes 603,979,776.
 - Eight FP32 experts required 1,207,959,552 resident bytes. Under the 1 GiB budget, residency bypass caused 3,019,898,880 warm H2D bytes and 13,153,048 ns warm median. This confirms BF16 residency is required for multi-expert pressure on the target card.
 - The current path is sequential, so this is a lower bound for an expert-major batch implementation rather than a final MoE layer result.
+
+## 2026-08-14 Real BF16 expert-major candidate grid
+
+- Added `dense_situ_mlp_grid` to the CUDA backend for the validated raw-BF16 GLM path. It batches all selected experts over a candidate-token block, admits each projection through the resident table, uploads the activation block once, and returns one flattened output per expert. FP32 remains on the scalar reference path.
+- Added `--tokens` to `k3x_cuda_glm5x_real_expert_bench` with a 1..65535 guard. The CPU reference now evaluates every candidate token, so the reported error covers the full last-expert block rather than one token only.
+- The two-token CUDA regression uses nonzero matrices and CPU BF16-rounded references. The full WSL CTest suite remains 26/26 and the focused GLM Python suite remains 35/35.
+- Rerun on the two real probe artifacts: 8 experts x 4 tokens measured 1,758,739 ns warm block median, 603,979,776 resident bytes, zero warm H2D, and 0.1351% maximum relative CPU difference. This is a bounded FFN block result, not model tok/s.
+- The next bottleneck is now direct raw-BF16/tensor-core storage plus exact natural Top-8 routing and nonzero full-layer parity. The dense grid is opt-in until those quality and capacity gates exist.
