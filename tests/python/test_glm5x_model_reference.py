@@ -57,3 +57,29 @@ def test_model_reference_can_load_one_layer_at_a_time() -> None:
     assert calls == [0, 1]
     assert model.layer_count == 2
     assert len(forward.layers) == 2
+
+
+def test_model_reference_can_retain_trunk_layers_between_forwards() -> None:
+    layer, _, _ = _make_layer()
+    torch.manual_seed(83)
+    calls: list[int] = []
+
+    def load_layer(layer_id: int):
+        calls.append(layer_id)
+        return layer
+
+    model = GLM5XDecoderModelReference.from_layer_loader(
+        embedding=torch.randn(16, 8),
+        layer_count=2,
+        layer_loader=load_layer,
+        final_norm=torch.ones(8),
+        lm_head=torch.randn(16, 8),
+        rope_dim=2,
+        layer_cache_capacity=2,
+    )
+    first = model.forward_tokens(torch.tensor([1, 2]))
+    second = model.forward_tokens(torch.tensor([1, 2]))
+    torch.testing.assert_close(first.logits, second.logits)
+    assert calls == [0, 1]
+    assert model.layer_cache_capacity == 2
+    assert model.cached_layer_count == 2

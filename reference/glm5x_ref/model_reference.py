@@ -1,6 +1,7 @@
 # GLM5X 여러 decoder layer와 final logits의 CPU reference 실행을 제공합니다.
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
@@ -74,6 +75,8 @@ class GLM5XDecoderModelReference:
         self.layers = tuple(layers)
         self._layer_loader: Callable[[int], GLM5XDecoderLayerReference] | None = None
         self._layer_count = len(self.layers)
+        self._layer_cache_capacity = 0
+        self._layer_cache: OrderedDict[int, GLM5XDecoderLayerReference] = OrderedDict()
         self._rope_dim = int(self.layers[0].attention.weights.qk_rope_head_dim)
         self.final_norm = final_norm
         self.lm_head = lm_head
@@ -90,14 +93,22 @@ class GLM5XDecoderModelReference:
         lm_head: torch.Tensor,
         rope_dim: int = 64,
         rope_theta: float = 10000.0,
+        layer_cache_capacity: int = 0,
     ) -> "GLM5XDecoderModelReference":
-        """Create a reference model whose layer weights are loaded per forward."""
+        """Create a reference model whose layer weights are loaded per forward.
+
+        ``layer_cache_capacity`` keeps validated layer objects (including their
+        non-expert trunk tensors) between forwards. Zero preserves the strict
+        out-of-core behavior and does not retain loaded layers.
+        """
         if not isinstance(layer_count, int) or layer_count <= 0:
             raise ValueError("GLM5X_MODEL_LAYER_COUNT")
         if not callable(layer_loader):
             raise ValueError("GLM5X_MODEL_LAYER_LOADER")
         if not isinstance(rope_dim, int) or rope_dim <= 0 or rope_dim % 2:
             raise ValueError("GLM5X_MODEL_ROPE_DIM")
+        if not isinstance(layer_cache_capacity, int) or layer_cache_capacity < 0:
+            raise ValueError("GLM5X_MODEL_LAYER_CACHE_CAPACITY")
         embedding = torch.as_tensor(embedding)
         final_norm = torch.as_tensor(final_norm)
         lm_head = torch.as_tensor(lm_head)
@@ -116,6 +127,8 @@ class GLM5XDecoderModelReference:
         instance._layer_loader = layer_loader
         instance._layer_count = layer_count
         instance._rope_dim = rope_dim
+        instance._layer_cache_capacity = min(layer_cache_capacity, layer_count)
+        instance._layer_cache = OrderedDict()
         instance.final_norm = final_norm
         instance.lm_head = lm_head
         instance.rope_theta = float(rope_theta)
@@ -137,18 +150,35 @@ class GLM5XDecoderModelReference:
     def layer_count(self) -> int:
         return self._layer_count
 
+    @property
+    def layer_cache_capacity(self) -> int:
+        return self._layer_cache_capacity
+
+    @property
+    def cached_layer_count(self) -> int:
+        return len(self._layer_cache)
+
     def _load_layer(self, index: int) -> GLM5XDecoderLayerReference:
         if self._layer_loader is None:
             assert self.layers is not None
             layer = self.layers[index]
         else:
-            layer = self._layer_loader(index)
+            layer = self._layer_cache.get(index)
+            if layer is not None:
+                self._layer_cache.move_to_end(index)
+            else:
+                layer = self._layer_loader(index)
         if not isinstance(layer, GLM5XDecoderLayerReference):
             raise ValueError("GLM5X_MODEL_LAYER_LOADER_RETURN_TYPE")
         if layer.attention.weights.hidden_size != self.hidden_size:
             raise ValueError("GLM5X_MODEL_LAYER_HIDDEN_SHAPE")
         if layer.attention.weights.qk_rope_head_dim != self.rope_dim:
             raise ValueError("GLM5X_MODEL_LAYER_ROPE_DIM")
+        if self._layer_loader is not None and self._layer_cache_capacity:
+            self._layer_cache[index] = layer
+            self._layer_cache.move_to_end(index)
+            while len(self._layer_cache) > self._layer_cache_capacity:
+                self._layer_cache.popitem(last=False)
         return layer
 
     def empty_state(self) -> GLM5XDecoderState:

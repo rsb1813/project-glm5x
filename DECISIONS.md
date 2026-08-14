@@ -384,3 +384,11 @@
 - Evidence: on the real 5.34 GB first GLM shard, strict eager open took `49.816001 s`, while lazy directory open took `0.003153 s` and the first 1.90 GB tensor read/CRC took `8.989272 s`. A tampered lazy tensor raised `DATA_CRC_MISMATCH` on read; full Python passed `304 passed, 124 skipped`.
 - Accepted because: out-of-core startup cannot afford rereading every cold shard before knowing which layer/expert is needed, while first-use CRC preserves selected-payload correctness.
 - Revisit: after adding runtime recovery, optional deferred root verification, telemetry, and a measured 78-layer prefetch schedule. Do not promote `verify_root=False` to QUALITY mode without an integrity decision.
+
+## D-0049 -- Add a bounded opt-in cache for reference trunk layers
+
+- Decision: extend `GLM5XDecoderModelReference.from_layer_loader` with an explicit `layer_cache_capacity` LRU. A nonzero capacity retains validated decoder-layer objects and their non-expert trunk tensors between forwards; zero keeps the previous strict layer-at-a-time behavior. Expert payload residency remains a separate provider policy.
+- Alternatives: cache every layer implicitly, cache nothing and reconstruct every token, or mix expert payloads into the model-level cache without a byte budget.
+- Evidence: the two-layer correctness test produced identical logits. Across two forwards, capacity 2 invoked the loader once per layer (`[0, 1]`) while capacity 0 invoked it on every forward (`[0, 1, 0, 1]`). A single-threaded synthetic timing sample was `1.0073 ms` per forward without cache versus `1.0310 ms` with cache, so no synthetic speedup is claimed.
+- Accepted because: real 78-layer execution must avoid rereading large attention/trunk tensors on every token, but the full trunk footprint and RAM pressure are not yet measured. The explicit capacity makes the tradeoff observable and reversible without changing logits or natural routing.
+- Revisit: after a real all-layer provider exists; measure bytes, construction latency, RAM residency, NVMe traffic, and quality parity before selecting a default capacity or sharing the cache with expert payloads.

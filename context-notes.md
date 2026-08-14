@@ -322,3 +322,9 @@
 - The repository has zero open Dependabot PRs. Dependabot security alerts are disabled by repository configuration, so the API's `403` response confirms unavailable alerting rather than a confirmed vulnerability count.
 
 - The documentation-only follow-up `31fe66f` also passed Linux correctness as `31824846842`; CodeQL `31824846833` passed with C++ in `2m59s` and Python in `2m19s`. The overlay-base annotation remains non-failing.
+
+## 2026-08-15 -- Bounded reference trunk-layer cache
+
+- Added `layer_cache_capacity` to `GLM5XDecoderModelReference.from_layer_loader`. Capacity zero preserves the prior out-of-core behavior; a positive value retains validated layer objects in an LRU and leaves expert payload caching to the layer/provider policy.
+- The focused cache test passed with identical logits and loader calls `[0, 1]` across two forwards at capacity 2. The full WSL Python suite passed `305 passed, 124 skipped` in `73.05 s`.
+- A small single-threaded synthetic sample measured `1.0073 ms` per forward with capacity 0 and `1.0310 ms` with capacity 2. This is too small to claim a speedup; the value is the measured elimination of repeated layer construction/admission calls, which must be rerun on real all-layer data.

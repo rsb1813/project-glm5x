@@ -551,3 +551,13 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Correctness: a one-byte mutation in lazy mode raised `DATA_CRC_MISMATCH` on first tensor read. Default eager mode and all existing bundle identity/CRC tests remain active.
 - Traffic/quality: no tok/s, TTFT, VRAM, system RAM, H2D, cache hit, or quality score was measured. The result is cold-start and selective-admission evidence only.
 - Status: experimental and opt-in. `verify_root=False` deliberately weakens whole-artifact integrity timing and is not a QUALITY default.
+
+## 2026-08-15 -- Reference trunk-layer cache contract
+
+- Date: 2026-08-15.
+- Commit: working-tree implementation after `ae7172f`; no CUDA or full checkpoint.
+- Hardware/model: WSL2 Ubuntu-24.04 CPU reference, synthetic GLM5X-compatible two-layer graph.
+- Mode: `GLM5XDecoderModelReference.from_layer_loader`, two forwards over the same two layers, `layer_cache_capacity=0` versus `2`.
+- Correctness: both modes produced identical logits. Capacity 2 retained two validated layer objects and the loader call sequence over two forwards was `[0, 1]`; the no-cache regression remains `[0, 1, 0, 1]`.
+- Performance/traffic: the synthetic model is too small for a meaningful latency claim. A single-threaded 8-forward sample measured `1.0073 ms/forward` with capacity 0 and `1.0310 ms/forward` with capacity 2, so no speedup is claimed. The measurable benefit is eliminating repeated layer construction and future real-shard admission calls; real 78-layer RAM/NVMe traffic remains unmeasured.
+- Status: opt-in and runtime-selectable. Capacity 0 remains the default until real trunk footprint and quality parity are measured.
