@@ -4,7 +4,7 @@
 
 GLM5X is a correctness-first runtime and storage project for running GLM-5.x on a machine with a 16 GB consumer GPU, large system RAM, and NVMe storage. It is designed around the model's sparse MoE routing, DSA/MLA attention, MTP speculative decoding, and expert-major verification rather than treating the workload as a dense model with a generic cache.
 
-> **Status:** bootstrap in progress. The repository contains the migrated K3X storage/cache foundation and a GLM-5.x model descriptor. No GLM weights are bundled, and no throughput number is claimed yet.
+> **Status:** GLM-5.2 shape and manifest boundary are implemented. No GLM weights are bundled. The repository has a real RTX 5080 bounded expert-kernel baseline, but no end-to-end tok/s number is claimed.
 
 ## What is here now
 
@@ -12,15 +12,17 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - Three-tier residency interfaces for VRAM, system RAM, and NVMe.
 - Deadline-aware prefetch, task/session profiles, expert cache policies, and benchmark schemas inherited from K3X.
 - GLM descriptor validation for DSA, 256 routed experts, Top-8 routing, shared experts, and MTP metadata.
+- `GLM5XTensorManifest` validation for safetensors shard maps and source byte totals before conversion.
+- A GLM-5.2-shaped CUDA expert benchmark for hidden size 6144 and expert intermediate size 2048, including 1/2/4/8-token expert-major batching.
 - CPU/reference TurboQuant-style KV cache with asymmetric K/V bits and 600k–1M capacity arithmetic. This does not compress model weights and is not yet a CUDA performance path.
-- A `glm5x-convert` entry point that currently wraps the proven storage converter while the GLM tensor manifest is being added.
+- A `glm5x-convert` entry point that wraps the proven storage converter while model-specific extent roles are completed.
 - Strict separation between implemented code, experiments, proposals, and measurements.
 
 ## What is not claimed
 
 - GLM-5.2 or GLM-5.3 weights are not included.
 - The GLM reference graph and CUDA fast path are not complete.
-- DSpark/MTP, expert-major batching, proxy routing, adaptive quality modes, and RTX 5080 throughput are not yet measured on the target PC.
+- DSpark/MTP acceptance, proxy routing, adaptive quality modes, and end-to-end RTX 5080 throughput are not yet measured on the target PC. Expert-major candidate batching is measured only as a bounded CUDA layer path.
 - Synthetic or bounded fixtures are not evidence of full-model throughput.
 
 ## Design
@@ -64,7 +66,7 @@ python -m glm5x_converter.cli --help
 
 ## Roadmap
 
-1. GLM-5.2 descriptor, manifest, and tiny reference graph.
+1. GLM-5.2 descriptor, manifest, and tiny reference graph. (Descriptor/manifest and bounded CUDA baseline are complete.)
 2. TurboQuant reference KV parity and packed paged-KV contract.
 3. GLM-5.2 DSA/indexer state and 600k/1M capacity smoke.
 4. Exact CPU runtime and profiler.

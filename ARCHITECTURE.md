@@ -9,15 +9,18 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - K3X-compatible superblock, tensor/layer/expert directories, aligned extents, CRC/SHA verification, and resumable writer.
 - Portable C++20 reader, cache, prefetch, routing-policy, speculative, and expert-major interfaces.
 - GLM descriptor validation for DSA, Top-8, 256 routed experts, shared experts, and MTP metadata.
+- GLM-5.2 tensor-manifest validation for `config.json`, safetensors `weight_map`, shard names, tensor count, and source byte total without opening a weight shard.
+- A bounded RTX 5080 CUDA benchmark for GLM-5.2 expert dimensions (`hidden=6144`, `expert_intermediate=2048`, `group=32`) using the resident expert-grid backend.
 - GLM5X converter CLI wrapper.
 - CPU/reference TurboQuant-inspired KV cache with Hadamard rotation, integer and half-bit schedules, asymmetric K/V policy, incremental attention, and capacity estimation.
 
 ### In progress
 
-- GLM tensor manifest and model-specific extent roles.
+- GLM model-specific extent roles and streaming conversion from the validated manifest.
 - GLM-5.2 reference graph with exact DSA/MLA and MoE routing.
 - Synthetic GLM-5.2 checkpoint round-trip.
 - Connecting compressed KV blocks to the GLM DSA/indexer state instead of the standalone reference cache.
+- Wiring expert-major candidate-token batching into the MTP verifier rather than only the standalone CUDA benchmark.
 
 ### Experimental
 
@@ -29,7 +32,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 ### Proposed
 
 - GLM-5.3 checkpoint descriptor and calibration swap.
-- Full RTX 5080 native CUDA kernels.
+- Full RTX 5080 native CUDA kernels beyond the current scalar MXFP4 grid path.
 - Cloud-side shard conversion through the existing SKYFORGE concept.
 
 ## Runtime data flow
@@ -42,7 +45,9 @@ For long context, the planned path is paged DSA state with a recent high-precisi
 
 ## Model boundary
 
-`GLM5XModelDescriptor` is the first model boundary. It owns model family, attention kind, layer count, hidden size, routed expert count, Top-K, shared experts, vocabulary size, and MTP layer count. Tensor file names and shapes belong to a checkpoint manifest and must not be embedded in runtime kernels.
+`GLM5XModelDescriptor` is the first model boundary. It owns model family, attention kind, layer count, hidden size, routed expert count, Top-K, shared experts, vocabulary size, MTP layer count, MoE intermediate width, DSA index Top-K/frequency/head shape, MTP sharing policy, and maximum position length. Tensor file names and source byte totals belong to `GLM5XTensorManifest` and must not be embedded in runtime kernels.
+
+The current CUDA evidence is deliberately bounded. The shaped benchmark runs the resident MXFP4 expert grid with deterministic zero weights, so maximum absolute error is checked against a zero reference. It is a kernel/layer measurement, not a full 78-layer GLM decode result and not a quality benchmark.
 
 K3-specific KDA, Attention Residual, Stable LatentMoE, 896-way Top-16 assumptions, and native Kimi MXFP4 naming are not part of the GLM5X default graph. They remain historical source context in the old K3X repository only.
 
