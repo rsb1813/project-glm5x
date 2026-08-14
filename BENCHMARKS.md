@@ -685,3 +685,14 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Correctness: output maximum absolute difference between the cold and cached calls was `0.0`; selected expert count and route were unchanged.
 - Decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, H2D GB/token, speculative acceptance, and quality benchmark were not measured. This is a bounded exact sublayer cache result, not a full-model throughput result.
 - Interpretation: the cache can remove repeat NVMe reads across layer-object lifetimes, but its useful capacity and hit rate are unknown until the 78-layer full bundle runs. Capacity `0` remains the default.
+
+## 2026-08-15 -- Opt-in decoded expert GPU cache
+
+- Date: 2026-08-15.
+- Commit: `5e4d86f`.
+- Hardware/model: RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.3, five-shard official GLM-5.2 probe bundle, layer 10, exact raw-BF16 expert roles.
+- Mode: one BF16 hidden-state token, `expert_load_workers=4`, host payload cache `1,000,000,000` bytes, decoded expert device cache `1,000,000,000` bytes, `cache_experts=false`, same input for two calls.
+- Cold/warm MoE sublayer wall time: `3.124653389 s` on the first call and `0.003793419 s` on the second call. The device cache held `603,979,776` bytes for 8 experts and reported `8` misses, `8` hits, and `0` evictions; host cache reported 8 misses and 0 hits on the first/second pair because the decoded cache prevented the second host read.
+- Correctness: output maximum absolute difference between cold and warm calls was `0.0`; selected expert count and route were unchanged. Peak CUDA allocated bytes were `719,427,584`.
+- Decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, H2D GB/token, speculative acceptance, and quality benchmark were not measured. This is a bounded exact sublayer residency result, not a full-model throughput result.
+- Interpretation: the device cache removes repeat H2D and decode work when the same experts recur, but 1 GiB only holds a small subset of the full model. The full gate will compare it against the cold path before any policy change.
