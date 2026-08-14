@@ -47,6 +47,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - CPU/reference `GLM5XLayer10MoEReference` with the official GLM router contract (float32 sigmoid scores, group selection, exact Top-8 normalization and routed scale), shared SwiGLU, and explicit token-major expert scatter. `from_bundle()` maps the copy-free cross-shard bundle to lazy exact raw-BF16 expert role loads, so a forward materializes only the selected experts.
 - CPU/reference `GLM5XMLAReference` with q-residual projection, compressed MLA KV state, per-token RoPE, causal attention, and incremental state reuse. `GLM5XOfficialDSAState` is appended by the exact official-shaped indexer and its causal Top-K mask is passed into MLA without changing natural routing.
 - `GLM5XDecoderLayerReference` now executes the layer boundary in official order: input RMS norm, q-residual/DSA, MLA, residual, post-attention RMS norm, shared/routed MoE, and residual. It supports full-vs-incremental parity and a bundle-backed layer loader that shares one validated `GLM5XExpertBundle` reader across attention, indexer, and lazy expert loads.
+- `GLM5XDecoderModelReference` now composes multiple exact decoder layers, final RMSNorm, and an LM head. It retains per-layer MLA/DSA state, supports prompt prefill plus one-token incremental calls, and exposes greedy generation parity on the synthetic GLM5X graph. This is CPU/reference-only; all-layer real-weight loading, MTP, and CUDA logits remain pending.
 
 ### In progress
 

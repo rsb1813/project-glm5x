@@ -352,3 +352,11 @@
 - Evidence: the CUDA synthetic regression passed exact routed-plus-shared parity and verified one final 16-byte D2H for the two-token fixture. On the exact two-token GLM5XACT layer-10 handoff, GPU/CPU maximum relative error remained `0.00045266628149` and expected BF16-artifact relative error remained `0.00152439018711`. With 100 warm iterations per run, baseline medians were `2,180,810`, `2,194,670`, `2,371,374 ns`; device accumulation without fusion was `2,326,186`, `2,590,515`, `2,098,680 ns`; fused shared accumulation was `1,984,222`, `1,986,460`, `2,090,547 ns`. Median-of-runs was `2,194,670 ns` baseline versus `1,986,460 ns` fused, approximately `9.49%` lower. The longer sweep did not reproduce the earlier standalone device-accumulation gain, so no universal speedup is claimed.
 - Accepted because: it removes the second D2H and host addition while keeping natural routing and the separate reference mode intact. It is still a bounded MoE-sublayer result, so promotion waits for full-layer parity, quality, and multi-seed evidence.
 - Revisit: after the exact MLA/DSA-to-CUDA handoff, pinned staging, and complete decoder-layer benchmark are available.
+
+## D-0045 -- Make final logits and incremental state explicit in the CPU reference
+
+- Decision: add `GLM5XDecoderModelReference` as a thin composition layer over exact decoder-layer references. It owns per-layer MLA/DSA states, final RMSNorm, the LM head, prompt prefill, one-token continuation, and greedy generation; it does not alter routing or enable CUDA fast paths.
+- Alternatives: keep only isolated layer tests, add logits directly to the layer class, or connect CUDA before a model-level state contract exists.
+- Evidence: the new synthetic two-layer test matched every incremental prompt logit to the corresponding prefill slice and matched an explicit greedy loop. WSL full Python passed `302 passed, 124 skipped` after the export.
+- Accepted because: it gives CUDA, MTP, prefix/KDA caching, and quality comparisons one unambiguous model-level state boundary while preserving the existing exact layer reference.
+- Revisit: when real all-layer GLM tensors and MTP metadata are available; batch support, tied embeddings, and CUDA final-logit placement must then be validated against the official checkpoint.

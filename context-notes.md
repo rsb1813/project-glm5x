@@ -290,3 +290,9 @@
 
 - The recurring historical `correctness / linux` failure was not a two-minute runtime timeout. On stale commit `b94c8b8`, C++ build/CTest passed and the Python step failed after about one minute with 50 `FileNotFoundError` cases for K3X `results/b0006` through `b0024` artifacts that GLM5X does not ship. Current `main` already has the narrow explicit-skip boundary and its latest public checks were green.
 - Dependabot PRs 1-4 were green replacement proposals for setup-python 7, checkout 7, numpy 2.5.2, and setuptools 84; they were closed after those exact changes were integrated on `a3fb8a8`. The repository vulnerability-alert endpoint returns disabled/403, so no CVE alert was confirmed. CodeQL v4/Node24-compatible action majors are also on main; no paid resource or security setting was changed.
+
+## 2026-08-15 -- Multi-layer CPU logits reference
+
+- Added `GLM5XDecoderModelReference` with per-layer MLA/DSA state tuples, final RMSNorm, LM-head logits, prompt prefill, one-token incremental forward, and greedy generation.
+- The focused parity test compares every incremental prompt logit against the multi-token prefill and compares generated tokens with an explicit greedy loop. WSL full Python passed `302 passed, 124 skipped`; no real full-checkpoint or tok/s claim is made.
+- The next implementation boundary is loading all real GLM layers into this state contract and exporting the exact hidden handoff to CUDA without changing natural routing.

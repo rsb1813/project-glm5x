@@ -508,3 +508,14 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Correctness: CUDA synthetic fused routed-plus-shared parity passed. On the exact GLM5XACT handoff, GPU/CPU maximum relative error was `0.00045266628149`, expected BF16-artifact relative error was `0.00152439018711`, and route IDs/contributions matched Python. The fused path reported one final output D2H per call.
 - Tests: WSL host CTest `15/15`, CUDA CTest `27/27`, and Python `301 passed, 124 skipped`.
 - Status: experimental and default-off. This is still one real MoE sublayer, not a complete decoder layer or end-to-end tok/s result. No TPS, TTFT, NVMe GB/token, full-layer quality, or final-token result was measured.
+
+## 2026-08-15 -- Multi-layer CPU reference logits and greedy parity
+
+- Date: 2026-08-15.
+- Commit: `f5a3e3a`.
+- Hardware: WSL2 Ubuntu-24.04 CPU reference; no CUDA execution and no full checkpoint.
+- Model/checkpoint: synthetic GLM5X-compatible two-layer graph built from the existing tiny MLA/DSA/MoE fixture.
+- Mode: prompt prefill followed by one-token incremental state reuse; final RMSNorm, LM head, and greedy generation enabled. No adaptive Top-K, speculative decoding, or proxy path.
+- Correctness: one focused test matched each incremental prompt logit against the corresponding prefill output and matched greedy generation against an explicit loop. Full WSL Python suite passed `302 passed, 124 skipped` in `69.41 s`.
+- Performance/traffic: decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, and quality benchmark were not measured. This is a correctness boundary, not a throughput result.
+- Interpretation: final-logit/state ownership is now explicit for the synthetic graph. The next bottleneck is real all-layer tensor loading and exact MLA/DSA-to-CUDA hidden-state parity.

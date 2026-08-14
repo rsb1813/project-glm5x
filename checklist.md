@@ -49,6 +49,7 @@
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [x] Add lazy official-router/shared-SwiGLU layer-10 reference over the bounded five-shard bundle.
 - [x] Add exact q-residual, MLA compressed state, official DSA incremental state, and full-vs-incremental layer parity.
+- [x] Add multi-layer CPU decoder reference with final RMSNorm, LM-head logits, and incremental greedy parity.
 - [x] Add a bundle-backed layer-10 loader that shares one validated reader across attention, indexer, norms, and lazy MoE experts.
 - [x] Separate official GLM SiLU gated MLP execution from the inherited legacy SiTU path and add CPU/CUDA parity coverage.
 - [x] Validate the real layer-10 `GLM5XACT` MoE input/output handoff with learned routing and BF16-boundary comparison.
