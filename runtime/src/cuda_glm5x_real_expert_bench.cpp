@@ -126,7 +126,8 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
     if (result.input_mode != "common" &&
         result.input_mode != "sparse-packed" &&
         result.input_mode != "expert-major" &&
-        result.input_mode != "learned-expert-major") {
+        result.input_mode != "learned-expert-major" &&
+        result.input_mode != "learned-moe-layer") {
         return std::nullopt;
     }
     if (result.precision != "bf16-rounded" && result.output != "fp32") {
@@ -148,6 +149,13 @@ struct NamedTensorPayload {
     std::uint8_t rank{};
     std::array<std::uint64_t, 4> dimensions{};
     std::vector<std::byte> bytes;
+};
+
+struct SharedExpertFixture {
+    std::array<NamedTensorPayload, 3> payload;
+    std::array<std::vector<float>, 3> weights;
+    k3x::RawBf16MlpView raw{};
+    k3x::DenseMlpView dense{};
 };
 
 float bf16_to_float(const std::byte* bytes) {
@@ -333,7 +341,7 @@ int main(int argc, char** argv) {
         std::cerr << "usage: --artifact-dir DIR --layer N --expert N "
                      "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
                      "[--workspace-bytes N] [--resident-bytes N] [--precision fp32|bf16-rounded] "
-                     "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major|learned-expert-major]\n";
+                     "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major|learned-expert-major|learned-moe-layer]\n";
         return 2;
     }
     const auto paths = artifact_paths(arguments->artifact_dir);
@@ -367,9 +375,12 @@ int main(int argc, char** argv) {
     const bool expert_major = arguments->input_mode == "expert-major";
     const bool learned_expert_major =
         arguments->input_mode == "learned-expert-major";
-    if (learned_expert_major &&
+    const bool learned_moe_layer =
+        arguments->input_mode == "learned-moe-layer";
+    const bool learned_route_mode = learned_expert_major || learned_moe_layer;
+    if (learned_route_mode &&
         (arguments->precision != "bf16-rounded" || arguments->tokens == 0)) {
-        std::cerr << "learned-expert-major requires --precision bf16-rounded\n";
+        std::cerr << "learned GLM modes require --precision bf16-rounded\n";
         return 7;
     }
     const auto logical_token_count = arguments->tokens;
@@ -384,7 +395,7 @@ int main(int argc, char** argv) {
     std::vector<std::uint32_t> expert_ids;
     std::uint64_t router_payload_bytes = 0;
     const auto host_start = std::chrono::steady_clock::now();
-    if (learned_expert_major) {
+    if (learned_route_mode) {
         const auto router = load_named_tensor(
             shard_views,
             "model.layers." + std::to_string(arguments->layer) +
@@ -445,7 +456,7 @@ int main(int argc, char** argv) {
         fixture.payload = std::move(loaded.value());
         host_payload_bytes += fixture.payload.payload_bytes;
         const auto needs_float_view = arguments->precision == "fp32" ||
-            expert_major || learned_expert_major ||
+            expert_major || learned_route_mode ||
             expert_id == expert_ids.back();
         if (needs_float_view) {
             for (std::size_t index = 0; index < fixture.weights.size(); ++index) {
@@ -480,6 +491,59 @@ int main(int argc, char** argv) {
         }
         fixtures.push_back(std::move(fixture));
     }
+    SharedExpertFixture shared_fixture;
+    std::uint64_t shared_payload_bytes = 0;
+    if (learned_moe_layer) {
+        const auto layer_prefix =
+            "model.layers." + std::to_string(arguments->layer) +
+            ".mlp.shared_experts.";
+        const std::array names{
+            layer_prefix + "gate_proj.weight",
+            layer_prefix + "up_proj.weight",
+            layer_prefix + "down_proj.weight",
+        };
+        const std::array<std::array<std::uint64_t, 2>, 3> shapes{{
+            {kIntermediateSize, kHiddenSize},
+            {kIntermediateSize, kHiddenSize},
+            {kHiddenSize, kIntermediateSize},
+        }};
+        for (std::size_t index = 0; index < names.size(); ++index) {
+            auto payload = load_named_tensor(shard_views, names[index]);
+            if (!payload || payload.value().dtype != 3 ||
+                !has_shape(payload.value(),
+                           {shapes[index][0], shapes[index][1]})) {
+                std::cerr << "invalid GLM shared expert tensor\n";
+                return 6;
+            }
+            shared_payload_bytes += payload.value().bytes.size();
+            shared_fixture.payload[index] = std::move(payload.value());
+            shared_fixture.weights[index] =
+                decode_bf16(shared_fixture.payload[index].bytes);
+            if (shared_fixture.weights[index].empty()) return 7;
+            for (auto& value : shared_fixture.weights[index]) {
+                value = round_to_bf16(value);
+            }
+        }
+        const auto gate_id = k3x::fnv1a64(names[0].c_str());
+        const auto up_id = k3x::fnv1a64(names[1].c_str());
+        const auto down_id = k3x::fnv1a64(names[2].c_str());
+        shared_fixture.raw = {
+            {gate_id, shared_fixture.payload[0].bytes,
+             kIntermediateSize, kHiddenSize},
+            {up_id, shared_fixture.payload[1].bytes,
+             kIntermediateSize, kHiddenSize},
+            {down_id, shared_fixture.payload[2].bytes,
+             kHiddenSize, kIntermediateSize},
+        };
+        shared_fixture.dense = {
+            {gate_id, shared_fixture.weights[0], kIntermediateSize,
+             kHiddenSize},
+            {up_id, shared_fixture.weights[1], kIntermediateSize,
+             kHiddenSize},
+            {down_id, shared_fixture.weights[2], kHiddenSize,
+             kIntermediateSize},
+        };
+    }
     const auto host_load_ns = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - host_start).count());
@@ -495,10 +559,10 @@ int main(int argc, char** argv) {
                      "and at least two experts\n";
         return 7;
     }
-    if (learned_expert_major &&
+    if (learned_route_mode &&
         (arguments->precision != "bf16-rounded" || arguments->tokens == 0 ||
          fixtures.size() < 2)) {
-        std::cerr << "learned-expert-major requires BF16 precision and at least "
+        std::cerr << "learned GLM modes require BF16 precision and at least "
                      "two selected experts\n";
         return 7;
     }
@@ -509,9 +573,9 @@ int main(int argc, char** argv) {
     }
     std::optional<k3x::ExpertMajorPackedPlan> expert_major_plan;
     std::vector<k3x::RawBf16MlpView> expert_major_views;
-    if (expert_major || learned_expert_major) {
+    if (expert_major || learned_route_mode) {
         std::vector<k3x::ExpertMajorTokenRoute> routes;
-        if (learned_expert_major) {
+        if (learned_route_mode) {
             routes = learned_routes;
         } else {
             routes.resize(arguments->tokens);
@@ -586,7 +650,7 @@ int main(int argc, char** argv) {
     std::vector<float> cpu_reference;
     cpu_reference.reserve(grid_token_count * kHiddenSize);
     const auto reference_token_count = sparse_packed ? 1 : arguments->tokens;
-    if (expert_major || learned_expert_major) {
+    if (expert_major || learned_route_mode) {
         cpu_reference.assign(arguments->tokens * kHiddenSize, 0.0F);
         for (const auto& group : expert_major_plan->groups) {
             const auto fixture = std::find_if(
@@ -610,6 +674,21 @@ int main(int argc, char** argv) {
                 }
             }
         }
+        if (learned_moe_layer) {
+            for (std::size_t token = 0; token < arguments->tokens; ++token) {
+                const auto token_input = std::span<const float>(input).subspan(
+                    token * kHiddenSize, kHiddenSize);
+                const auto shared = cpu->dense_situ_mlp(
+                    token_input, shared_fixture.dense, 1.0F, std::nullopt,
+                    arguments->layer, k3x::ProfilePhase::decode);
+                if (!shared) return 8;
+                auto output = std::span<float>(cpu_reference).subspan(
+                    token * kHiddenSize, kHiddenSize);
+                for (std::size_t value = 0; value < output.size(); ++value) {
+                    output[value] += shared.value()[value];
+                }
+            }
+        }
     } else for (std::size_t token = 0; token < reference_token_count; ++token) {
         const auto logical_token = sparse_packed
             ? ((fixtures.size() - 1) % logical_token_count) : token;
@@ -623,6 +702,32 @@ int main(int argc, char** argv) {
                              reference.value().end());
     }
     const auto execute = [&]() {
+        if (learned_moe_layer) {
+            auto routed = cuda.value()->raw_bf16_situ_mlp_expert_major(
+                input, arguments->tokens, *expert_major_plan,
+                expert_major_views, 1.0F, std::nullopt, arguments->layer,
+                k3x::ProfilePhase::decode);
+            if (!routed) return routed;
+            const std::array<k3x::RawBf16MlpView, 1> shared_views{
+                shared_fixture.raw};
+            auto shared = cuda.value()->raw_bf16_situ_mlp_grid(
+                input, arguments->tokens, shared_views, 1.0F, std::nullopt,
+                arguments->layer, k3x::ProfilePhase::decode);
+            if (!shared) {
+                return k3x::Result<std::vector<float>>::failure(
+                    shared.error(), shared.message());
+            }
+            if (shared.value().size() != 1 ||
+                shared.value().front().size() != routed.value().size()) {
+                return k3x::Result<std::vector<float>>::failure(
+                    k3x::ErrorCode::invalid_extent,
+                    "shared GLM expert output shape mismatch");
+            }
+            for (std::size_t index = 0; index < routed.value().size(); ++index) {
+                routed.value()[index] += shared.value().front()[index];
+            }
+            return routed;
+        }
         if (expert_major || learned_expert_major) {
             return cuda.value()->raw_bf16_situ_mlp_expert_major(
                 input, arguments->tokens, *expert_major_plan,
@@ -696,10 +801,12 @@ int main(int argc, char** argv) {
     const auto cpu_scale = std::max(maximum_absolute_value(cpu_reference), 1.0e-6F);
     std::cout << std::setprecision(12)
               << "{\"artifact_kind\":\""
-              << ((expert_major || learned_expert_major)
-                      ? (learned_expert_major
-                             ? "glm5.2_real_bf16_learned_expert_major"
-                             : "glm5.2_real_bf16_expert_major")
+              << ((expert_major || learned_route_mode)
+                      ? (learned_moe_layer
+                             ? "glm5.2_real_bf16_learned_moe_layer"
+                             : (learned_expert_major
+                                    ? "glm5.2_real_bf16_learned_expert_major"
+                                    : "glm5.2_real_bf16_expert_major"))
                       : "glm5.2_real_bf16_expert")
               << "\""
               << ",\"layer_id\":" << arguments->layer
@@ -712,10 +819,10 @@ int main(int argc, char** argv) {
               << ",\"output\":\"" << arguments->output << "\""
               << ",\"input_mode\":\"" << arguments->input_mode << "\""
               << ",\"route_group_count\":"
-              << ((expert_major || learned_expert_major)
+              << ((expert_major || learned_route_mode)
                       ? expert_major_plan->groups.size() : 0)
               << ",\"route_assignment_count\":"
-              << ((expert_major || learned_expert_major)
+              << ((expert_major || learned_route_mode)
                       ? expert_major_plan->assignment_count : 0)
               << ",\"grid_token_count\":" << grid_token_count
               << ",\"cublas_workspace_bytes\":"
@@ -724,6 +831,7 @@ int main(int argc, char** argv) {
               << arguments->resident_bytes
               << ",\"host_payload_bytes\":" << host_payload_bytes
               << ",\"router_payload_bytes\":" << router_payload_bytes
+              << ",\"shared_payload_bytes\":" << shared_payload_bytes
               << ",\"host_load_nanoseconds\":" << host_load_ns
               << ",\"cold_latency_nanoseconds\":" << cold_ns
               << ",\"latency_nanoseconds_median\":" << median(samples)

@@ -231,6 +231,14 @@
 - A 2 GiB budget was required for two tokens because the real route selected 15 experts and 1.132 GB of BF16 expert roles. The 20-warmup/100-iteration FP32-output run measured 1.905668 ms/block, 0.0866% maximum CPU-relative difference, and zero warm weight H2D. A 4-token run selected 29 experts and measured 3.757986 ms/block with 0.0667% relative difference under a 4 GiB budget.
 - The earlier deterministic route is now clearly separated from this learned route. Neither includes MLA/DSA, trunk residuals, logits, or generation, so neither is a model tok/s result.
 
+## 2026-08-14 -- Learned GLM MoE sublayer CUDA boundary
+
+- Commit `c1b7926` adds `learned-moe-layer`. It loads the real layer-10 shared expert (`gate_proj`, `up_proj`, `down_proj`) in addition to the selected routed union, executes routed expert-major scatter plus shared raw-BF16 grid, and compares the sum with the CPU dense reference.
+- With two tokens and a 2 GiB resident budget, 15 routed experts plus one shared expert used `1,207,959,552` resident bytes and measured `2,155,188 ns` warm median/block. Maximum CPU-relative difference was `0.000585675588809` and warm weight H2D was `0`.
+- With four tokens and a 4 GiB budget, 29 routed experts plus one shared expert used `2,264,924,160` resident bytes and measured `3,968,243 ns` warm median/block. Maximum CPU-relative difference was `0.000429985491792` and warm weight H2D was `0`.
+- The opt-in BF16-output cross-check measured `2,374,827 ns` for two tokens and `0.00111866334919` maximum CPU-relative difference, so FP32 output remains the default for this boundary.
+- This is the complete bounded MoE sublayer only. MLA/DSA, trunk residuals, final logits, incremental full-layer state, and end-to-end tok/s remain unmeasured.
+
 ## 2026-08-14 — public CI and Dependabot diagnosis
 
 - Pushed learned-router evidence at `222d113`; Linux correctness `31802692875` passed in 2m43s and CodeQL `31802692977` passed in 4m10s.

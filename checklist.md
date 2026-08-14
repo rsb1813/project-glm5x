@@ -42,6 +42,7 @@
 - [x] Add exact expert-major contribution scatter after packed CUDA outputs.
 - [x] Connect ragged expert-major buckets and weighted scatter to the raw-BF16 CUDA grid API; keep learned GLM routing separate.
 - [x] Add official GLM-5.2 router-weight/correction-bias loading and learned natural Top-8 expert-major CUDA benchmark mode.
+- [x] Add learned GLM MoE sublayer mode with real shared-expert raw-BF16 execution and CPU parity.
 - [x] Add explicit resident VRAM budget control for the learned expert-union probe.
 - [x] Make Linux correctness reproducible when migrated historical benchmark evidence is absent; keep new GLM tests active.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.

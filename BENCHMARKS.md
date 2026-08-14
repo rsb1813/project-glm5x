@@ -436,3 +436,15 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Four-token result: 29 unique expert groups, 32 assignments, `3,757,986 ns` warm median/block, `327,788,285 ns` cold latency, `18,399,328,859 ns` host load, `2,189,426,688` expert bytes resident, `3,146,752` router bytes read, `2,189,426,688` cold weight H2D bytes, `0` warm weight H2D bytes, and `0.000666717009153` maximum CPU-relative difference. VRAM admission budget was 4 GiB.
 - BF16-output cross-check: two tokens measured `1,937,250 ns` and `0.00194821879268` maximum CPU-relative difference, so BF16 output remains opt-in rather than a default quality path.
 - Interpretation: this is the first real routing-aware GLM MoE/FFN measurement. The route and expert union are real, but MLA/DSA, trunk residuals, logits, and token generation are not included; no end-to-end tok/s claim follows.
+
+## 2026-08-14 -- Learned GLM MoE sublayer with shared expert
+
+- Commit: `c1b7926`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL on the configured target PC.
+- Model/checkpoint: five bounded `zai-org/GLM-5.2` probe artifacts, complete layer 10; no full checkpoint.
+- Mode: `k3x_cuda_glm5x_real_expert_bench --input-mode learned-moe-layer`, official sigmoid natural Top-8, routed scale 2.5, raw-BF16 expert-major routed scatter plus the real shared-expert raw-BF16 grid, FP32 output, 20 warmups and 100 measured iterations, synchronous transfers.
+- Two-token result: 15 routed expert groups, 16 assignments, one shared expert, `2,155,188 ns` warm median/block, `246,997,686 ns` cold latency, `10,123,913,076 ns` host load, `1,207,959,552` resident bytes, `1,207,959,552` cold weight H2D bytes, `0` warm weight H2D bytes, `3,146,752` router bytes, `75,497,472` shared payload bytes, and `0.000585675588809` maximum CPU-relative difference. Resident budget was 2 GiB.
+- Four-token result: 29 routed expert groups, 32 assignments, one shared expert, `3,968,243 ns` warm median/block, `331,985,997 ns` cold latency, `18,897,178,153 ns` host load, `2,264,924,160` resident bytes, `2,264,924,160` cold weight H2D bytes, `0` warm weight H2D bytes, `3,146,752` router bytes, `75,497,472` shared payload bytes, and `0.000429985491792` maximum CPU-relative difference. Resident budget was 4 GiB.
+- BF16-output cross-check: two tokens measured `2,374,827 ns` warm median/block with `0.00111866334919` maximum CPU-relative difference, so FP32 output remains the default.
+- Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, cache hit rate, speculative acceptance, quality score, and full-model VRAM pressure: not measured.
+- Interpretation: this is the complete bounded learned MoE sublayer, including shared SwiGLU. It still excludes q-residual/MLA/DSA, trunk residuals, final logits, incremental full-layer state, and token generation; no end-to-end tok/s claim follows.

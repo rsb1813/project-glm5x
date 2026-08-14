@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, and a learned-router-aware ragged raw-BF16 CUDA dispatch boundary are implemented over five bounded real shards. The implementation evidence is in `222d113`; the latest documentation HEAD is `aad79cb`, and both public Linux correctness plus CodeQL are green.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, and a learned-router-aware raw-BF16 CUDA MoE sublayer boundary are implemented over five bounded real shards. The implementation evidence is in `c1b7926`; public Linux correctness and CodeQL will run on this pushed commit.
 
 ## Completed
 
@@ -47,6 +47,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Reused one root-verified `GLM5XExpertBundle` reader across the layer loader and lazy MoE closure; the real five-shard construction smoke fell from 491.483777 s to 250.637263 s.
 - Connected `ExpertMajorPackedPlan` bucketing and contribution scatter to `CudaBackend::raw_bf16_situ_mlp_expert_major`; the real bounded probe measured 1,380,314 ns warm median/block for a deterministic 8-group/10-assignment/2-token route.
 - Added `learned-expert-major` to load the official GLM router and correction bias, select the actual Top-8 expert union, and expose an explicit resident-byte budget. The bounded two-token route selected 15 experts and measured 1,905,668 ns warm median/block with 0.0866% maximum CPU-relative difference.
+- Added `learned-moe-layer` to execute the same natural routed union plus the actual layer shared expert through raw-BF16 CUDA, with combined CPU parity and separate shared-payload/residency telemetry.
 - Added a narrow pytest boundary for historical K3X evidence files absent from the GLM5X repository; new GLM5X tests remain active. GitHub Actions correctness and CodeQL pass on `a00beec`.
 
 ## In progress
@@ -102,6 +103,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Ragged packed-batch gate: `test_expert_major` verifies stable one-/two-assignment buckets, repeated-shape slab concatenation, source group indices, and malformed payload rejection. The CUDA bucket loop consumes this contract for both deterministic and learned route plans.
 - Contribution-scatter gate: `test_expert_major` verifies weighted group-output accumulation in token order and short-output rejection. The CUDA path uses the same helper after raw-BF16 bucket execution; full-layer GLM parity remains open.
 - Learned-router real-shard gate: official layer-10 router tensors selected 15 experts/16 assignments for two tokens and 29 experts/32 assignments for four tokens. FP32-output warm medians were 1,905,668 ns/block and 3,757,986 ns/block, respectively; no full-layer or end-to-end tok/s was measured.
+- Learned-MoE-sublayer real-shard gate: two tokens selected 15 routed experts plus one shared expert and measured 2,155,188 ns/block with 1,207,959,552 resident bytes and 0.0586% maximum CPU-relative difference. Four tokens selected 29 routed experts plus one shared expert and measured 3,968,243 ns/block with 2,264,924,160 resident bytes and 0.0430% relative difference. BF16-output was slower at 2,374,827 ns and had 0.1119% relative difference, so FP32 remains default. This is not a full-layer or end-to-end tok/s result.
 - Expert-major real-shard gate: five probe artifacts, deterministic 8-group/10-assignment/2-token route, 1,380,314 ns warm median/block, 168,543,514 ns cold latency, 603,979,776 resident bytes, zero warm weight H2D, and 0.1471% maximum CPU-relative difference. Common was 1,651,193 ns and sparse-packed was 1,631,127 ns in paired samples. This is not learned routing or end-to-end tok/s.
 - Sparse-packed probe: deterministic 8-expert/2-token pattern measured 965,550 ns/block versus 1,040,559 ns for the common-input rerun; this is not learned routing or end-to-end throughput.
 - Latest rerun at `1f43e1a`: common 927,744 ns/block versus sparse-packed 939,149 ns/block, so sparse-packed was about 1.2% slower in this sample. The direction changed from the earlier sample; no stable packed speedup is assumed.
@@ -117,5 +119,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
-- Last known-good implementation HEAD: `222d113` (`docs: record learned GLM router CUDA evidence`); latest public documentation HEAD: `aad79cb`. WSL CUDA CTest 26/26 is green; focused GLM Python 42/42 is the last WSL Python result. Public Linux correctness `31803145001` and CodeQL `31803145130` both passed.
-- Next bottleneck: connect the exact layer-10 router/MLA/DSA output to the new bucket loop, avoid multi-gigabyte root hashing on every process start, then add pinned/asynchronous raw H2D, direct tensor-core algorithm selection, all-layer exact state, nonzero full-layer parity, and VRAM-pressure-aware residency; full weights remain intentionally absent.
+- Last known-good implementation HEAD: `c1b7926` (`feat: benchmark learned GLM MoE layer`). WSL CUDA CTest 26/26 is green; focused GLM Python 42/42 is the last WSL Python result. Public CI for this commit is pending.
+- Next bottleneck: feed the exact layer-10 q-residual/MLA/DSA hidden state into the learned MoE sublayer, avoid multi-gigabyte root hashing on every process start, then add pinned/asynchronous raw H2D, direct tensor-core algorithm selection, all-layer exact state, nonzero full-layer parity, and VRAM-pressure-aware residency; full weights remain intentionally absent.
