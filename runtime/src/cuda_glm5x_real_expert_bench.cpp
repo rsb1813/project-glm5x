@@ -115,7 +115,8 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
         return std::nullopt;
     }
     if (result.input_mode != "common" &&
-        result.input_mode != "sparse-packed") {
+        result.input_mode != "sparse-packed" &&
+        result.input_mode != "expert-major") {
         return std::nullopt;
     }
     if (result.precision != "bf16-rounded" && result.output != "fp32") {
@@ -205,7 +206,7 @@ int main(int argc, char** argv) {
         std::cerr << "usage: --artifact-dir DIR --layer N --expert N "
                      "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
                      "[--workspace-bytes N] [--precision fp32|bf16-rounded] "
-                     "[--output fp32|bf16] [--input-mode common|sparse-packed]\n";
+                     "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major]\n";
         return 2;
     }
     const auto paths = artifact_paths(arguments->artifact_dir);
@@ -262,6 +263,7 @@ int main(int argc, char** argv) {
         fixture.payload = std::move(loaded.value());
         host_payload_bytes += fixture.payload.payload_bytes;
         const auto needs_float_view = arguments->precision == "fp32" ||
+            arguments->input_mode == "expert-major" ||
             expert_id == expert_ids.back();
         if (needs_float_view) {
             for (std::size_t index = 0; index < fixture.weights.size(); ++index) {
@@ -300,9 +302,17 @@ int main(int argc, char** argv) {
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - host_start).count());
     const bool sparse_packed = arguments->input_mode == "sparse-packed";
+    const bool expert_major = arguments->input_mode == "expert-major";
     if (sparse_packed &&
         (arguments->precision != "bf16-rounded" || arguments->tokens != 2)) {
         std::cerr << "sparse-packed requires --precision bf16-rounded --tokens 2\n";
+        return 7;
+    }
+    if (expert_major &&
+        (arguments->precision != "bf16-rounded" || arguments->tokens != 2 ||
+         fixtures.size() < 2)) {
+        std::cerr << "expert-major requires --precision bf16-rounded --tokens 2 "
+                     "and at least two experts\n";
         return 7;
     }
     const auto logical_token_count = arguments->tokens;
@@ -317,6 +327,45 @@ int main(int argc, char** argv) {
     raw_views.reserve(fixtures.size());
     for (const auto& fixture : fixtures) {
         raw_views.push_back(fixture.raw);
+    }
+    std::optional<k3x::ExpertMajorPackedPlan> expert_major_plan;
+    std::vector<k3x::RawBf16MlpView> expert_major_views;
+    if (expert_major) {
+        std::vector<k3x::ExpertMajorTokenRoute> routes(arguments->tokens);
+        for (std::size_t token = 0; token < arguments->tokens; ++token) {
+            auto& route = routes[token];
+            for (std::size_t expert_index = 0;
+                 expert_index < fixtures.size(); ++expert_index) {
+                const bool shared = expert_index < 2;
+                const bool alternating = expert_index >= 2 &&
+                    ((expert_index + token) % arguments->tokens == 0);
+                if (shared || alternating) {
+                    route.expert_ids.push_back(expert_ids[expert_index]);
+                }
+            }
+            if (route.expert_ids.empty()) return 7;
+            route.contributions.assign(
+                route.expert_ids.size(),
+                1.0F / static_cast<float>(route.expert_ids.size()));
+        }
+        auto built = k3x::build_expert_major_packed_plan(
+            input, arguments->tokens, kHiddenSize, routes);
+        if (!built) {
+            std::cerr << k3x::error_code_name(built.error()) << ": "
+                      << built.message() << '\n';
+            return 8;
+        }
+        expert_major_plan = std::move(built.value());
+        expert_major_views.reserve(expert_major_plan->groups.size());
+        for (const auto& group : expert_major_plan->groups) {
+            const auto fixture = std::find_if(
+                fixtures.begin(), fixtures.end(),
+                [&](const RealExpertFixture& item) {
+                    return item.expert_id == group.expert_id;
+                });
+            if (fixture == fixtures.end()) return 8;
+            expert_major_views.push_back(fixture->raw);
+        }
     }
     std::vector<float> packed_input;
     if (sparse_packed) {
@@ -353,7 +402,31 @@ int main(int argc, char** argv) {
     std::vector<float> cpu_reference;
     cpu_reference.reserve(grid_token_count * kHiddenSize);
     const auto reference_token_count = sparse_packed ? 1 : arguments->tokens;
-    for (std::size_t token = 0; token < reference_token_count; ++token) {
+    if (expert_major) {
+        cpu_reference.assign(arguments->tokens * kHiddenSize, 0.0F);
+        for (const auto& group : expert_major_plan->groups) {
+            const auto fixture = std::find_if(
+                fixtures.begin(), fixtures.end(),
+                [&](const RealExpertFixture& item) {
+                    return item.expert_id == group.expert_id;
+                });
+            if (fixture == fixtures.end()) return 8;
+            for (const auto& assignment : group.assignments) {
+                const auto token_input = std::span<const float>(input).subspan(
+                    assignment.token_index * kHiddenSize, kHiddenSize);
+                const auto reference = cpu->dense_situ_mlp(
+                    token_input, fixture->dense, 1.0F, std::nullopt,
+                    arguments->layer, k3x::ProfilePhase::decode);
+                if (!reference) return 8;
+                auto output = std::span<float>(cpu_reference).subspan(
+                    assignment.token_index * kHiddenSize, kHiddenSize);
+                for (std::size_t value = 0; value < output.size(); ++value) {
+                    output[value] += assignment.contribution *
+                        reference.value()[value];
+                }
+            }
+        }
+    } else for (std::size_t token = 0; token < reference_token_count; ++token) {
         const auto logical_token = sparse_packed
             ? ((fixtures.size() - 1) % logical_token_count) : token;
         const auto token_input = std::span<const float>(input).subspan(
@@ -366,6 +439,12 @@ int main(int argc, char** argv) {
                              reference.value().end());
     }
     const auto execute = [&]() {
+        if (expert_major) {
+            return cuda.value()->raw_bf16_situ_mlp_expert_major(
+                input, arguments->tokens, *expert_major_plan,
+                expert_major_views, 1.0F, std::nullopt, arguments->layer,
+                k3x::ProfilePhase::decode);
+        }
         if (use_grid) {
             auto outputs = sparse_packed
                 ? cuda.value()->raw_bf16_situ_mlp_grid_packed(
@@ -432,7 +511,10 @@ int main(int argc, char** argv) {
     const auto cpu_abs = maximum_absolute_difference(actual, cpu_reference);
     const auto cpu_scale = std::max(maximum_absolute_value(cpu_reference), 1.0e-6F);
     std::cout << std::setprecision(12)
-              << "{\"artifact_kind\":\"glm5.2_real_bf16_expert\""
+              << "{\"artifact_kind\":\""
+              << (expert_major ? "glm5.2_real_bf16_expert_major"
+                               : "glm5.2_real_bf16_expert")
+              << "\""
               << ",\"layer_id\":" << arguments->layer
               << ",\"expert_id\":" << expert_ids.front()
               << ",\"expert_count\":" << expert_ids.size()
@@ -442,6 +524,10 @@ int main(int argc, char** argv) {
               << ",\"precision\":\"" << arguments->precision << "\""
               << ",\"output\":\"" << arguments->output << "\""
               << ",\"input_mode\":\"" << arguments->input_mode << "\""
+              << ",\"route_group_count\":"
+              << (expert_major ? expert_major_plan->groups.size() : 0)
+              << ",\"route_assignment_count\":"
+              << (expert_major ? expert_major_plan->assignment_count : 0)
               << ",\"grid_token_count\":" << grid_token_count
               << ",\"cublas_workspace_bytes\":"
               << arguments->workspace_bytes

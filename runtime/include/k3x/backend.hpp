@@ -1,6 +1,7 @@
 // dense와 native MXFP4 연산을 실행하는 명시적 compute backend 계약을 정의합니다.
 #pragma once
 
+#include "k3x/expert_major.hpp"
 #include "k3x/profile.hpp"
 #include "k3x/status.hpp"
 
@@ -206,6 +207,13 @@ public:
         std::span<const RawBf16MlpView>, float,
         std::optional<float>, std::uint32_t, ProfilePhase) {
         return Result<std::vector<std::vector<float>>>::failure(
+            ErrorCode::backend_unavailable);
+    }
+    virtual Result<std::vector<float>> raw_bf16_situ_mlp_expert_major(
+        std::span<const float>, std::size_t,
+        const ExpertMajorPackedPlan&, std::span<const RawBf16MlpView>, float,
+        std::optional<float>, std::uint32_t, ProfilePhase) {
+        return Result<std::vector<float>>::failure(
             ErrorCode::backend_unavailable);
     }
     virtual Result<std::vector<std::vector<float>>> mxfp4_situ_mlp_group(

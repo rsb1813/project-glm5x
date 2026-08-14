@@ -381,6 +381,44 @@ int test_bf16_resident_grid() {
         packed_stats.resident_grid_kernel_launches != 4) {
         return 88;
     }
+
+    const std::array<k3x::ExpertMajorTokenRoute, 2> routes{{
+        {{0}, {0.25F}},
+        {{1}, {0.75F}},
+    }};
+    const auto packed_plan = k3x::build_expert_major_packed_plan(
+        input, 2, 3, routes);
+    if (!packed_plan) return 89;
+    auto routed_backend = k3x::make_cuda_backend(options);
+    if (!routed_backend) return 90;
+    const auto routed_output =
+        routed_backend.value()->raw_bf16_situ_mlp_expert_major(
+            input, 2, packed_plan.value(), raw_experts, 1.0F, std::nullopt,
+            17, k3x::ProfilePhase::decode);
+    if (!routed_output || routed_output.value().size() != 4) return 91;
+    for (std::size_t token = 0; token < 2; ++token) {
+        const auto& expert = rounded_experts[token];
+        const auto expected = cpu->dense_situ_mlp(
+            std::span<const float>(rounded_input).subspan(token * 3, 3),
+            expert, 1.0F, std::nullopt, 17, k3x::ProfilePhase::decode);
+        if (!expected) return 92;
+        const auto contribution = token == 0 ? 0.25F : 0.75F;
+        for (std::size_t value = 0; value < expected.value().size(); ++value) {
+            if (!nearly_equal(
+                    routed_output.value()[token * 2 + value],
+                    expected.value()[value] * contribution, 2.0e-2F)) {
+                return 93;
+            }
+        }
+    }
+    const auto routed_stats = routed_backend.value()->runtime_stats();
+    if (routed_stats.resident_grid_calls != 1 ||
+        routed_stats.resident_grid_tokens != 1 ||
+        routed_stats.resident_grid_expert_tokens != 2 ||
+        routed_stats.activation_h2d_bytes != 12 ||
+        routed_stats.device_to_host_bytes != 16) {
+        return 94;
+    }
     auto bf16_output_options = options;
     bf16_output_options.cuda_bf16_output = k3x::CudaBf16OutputMode::bf16;
     auto bf16_output_backend = k3x::make_cuda_backend(bf16_output_options);

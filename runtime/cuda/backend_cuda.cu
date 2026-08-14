@@ -1495,6 +1495,93 @@ public:
             layer, phase, expert_inputs);
     }
 
+    Result<std::vector<float>> raw_bf16_situ_mlp_expert_major(
+        std::span<const float> token_hidden, std::size_t token_count,
+        const ExpertMajorPackedPlan& plan,
+        std::span<const RawBf16MlpView> expert_views, float situ_beta,
+        std::optional<float> situ_linear, std::uint32_t layer,
+        ProfilePhase phase) override {
+        if (token_count == 0 || plan.hidden_size == 0 ||
+            plan.hidden_size != 0 &&
+                token_count > std::numeric_limits<std::size_t>::max() /
+                    plan.hidden_size ||
+            token_hidden.size() != token_count * plan.hidden_size ||
+            plan.groups.empty() || plan.groups.size() != expert_views.size() ||
+            plan.assignment_count == 0) {
+            return Result<std::vector<float>>::failure(
+                ErrorCode::invalid_extent);
+        }
+        const auto output_size = expert_views.front().down.rows;
+        if (output_size == 0 ||
+            plan.assignment_count >
+                std::numeric_limits<std::size_t>::max() / output_size) {
+            return Result<std::vector<float>>::failure(
+                ErrorCode::invalid_extent);
+        }
+        std::vector<std::size_t> group_offsets(plan.groups.size());
+        std::size_t output_offset = 0;
+        for (std::size_t group_index = 0; group_index < plan.groups.size();
+             ++group_index) {
+            const auto assignments = plan.groups[group_index].assignments.size();
+            if (assignments == 0 ||
+                assignments >
+                    std::numeric_limits<std::size_t>::max() / output_size ||
+                output_offset > std::numeric_limits<std::size_t>::max() -
+                    assignments * output_size) {
+                return Result<std::vector<float>>::failure(
+                    ErrorCode::invalid_extent);
+            }
+            group_offsets[group_index] = output_offset;
+            output_offset += assignments * output_size;
+        }
+        if (output_offset != plan.assignment_count * output_size) {
+            return Result<std::vector<float>>::failure(
+                ErrorCode::invalid_extent);
+        }
+
+        auto batches = bucket_expert_major_packed_plan(plan);
+        if (!batches) {
+            return Result<std::vector<float>>::failure(
+                batches.error(), batches.message());
+        }
+        std::vector<float> group_outputs(output_offset, 0.0F);
+        for (const auto& batch : batches.value()) {
+            std::vector<RawBf16MlpView> batch_views;
+            batch_views.reserve(batch.group_indices.size());
+            for (const auto group_index : batch.group_indices) {
+                if (group_index >= expert_views.size()) {
+                    return Result<std::vector<float>>::failure(
+                        ErrorCode::invalid_extent);
+                }
+                batch_views.push_back(expert_views[group_index]);
+            }
+            const auto outputs = raw_bf16_situ_mlp_grid_packed(
+                batch.inputs, batch.token_count, batch_views, situ_beta,
+                situ_linear, layer, phase);
+            if (!outputs || outputs.value().size() != batch_views.size()) {
+                return Result<std::vector<float>>::failure(
+                    outputs ? ErrorCode::invalid_extent : outputs.error(),
+                    outputs ? "expert-major output count mismatch"
+                            : outputs.message());
+            }
+            for (std::size_t batch_index = 0;
+                 batch_index < batch.group_indices.size(); ++batch_index) {
+                const auto group_index = batch.group_indices[batch_index];
+                const auto expected = batch.token_count * output_size;
+                if (outputs.value()[batch_index].size() != expected) {
+                    return Result<std::vector<float>>::failure(
+                        ErrorCode::invalid_extent);
+                }
+                std::copy(
+                    outputs.value()[batch_index].begin(),
+                    outputs.value()[batch_index].end(),
+                    group_outputs.begin() + group_offsets[group_index]);
+            }
+        }
+        return scatter_expert_major_outputs(
+            plan, token_count, output_size, group_outputs);
+    }
+
     Result<std::vector<std::vector<float>>> mxfp4_situ_mlp_group(
         std::span<const float> input, std::span<const Mxfp4MlpView> experts,
         float situ_beta, std::optional<float> situ_linear,
