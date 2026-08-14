@@ -46,7 +46,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - The full-bundle gate accepts `--expert-load-workers N` to overlap exact selected-expert reads from K3X artifacts. The default `1` remains the serial correctness path until a real full-model I/O benchmark proves a benefit.
 - `--expert-cache-bytes N` enables an exact host payload cache across layer loads and token forwards; `0` disables it. The monitor records both a cold run and an 8 GiB cached run without changing router decisions or quantization.
 - `--expert-device-cache-bytes N` optionally retains decoded exact expert tensors on the target GPU; `0` disables it. The monitor uses 4 GiB only in the cached comparison and records residency/hit telemetry.
-- `tools/monitor_glm5x_full_gate.sh` is a local-only coordinator helper. It waits for all source-deletion markers, performs lazy final bundle assembly, then runs a one-token CUDA reference gate with crash-safe JSON outputs.
+- `tools/monitor_glm5x_full_gate.sh` is a local-only coordinator helper. It waits for all source-deletion markers, performs lazy final bundle assembly, then runs separate cold 1-token and cached 2-token CUDA reference gates with crash-safe JSON outputs.
 - The stream also supports disjoint local workers with `--shard-start`, `--shard-end`, and `--no-assemble`; workers can convert separate ranges concurrently, followed by one final bundle assembly.
 - Stream completion reuses each shard's strict conversion gate for bundle indexing, so final assembly does not rescan every payload. Strict bundle admission is still the runtime default.
 - A GLM-5.2-shaped CUDA expert benchmark for hidden size 6144 and expert intermediate size 2048, including 1/2/4/8-token expert-major batching.
