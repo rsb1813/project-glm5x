@@ -39,6 +39,7 @@ struct Arguments {
     std::size_t warmup{};
     std::size_t iterations{1};
     std::string validation_name{"per-call"};
+    std::string execution_name{"native"};
     k3x::CudaWeightValidationMode validation{
         k3x::CudaWeightValidationMode::per_call};
     bool profiler{true};
@@ -108,6 +109,8 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             arguments.iterations = *parsed;
         } else if (key == "--validation") {
             arguments.validation_name = value;
+        } else if (key == "--execution") {
+            arguments.execution_name = value;
         } else if (key == "--profiler") {
             if (value == "on") arguments.profiler = true;
             else if (value == "off") arguments.profiler = false;
@@ -144,6 +147,17 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
     if (arguments.validation == k3x::CudaWeightValidationMode::admission &&
         arguments.boundary != Boundary::moe_layer) {
         std::cerr << "admission validation requires moe-layer boundary\n";
+        return std::nullopt;
+    }
+    if (arguments.execution_name != "native" &&
+        arguments.execution_name != "dequantized-bf16") {
+        std::cerr << "unknown execution mode: " << arguments.execution_name
+                  << '\n';
+        return std::nullopt;
+    }
+    if (arguments.execution_name == "dequantized-bf16" &&
+        arguments.boundary != Boundary::ffn_block) {
+        std::cerr << "dequantized-bf16 currently requires ffn-block boundary\n";
         return std::nullopt;
     }
     if (arguments.iterations == 0) {
@@ -304,7 +318,8 @@ void write_error(k3x::ErrorCode code, const std::string& message) {
 k3x::BackendOptions backend_options(
     Boundary boundary,
     k3x::CudaWeightValidationMode validation =
-        k3x::CudaWeightValidationMode::per_call) {
+        k3x::CudaWeightValidationMode::per_call,
+    std::string_view execution = "native") {
     k3x::BackendOptions options;
     options.kind = k3x::BackendKind::cuda_custom;
     options.dense_precision = k3x::DensePrecision::fp32;
@@ -317,6 +332,9 @@ k3x::BackendOptions backend_options(
     options.cuda_transfer = k3x::CudaTransferMode::synchronous;
     options.cuda_moe_fusion = k3x::CudaMoeFusionMode::none;
     options.cuda_weight_validation = validation;
+    options.cuda_mxfp4_execution = execution == "dequantized-bf16"
+        ? k3x::CudaMxfp4Execution::dequantized_bf16
+        : k3x::CudaMxfp4Execution::native;
     options.cuda_resident_bytes = kResidentCapacity;
     return options;
 }
@@ -380,7 +398,8 @@ int main(int argc, char** argv) {
 
     k3x::Profiler profiler;
     auto backend = k3x::make_cuda_backend(
-        backend_options(arguments->boundary, arguments->validation),
+        backend_options(arguments->boundary, arguments->validation,
+                        arguments->execution_name),
         arguments->profiler ? &profiler : nullptr);
     if (!backend) {
         write_error(backend.error(), backend.message());
@@ -439,6 +458,8 @@ int main(int argc, char** argv) {
               << "{\"artifact_kind\":\"released_dimension_moe_layer\""
               << ",\"routing_semantics\":false"
               << ",\"boundary\":\"" << arguments->boundary_name << "\""
+              << ",\"execution\":\"" << arguments->execution_name
+              << "\""
               << ",\"experts\":" << arguments->experts
               << ",\"hidden_width\":" << kHidden
               << ",\"latent_width\":" << kLatent

@@ -3460,6 +3460,66 @@ private:
                 ErrorCode::invalid_mxfp4);
         }
 
+        const auto native_fallback = [&]() {
+            ++runtime_stats_.resident_grid_fallbacks;
+            std::vector<std::vector<float>> outputs(experts.size());
+            for (std::size_t token = 0; token < token_count; ++token) {
+                auto token_outputs = mxfp4_situ_mlp_group_impl(
+                    inputs.subspan(token * input_width, input_width), experts,
+                    {}, situ_beta, situ_linear, layer, phase);
+                if (!token_outputs) {
+                    return Result<std::vector<std::vector<float>>>::failure(
+                        token_outputs.error(), token_outputs.message());
+                }
+                for (std::size_t expert = 0; expert < experts.size(); ++expert) {
+                    outputs[expert].insert(outputs[expert].end(),
+                                           token_outputs.value()[expert].begin(),
+                                           token_outputs.value()[expert].end());
+                }
+            }
+            return Result<std::vector<std::vector<float>>>::success(
+                std::move(outputs));
+        };
+
+        std::uint64_t required_bf16_bytes = 0;
+        for (const auto& expert : experts) {
+            if (expert.gate.cols != input_width ||
+                expert.gate.rows != intermediate_width ||
+                expert.up.cols != input_width ||
+                expert.up.rows != intermediate_width ||
+                expert.down.cols != intermediate_width ||
+                expert.down.rows != output_width ||
+                expert.gate.group_size != 32 || expert.up.group_size != 32 ||
+                expert.down.group_size != 32 ||
+                !valid_mxfp4_size(input_width, expert.gate) ||
+                !valid_mxfp4_size(input_width, expert.up) ||
+                !valid_mxfp4_size(intermediate_width, expert.down)) {
+                return Result<std::vector<std::vector<float>>>::failure(
+                    ErrorCode::invalid_mxfp4);
+            }
+            for (const auto view : {expert.gate, expert.up, expert.down}) {
+                if (resident_weights_->contains(
+                        {view.tensor_id,
+                         cuda::WeightRepresentation::dense_bf16,
+                         view.rows, view.cols, 0})) {
+                    continue;
+                }
+                const auto elements = view.rows * view.cols;
+                const auto bytes = elements * sizeof(__nv_bfloat16);
+                if (bytes > std::numeric_limits<std::uint64_t>::max() -
+                                required_bf16_bytes) {
+                    return Result<std::vector<std::vector<float>>>::failure(
+                        ErrorCode::invalid_extent);
+                }
+                required_bf16_bytes += bytes;
+            }
+        }
+        if (required_bf16_bytes > options_.cuda_resident_bytes ||
+            runtime_stats_.resident_weight_bytes >
+                options_.cuda_resident_bytes - required_bf16_bytes) {
+            return native_fallback();
+        }
+
         struct WeightMember {
             Mxfp4WeightView view;
             const __nv_bfloat16* host{};
@@ -3471,7 +3531,6 @@ private:
         members.reserve(experts.size() * 3);
         std::uint64_t total_weight_transfer = 0;
         std::size_t maximum_weight_bytes = 0;
-        bool bypass = false;
         for (const auto& expert : experts) {
             if (expert.gate.cols != input_width ||
                 expert.gate.rows != intermediate_width ||
@@ -3510,39 +3569,13 @@ private:
                     return Result<std::vector<std::vector<float>>>::failure(
                         acquisition.error(), acquisition.message());
                 }
-                if (acquisition.value().disposition ==
-                    cuda::ResidentDisposition::bypass) {
-                    bypass = true;
-                } else {
-                    member.device = const_cast<void*>(
-                        acquisition.value().primary);
-                    member.transfer_bytes = acquisition.value().uploaded_bytes;
-                }
+                member.device = const_cast<void*>(
+                    acquisition.value().primary);
+                member.transfer_bytes = acquisition.value().uploaded_bytes;
                 total_weight_transfer += member.transfer_bytes;
                 members.push_back(member);
             }
         }
-        if (bypass) {
-            ++runtime_stats_.resident_grid_fallbacks;
-            std::vector<std::vector<float>> outputs(experts.size());
-            for (std::size_t token = 0; token < token_count; ++token) {
-                auto token_outputs = mxfp4_situ_mlp_group_impl(
-                    inputs.subspan(token * input_width, input_width), experts,
-                    {}, situ_beta, situ_linear, layer, phase);
-                if (!token_outputs) {
-                    return Result<std::vector<std::vector<float>>>::failure(
-                        token_outputs.error(), token_outputs.message());
-                }
-                for (std::size_t expert = 0; expert < experts.size(); ++expert) {
-                    outputs[expert].insert(outputs[expert].end(),
-                                           token_outputs.value()[expert].begin(),
-                                           token_outputs.value()[expert].end());
-                }
-            }
-            return Result<std::vector<std::vector<float>>>::success(
-                std::move(outputs));
-        }
-
         const auto expert_tokens = experts.size() * token_count;
         const auto input_count = token_count * input_width;
         const auto input_bytes = input_count * sizeof(__nv_bfloat16);

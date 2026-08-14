@@ -538,6 +538,42 @@ int test_dequantized_bf16_grid_nonzero_parity() {
     return 0;
 }
 
+int test_dequantized_bf16_grid_capacity_fallback() {
+    const Mxfp4Fixture fixture;
+    const auto expert = fixture.views()[0];
+    const std::array<k3x::Mxfp4MlpView, 1> experts{{expert}};
+    auto cpu = k3x::make_cpu_backend();
+    const auto expected = cpu->mxfp4_situ_mlp_group(
+        fixture.input, experts, 2.0F, 1.5F, 10,
+        k3x::ProfilePhase::decode);
+    if (!expected) return 113;
+
+    k3x::BackendOptions options;
+    options.kind = k3x::BackendKind::cuda_custom;
+    options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
+    options.cuda_allocation = k3x::CudaAllocationMode::reused;
+    options.cuda_weights = k3x::CudaWeightMode::resident;
+    options.cuda_mxfp4_execution =
+        k3x::CudaMxfp4Execution::dequantized_bf16;
+    options.cuda_batching = k3x::CudaBatchingMode::resident_grid;
+    options.cuda_resident_bytes = 4096;
+    auto backend = k3x::make_cuda_backend(options);
+    if (!backend) return 114;
+    const auto actual = backend.value()->mxfp4_situ_mlp_grid(
+        fixture.input, 1, experts, 2.0F, 1.5F, 10,
+        k3x::ProfilePhase::decode);
+    if (!actual || actual.value().size() != 1 ||
+        !nearly_equal(actual.value()[0], expected.value()[0], 1.0e-6F)) {
+        return 115;
+    }
+    const auto stats = backend.value()->runtime_stats();
+    if (stats.resident_grid_fallbacks != 1 ||
+        stats.weight_cache_bypasses != 0 || stats.weight_h2d_bytes == 0) {
+        return 116;
+    }
+    return 0;
+}
+
 int test_exact_mxfp4_group() {
     const Mxfp4Fixture fixture;
     const auto experts = fixture.views();
@@ -784,6 +820,9 @@ int main() {
         return result;
     }
     if (const auto result = test_dequantized_bf16_grid_nonzero_parity()) {
+        return result;
+    }
+    if (const auto result = test_dequantized_bf16_grid_capacity_fallback()) {
         return result;
     }
     if (const auto result = test_exact_mxfp4_group()) return result;

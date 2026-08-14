@@ -164,4 +164,8 @@ Result<ResidentAcquisition> ResidentWeightTable::acquire(
          required});
 }
 
+bool ResidentWeightTable::contains(ResidentWeightKey key) const {
+    return impl_->entries.find(key) != impl_->entries.end();
+}
+
 }  // namespace k3x::cuda

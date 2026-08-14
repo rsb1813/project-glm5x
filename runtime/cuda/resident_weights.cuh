@@ -45,6 +45,7 @@ public:
     Result<ResidentAcquisition> acquire(
         ResidentWeightKey key, std::span<const std::byte> primary,
         std::span<const std::byte> secondary);
+    bool contains(ResidentWeightKey key) const;
 
 private:
     struct Impl;
