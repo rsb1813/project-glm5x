@@ -12,7 +12,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - GLM-5.2 tensor-manifest validation for `config.json`, safetensors `weight_map`, shard names, tensor count, and source byte total without opening a weight shard.
 - A bounded RTX 5080 CUDA benchmark for GLM-5.2 expert dimensions (`hidden=6144`, `expert_intermediate=2048`, `group=32`) using the resident expert-grid backend.
 - Resident expert-major batch execution now admits packed/scales through the shared `ResidentWeightTable`; repeated candidate batches can reuse exact MXFP4 weights without another weight H2D upload.
-- Experimental resident BF16 expert-grid execution dequantizes exact MXFP4 values once per tensor and uses cublasLt BF16-input/FP32-output projections; native MXFP4 remains the default and the BF16 path is capacity-gated.
+- Experimental resident BF16 expert-grid execution dequantizes exact MXFP4 values once per tensor and uses cublasLt BF16-input/FP32-output projections; native MXFP4 remains the default. A preflight budget check accounts for dense resident weights and warm BF16 keys before admission, then falls back to native without partial mixed-representation residency when the budget is insufficient.
 - GLM5X converter CLI wrapper.
 - CPU/reference TurboQuant-inspired KV cache with Hadamard rotation, integer and half-bit schedules, asymmetric K/V policy, incremental attention, and capacity estimation.
 

@@ -62,4 +62,5 @@
 - Alternatives: replace native MXFP4 globally, keep only the per-expert BF16 batch path, or pre-store every expert in BF16.
 - Evidence: on the RTX 5080 GLM-shaped 8-expert/4-token fixture, BF16 grid median was 2,582,527 ns/block versus 5,394,131 ns for native grid, with zero error on the zero-weight contract fixture. A nonzero deterministic packed pattern measured 0.95% maximum relative difference against a native GPU reference. Resident weight bytes increased from 160,432,128 to 603,979,776.
 - Accepted because: the measured speedup is material and the exact native path remains available; the memory multiplier and missing quality benchmark make a default switch unjustified.
+- Accepted guardrail: BF16 capacity is preflighted before admission, warm resident keys are excluded from the remaining-byte calculation, and insufficient capacity falls back to native before any partial BF16 admission. The released-dimension check reproduced a 14,319,240 ns fallback versus 6,333,866 ns native with zero oracle error.
 - Revisit: after nonzero GLM shard parity, VRAM-bank pressure measurements, and end-to-end DSA/MoE quality tests.

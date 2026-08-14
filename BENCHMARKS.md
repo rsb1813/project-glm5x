@@ -90,3 +90,13 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 1
 - Native-reference maximum absolute difference: 1,732.3086; maximum relative difference to the native reference maximum magnitude: 0.00950465 (0.95%).
 - Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, average Top-K, speculative acceptance, and task quality: not measured.
 - Interpretation: this is a numerical dequantization/accumulation check, not a GLM quality benchmark. The deterministic pattern is not a calibrated GLM shard.
+
+## 2026-08-14 -- Released-dimension capacity fallback check
+
+- Commit: `29b6fde`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: `build-glm5x-cuda-fixtures/released/released.k3x`, a bounded released-dimension synthetic fixture; not GLM-5.2 weights.
+- Mode: `k3x_cuda_moe_layer_bench --boundary ffn-block --execution dequantized-bf16`, 16 selected experts, 1 GiB resident budget.
+- Result: BF16 preflight detected that dense trunk residency plus all selected BF16 experts exceeded the budget and returned to the exact native MXFP4 group path. Warm median was 14,319,240 ns, `resident_grid_fallbacks=10`, maximum absolute error 0 versus the native oracle.
+- Native comparison from the same fixture: 6,333,866 ns warm median at the same 16-expert shape and budget.
+- Interpretation: this is a guardrail result, not a BF16 speed claim. A BF16 mode must use a VRAM budget that includes dense trunk and expert residency; otherwise native fallback is intentionally selected.
