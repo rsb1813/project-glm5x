@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, and a ragged expert-major raw-BF16 CUDA dispatch boundary are implemented over five bounded real shards. Local WSL CUDA/CPU tests are green on `d09eb3a`; the pushed Linux correctness and CodeQL gates remain green on the previous public commit until this commit is pushed.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, and a ragged expert-major raw-BF16 CUDA dispatch boundary are implemented over five bounded real shards. Local WSL CUDA/CPU tests are green on `d09eb3a`; public Linux correctness and CodeQL are green for `277171b`.
 
 ## Completed
 
@@ -115,5 +115,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
-- Last known-good local code HEAD: `d09eb3a` (`feat: connect ragged expert-major BF16 grid`). WSL CUDA CTest 26/26 and CPU CTest 14/14 are green; focused GLM Python 42/42 is the last WSL Python result. Public CI for this commit is pending push.
+- Last known-good implementation HEAD: `d09eb3a` (`feat: connect ragged expert-major BF16 grid`). WSL CUDA CTest 26/26 and CPU CTest 14/14 are green; focused GLM Python 42/42 is the last WSL Python result. Public docs/README HEAD `277171b` passed Linux correctness `31801234476` in 3m42s and CodeQL `31801234428`.
 - Next bottleneck: connect the exact layer-10 router/MLA/DSA output to the new bucket loop, avoid multi-gigabyte root hashing on every process start, then add pinned/asynchronous raw H2D, direct tensor-core algorithm selection, all-layer exact state, nonzero full-layer parity, and VRAM-pressure-aware residency; full weights remain intentionally absent.

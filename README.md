@@ -4,7 +4,7 @@
 
 GLM5X is a correctness-first runtime and storage project for running GLM-5.x on a machine with a 16 GB consumer GPU, large system RAM, and NVMe storage. It is designed around the model's sparse MoE routing, DSA/MLA attention, MTP speculative decoding, and expert-major verification rather than treating the workload as a dense model with a generic cache.
 
-> **Status:** GLM-5.2 shape/manifest, exact layer-10 q-residual/MLA/DSA/MoE reference, and a ragged raw-BF16 expert-major CUDA dispatch boundary are implemented. No GLM weights are bundled and no end-to-end tok/s number is claimed. The latest public CI baseline is green; the new `74fe292` push is being verified.
+> **Status:** GLM-5.2 shape/manifest, exact layer-10 q-residual/MLA/DSA/MoE reference, and a ragged raw-BF16 expert-major CUDA dispatch boundary are implemented. No GLM weights are bundled and no end-to-end tok/s number is claimed. Linux correctness `31801234476` and CodeQL `31801234428` are green for `277171b`.
 
 ## What is here now
 
