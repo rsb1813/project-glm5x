@@ -230,3 +230,9 @@
 - Extended the real-expert benchmark with `learned-expert-major`. It validates and reads the actual layer-10 router BF16 matrix plus FP32 correction bias, uses the already-tested natural Top-8 policy, computes routed contributions with scale 2.5, and loads only the selected expert union.
 - A 2 GiB budget was required for two tokens because the real route selected 15 experts and 1.132 GB of BF16 expert roles. The 20-warmup/100-iteration FP32-output run measured 1.905668 ms/block, 0.0866% maximum CPU-relative difference, and zero warm weight H2D. A 4-token run selected 29 experts and measured 3.757986 ms/block with 0.0667% relative difference under a 4 GiB budget.
 - The earlier deterministic route is now clearly separated from this learned route. Neither includes MLA/DSA, trunk residuals, logits, or generation, so neither is a model tok/s result.
+
+## 2026-08-14 — public CI and Dependabot diagnosis
+
+- Pushed learned-router evidence at `222d113`; Linux correctness `31802692875` passed in 2m43s and CodeQL `31802692977` passed in 4m10s.
+- Dependabot PRs #1–#4 independently fail only in the Linux job after about 2m30s with 50 missing historical `results/b0006`–`b0024` files. Their static-analysis jobs pass. No Dependabot PR branch was changed.
+- The visible Node 20 and CodeQL v3 messages are deprecation annotations, not failed steps. Dependabot and vulnerability-alert APIs return disabled/not-authorized responses, so no CVE alert was verified.

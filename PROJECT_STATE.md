@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, and a learned-router-aware ragged raw-BF16 CUDA dispatch boundary are implemented over five bounded real shards. Local WSL CUDA CTest is green on `e599dfb`; public Linux correctness and CodeQL remain green for `566dcf4`.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, and a learned-router-aware ragged raw-BF16 CUDA dispatch boundary are implemented over five bounded real shards. Local WSL CUDA CTest is green, and public Linux correctness plus CodeQL are green on `222d113`.
 
 ## Completed
 
@@ -65,7 +65,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 
 - No full GLM-5.2 checkpoint is present; five bounded probe shards are available, so full checkpoint correctness and local TPS are not measured.
 - No full checkpoint download or Cloud Run conversion has been authorized or attempted; only five bounded probe shards are present.
-- Dependabot PRs #1–#4 are open for action/setup-python, action/checkout, numpy, and setuptools updates. Their Linux checks fail only because the stale bot branches reference absent historical K3X artifacts; CodeQL passes. Repository Dependabot and vulnerability-alert APIs are disabled, so no CVE alert is confirmed.
+- Dependabot PRs #1–#4 are open for action/setup-python, action/checkout, numpy, and setuptools updates. Their Linux checks fail with 50 `FileNotFoundError` cases because the stale bot branches reference absent historical K3X artifacts; their C++/Python CodeQL checks pass. Repository Dependabot and vulnerability-alert APIs are disabled, so no CVE alert is confirmed. The PR branches have not been modified or merged.
 - The migrated C++ runtime still has K3-oriented names and graph assumptions in several files.
 - CUDA build and bounded RTX 5080 kernel measurements are validated in WSL; native Linux end-to-end throughput has not been measured.
 - The TurboQuant implementation is CPU/reference only; it does not yet contain a packed CUDA kernel or full PolarQuant/QJL production path.
@@ -106,7 +106,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Sparse-packed probe: deterministic 8-expert/2-token pattern measured 965,550 ns/block versus 1,040,559 ns for the common-input rerun; this is not learned routing or end-to-end throughput.
 - Latest rerun at `1f43e1a`: common 927,744 ns/block versus sparse-packed 939,149 ns/block, so sparse-packed was about 1.2% slower in this sample. The direction changed from the earlier sample; no stable packed speedup is assumed.
 - Historical K3X evidence checks are explicitly skipped when their absent `results/` artifacts are not shipped; the Linux workflow still builds C++, runs CTest, and runs all new GLM5X tests. The Windows local environment still lacks the Linux-built executable for one cross-language test.
-- Public Linux correctness workflow `31799670817` and CodeQL workflow `31799670813` both passed for public docs commit `c29ef6a`; this new code commit is not pushed yet.
+- Public Linux correctness workflow `31802692875` and CodeQL workflow `31802692977` both passed for pushed commit `222d113`. The workflows still emit non-failing Node 20 and CodeQL v3 deprecation annotations.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
 - Resident expert-major batch result: 8 groups x 4 candidates, 1,641,591 ns/candidate token, cold weight H2D 160,432,128 bytes and warm weight H2D 0 bytes.
@@ -117,5 +117,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
-- Last known-good implementation HEAD: `e599dfb` (`feat: add learned GLM router expert benchmark`). WSL CUDA CTest 26/26 is green; focused GLM Python 42/42 is the last WSL Python result. Public docs/README HEAD `566dcf4` passed Linux correctness `31801541872` and CodeQL `31801541836`.
+- Last known-good public HEAD: `222d113` (`docs: record learned GLM router CUDA evidence`). WSL CUDA CTest 26/26 is green; focused GLM Python 42/42 is the last WSL Python result. Public Linux correctness `31802692875` and CodeQL `31802692977` both passed.
 - Next bottleneck: connect the exact layer-10 router/MLA/DSA output to the new bucket loop, avoid multi-gigabyte root hashing on every process start, then add pinned/asynchronous raw H2D, direct tensor-core algorithm selection, all-layer exact state, nonzero full-layer parity, and VRAM-pressure-aware residency; full weights remain intentionally absent.
