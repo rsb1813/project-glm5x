@@ -482,3 +482,15 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Token-2 result: bucket-cache-only experiment three-run medians were `2,238,866`, `2,191,291`, and `2,157,692 ns`; median `2,191,291 ns`. Baseline medians were `2,529,160`, `2,166,726`, and `2,120,466 ns`; median `2,166,726 ns`. The experiment was approximately `1.1%` slower by median-of-runs.
 - Correctness: the existing real layer-10 CPU/GPU and BF16-boundary parity remained within the previously recorded tolerance. No route or output divergence was observed.
 - Decision: rejected as a default optimization because the measured latency did not improve despite fewer token-1 grid calls. No decode/prefill tok/s, TTFT, full-layer quality, cache hit rate, NVMe traffic, or end-to-end throughput was measured.
+
+## 2026-08-15 -- Opt-in device-side ragged expert accumulation
+
+- Commit: `1514d11`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL2 Ubuntu-24.04. The target CPU/RAM/NVMe were not independently sampled by this benchmark.
+- Model/checkpoint: five bounded `zai-org/GLM-5.2` `.k3x` probe artifacts, complete layer 10 only; no full checkpoint.
+- Mode: `learned-moe-layer`, official sigmoid natural Top-8 routing with scale 2.5, explicit GLM SiLU, FP32 output, BF16-rounded inputs, resident raw-BF16 expert union, 5 warmups and 100 measured iterations. Baseline uses host output copies plus CPU scatter; experimental mode uses `--device-accumulate 1` and one final device-to-host output copy.
+- Route and residency: 15 routed expert groups, 16 assignments, one shared expert, 2 tokens, average Top-K `8.0`, resident expert bytes `1,207,959,552`, warm weight H2D `0`, router payload `3,146,752` bytes, shared payload `75,497,472` bytes.
+- Repeated warm medians, baseline: `2,198,145`, `2,736,064`, `2,492,351 ns`; device accumulation: `1,991,721`, `1,981,629`, `2,446,610 ns`. Median-of-runs: `2,492,351 ns` versus `1,991,721 ns`, approximately `20.1%` lower for the experimental path. The spread is material, so this is not a guaranteed speedup.
+- Correctness: both paths reported GPU/CPU maximum relative error `0.000571510172449` and absolute error `0.0000379583798349`; route IDs and contributions were unchanged. CUDA ragged primitive and varied-bucket parity tests pass.
+- Traffic/quality: the experimental path reduces per-bucket output D2H and CPU scatter, but no full-layer quality, decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, speculative acceptance, or final-token result was measured.
+- Status: experimental and runtime-switchable only. The default remains the host-scatter path until exact full-layer GLM parity and quality results exist.

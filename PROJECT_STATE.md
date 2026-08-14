@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, and an explicit GLM SiLU path are implemented over five bounded real shards. The current implementation is `f07d78c`; public Linux correctness `31812923197` and CodeQL `31812923191` are green. Full checkpoint execution, final logits, incremental generation, and end-to-end tok/s remain unmeasured.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, and an explicit GLM SiLU path are implemented over five bounded real shards. The current local implementation is `1514d11`; public checks for this commit are pending. Full checkpoint execution, final logits, incremental generation, and end-to-end tok/s remain unmeasured.
 
 ## Completed
 
@@ -64,11 +64,13 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Measure the new CUDA bucket loop with exact nonzero GLM router assignments, then add pinned asynchronous staging after full-layer parity is established.
 - Real five-shard layer-10 reference smoke at `a2d6b6d`: bundle open/root verification 250.637263 s, cold two-token forward 5.969859 s, cached repeat 0.057331 s, 16 unique selected experts, cached output max difference 0.0. These are layer/storage reference timings, not tok/s.
 - Latest bounded real layer-10 learned-MoE result at `f07d78c`: two tokens, 16 routed experts plus one shared expert, 2,091,698 ns warm median per MoE sublayer block, 1,283,457,024 resident expert bytes, zero warm H2D, GPU-versus-CPU relative error `0.000452667358331`, and BF16-rounded expected-artifact relative error `0.00152439018711`. Route IDs and contributions match between Python and C++.
+- Latest device-accumulate rerun at `1514d11`: the same two-token learned-MoE boundary measured three baseline medians `2,198,145`, `2,736,064`, `2,492,351 ns` and three device-accumulate medians `1,991,721`, `1,981,629`, `2,446,610 ns`. Median-of-runs improved from `2,492,351 ns` to `1,991,721 ns` (about 20.1%) with unchanged GPU/CPU relative error `0.000571510172449`; this remains an opt-in bounded sublayer result, not tok/s.
 
 ## Known blockers
 
 - No full GLM-5.2 checkpoint is present; five bounded probe shards are available, so full checkpoint correctness and local TPS are not measured.
 - No full checkpoint download or Cloud Run conversion has been authorized or attempted; only five bounded probe shards are present.
+- Current Dependabot state: PRs 1-4 remain open update proposals, but the same setup-python, checkout, numpy, and setuptools bumps are already present on `1514d11`; their replacement checks are green. The repository Dependabot security-alert endpoint is disabled, so no CVE alert was verified.
 - Dependabot PRs #1–#4 are open for action/setup-python, action/checkout, numpy, and setuptools updates. Their first Linux checks failed with 50 `FileNotFoundError` cases because the bot branches were stale; all four branches were rebased onto `main`, and the replacement Linux/CodeQL checks are green (`#1` runs `31805879968`/`31805879919`, `#2` `31805884019`/`31805884008`, `#3` `31805888033`/`31805888023`, `#4` `31805890586`/`31805890614`). Repository Dependabot and vulnerability-alert APIs are disabled, so no CVE alert is confirmed.
 - The migrated C++ runtime still has K3-oriented names and graph assumptions in several files.
 - CUDA build and bounded RTX 5080 kernel measurements are validated in WSL; native Linux end-to-end throughput has not been measured.
@@ -114,6 +116,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Public Linux correctness workflow `31812923197` and CodeQL workflow `31812923191` both passed for implementation commit `f07d78c`. The Linux job completed in about 3 minutes 51 seconds and the CodeQL jobs completed in about 3 minutes 20 seconds. The workflows still emit non-failing Node 20 and CodeQL v3 deprecation annotations.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - The 2026-08-15 prepared-bucket cache and one-token shared-dispatch experiment was reverted after paired RTX 5080 medians were approximately 3.4% slower for token-1 and 1.1% slower for token-2 than the `f07d78c` baseline. The next performance experiment is device-side expert-output accumulation; no optimization is accepted from theory alone.
+- The device-side ragged expert accumulation experiment now passes direct, varied-bucket, host, and CUDA parity. It remains runtime-switchable and default-off because the three-run latency spread is material and the full layer, final logits, and quality path are not yet connected.
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
 - Resident expert-major batch result: 8 groups x 4 candidates, 1,641,591 ns/candidate token, cold weight H2D 160,432,128 bytes and warm weight H2D 0 bytes.
 - Resident BF16 grid result: 8 experts x 4 candidates, 2,582,527 ns/block versus native 5,394,131 ns/block; BF16 resident weight bytes 603,979,776 versus native 160,432,128; maximum absolute error 0 on the zero-weight fixture.
@@ -124,4 +127,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
 - Last known-good implementation HEAD: `f07d78c` (`feat: align GLM MoE activation with SiLU`). WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the complete WSL Python suite `301 passed, 124 skipped in 71.25 s` are green. Public Linux correctness `31812923197` and CodeQL `31812923191` also passed.
+- Last known-good local implementation HEAD: `1514d11` (`feat: add opt-in device expert accumulation`). WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the complete WSL Python suite `301 passed, 124 skipped` are green. Public checks for this commit are pending the push.
 - Next bottleneck: export the exact layer-10 q-residual/MLA/DSA hidden state into `GLM5XACT`, verify complete nonzero full-layer parity, then add pinned/asynchronous raw H2D, direct tensor-core algorithm selection, all-layer exact state, final logits, incremental generation, and VRAM-pressure-aware residency. Full weights remain intentionally absent, so no end-to-end tok/s is claimed.

@@ -275,3 +275,15 @@
 - The learned CUDA MoE benchmark was tested with a cached immutable bucket list and, for one-token decode, a fused routed-plus-shared expert-major dispatch. Both changes preserved route/output parity but did not improve paired RTX 5080 medians.
 - Token-1 five-run medians were `1,307,995 ns` with both changes versus `1,265,441 ns` at the baseline. Token-2 three-run medians were `2,191,291 ns` with bucket caching versus `2,166,726 ns` at the baseline. The token-1 fused path cut grid calls but remained slower overall.
 - The experiment was reverted from the default code path and recorded as D-0042. The next performance hypothesis is device-side accumulation to remove per-expert host output copies and CPU scatter; it must first pass exact parity and a paired benchmark.
+
+## 2026-08-15 -- Device-side ragged expert accumulation
+
+- Added a CUDA ragged mix primitive that consumes per-assignment output offsets, token indices, and router contributions. The accumulator is zeroed once per expert-major forward and each bucket kernel adds into the token-major device buffer, so later assignment-count buckets cannot erase earlier token results.
+- The backend exposes the path only when FP32 output and `cuda_expert_major_device_accumulate` are selected. It retains the existing host scatter path as the default and falls back automatically for BF16 output.
+- A CUDA regression now covers both one-bucket and varied one-/two-assignment bucket plans. WSL host CTest 15/15, CUDA CTest 27/27, and Python 301 passed/124 skipped are green.
+- Three paired RTX 5080 layer-10 learned-MoE runs measured median-of-runs `2.492351 ms` baseline versus `1.991721 ms` device accumulation, about `20.1%` lower block latency. Relative GPU/CPU error stayed `0.000571510172449`; this is still only the bounded MoE sublayer, not end-to-end token generation.
+
+## 2026-08-15 -- CI and Dependabot maintenance
+
+- The recurring historical `correctness / linux` failure was not a two-minute runtime timeout. On stale commit `b94c8b8`, C++ build/CTest passed and the Python step failed after about one minute with 50 `FileNotFoundError` cases for K3X `results/b0006` through `b0024` artifacts that GLM5X does not ship. Current `main` already has the narrow explicit-skip boundary and its latest public checks were green.
+- Dependabot PRs 1-4 are green replacement proposals for setup-python 7, checkout 7, numpy 2.5.2, and setuptools 84. The repository vulnerability-alert endpoint returns disabled/403, so no CVE alert was confirmed. The tested version bumps and CodeQL v4/Node24-compatible action majors are now on `1514d11`; no paid resource or security setting was changed.
