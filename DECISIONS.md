@@ -416,3 +416,11 @@
 - Evidence: CPU-vs-CUDA layer/model parity tests passed; the complete WSL Python suite passed `311 passed, 124 skipped`, host CTest passed `15/15`, and the first two real GLM-5.2 shards finalized as `5,342,863,616` and `5,351,993,600` byte `.k3x` artifacts with source-deleted markers. The stream retains `.part` files for interruption-safe HTTP Range resume.
 - Accepted because: direct device staging removes an unnecessary host-to-device copy at the reference boundary, while one-shard conversion keeps peak source residency bounded and makes local full-checkpoint progress durable without paid cloud resources. The CUDA path and stream are correctness/operational boundaries, not throughput claims.
 - Revisit: after all 282 shards assemble into a verified bundle, exact final-head tensors and full-layer logits are available, and end-to-end CUDA decode measurements show whether direct staging and source deletion improve the actual bottleneck.
+
+## D-0053 -- Reuse strict per-shard verification for final stream indexing
+
+- Decision: keep `assemble_glm5x_expert_bundle` strict by default, but let the local stream call it with `verify_payloads=False, verify_root=False` after every shard has passed strict reader verification and received a source-deleted marker.
+- Alternatives: rescan every completed payload during final indexing, weaken the per-shard conversion gate, or make lazy bundle assembly the public CLI default.
+- Evidence: the focused bundle/stream regression passed `4/4`; strict verification still runs in `convert_glm5x_shards` before source deletion. A partial real assembly was observed to spend several minutes rereading seven multi-gigabyte artifacts, so the duplicate scan is a clear operational bottleneck, but no full-checkpoint assembly timing has been measured yet.
+- Accepted because: the conversion marker is written only after the finalized artifact opens under strict checks, while the lazy final index still validates directory metadata, file UUID, source SHA, root SHA field, tensor IDs, and sidecar identity. The strict public bundle path remains available for independent revalidation.
+- Revisit: after the 282-shard stream completes; compare lazy-index time and a separate strict post-build audit before enabling any runtime policy that trusts the assembled bundle without selected-tensor CRC checks.

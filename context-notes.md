@@ -363,3 +363,8 @@
 
 - Pushed `6fb2da1` to `main`. Linux correctness run `31831711520` passed in `2m38s`; CodeQL run `31831711580` passed for both Python and C++.
 - The local materializer reached 4/282 finalized `.k3x` shards while the hosted checks ran. The historical Linux failure notification remains tied to stale commit `b94c8b8`, not this push.
+
+## 2026-08-15 -- Remove duplicate final bundle scan
+
+- The stream previously used strict `K3XReader.open` for every artifact again during final bundle assembly. Since each artifact is strict-verified before its deletion marker, the stream now indexes the final bundle with lazy payload/root admission while the public CLI remains strict.
+- Focused bundle and stream tests passed `4/4`. The active process was started from the prior code, so it must be resumed/restarted before the new final-assembly path is used.

@@ -72,4 +72,5 @@
 - [x] Add explicit CPU/CUDA device staging to the reference bundle/model factories and CPU-vs-CUDA parity gates.
 - [x] Add verified source deletion markers and `convert-shards --delete-source` resume behavior.
 - [x] Add the resumable local GLM-5.2 shard stream driver with one-shard-at-a-time conversion.
+- [x] Reuse strict per-shard verification metadata during final stream bundle indexing instead of rescanning completed payloads.
 - [ ] Finish the 282-shard local stream and assemble the full expert bundle.

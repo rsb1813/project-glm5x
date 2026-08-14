@@ -62,7 +62,12 @@ def test_expert_bundle_joins_roles_from_independent_artifacts(tmp_path) -> None:
     convert_glm5x_shard(source_dir / shard_names[0], artifact_dir / "a.k3x", manifest, shard_names[0])
     convert_glm5x_shard(source_dir / shard_names[2], artifact_dir / "b.k3x", manifest, shard_names[2])
 
-    report = assemble_glm5x_expert_bundle(artifact_dir, artifact_dir / "experts.json")
+    report = assemble_glm5x_expert_bundle(
+        artifact_dir,
+        artifact_dir / "experts.json",
+        verify_payloads=False,
+        verify_root=False,
+    )
     bundle = json.loads((artifact_dir / "experts.json").read_text(encoding="utf-8"))
 
     assert report.completed is True

@@ -167,6 +167,9 @@ def _load_artifact(
     artifact: Path,
     output: Path,
     groups: dict[tuple[int, int], dict[str, dict[str, object]]],
+    *,
+    verify_payloads: bool = True,
+    verify_root: bool = True,
 ) -> tuple[dict[str, object], int]:
     sidecar = artifact.with_suffix(artifact.suffix + ".manifest.json")
     if not sidecar.is_file():
@@ -177,7 +180,11 @@ def _load_artifact(
         raise K3XError("EXPERT_BUNDLE_SIDECAR_INVALID", str(sidecar)) from exc
     if metadata.get("format") != "glm5x-bounded-shard-v1":
         raise K3XError("EXPERT_BUNDLE_SIDECAR_FORMAT", str(sidecar))
-    reader = K3XReader.open(artifact)
+    reader = K3XReader.open(
+        artifact,
+        verify_payloads=verify_payloads,
+        verify_root=verify_root,
+    )
     if metadata.get("source_sha256") != reader.superblock.source_sha256.hex():
         raise K3XError("EXPERT_BUNDLE_SOURCE_MISMATCH", str(artifact))
     records = {record.tensor_id: record for record in reader.tensor_records}
@@ -229,6 +236,8 @@ def assemble_glm5x_expert_bundle(
     output: str | Path,
     *,
     dry_run: bool = False,
+    verify_payloads: bool = True,
+    verify_root: bool = True,
 ) -> GLM5XExpertBundleReport:
     artifact_dir, output = Path(artifact_dir), Path(output)
     if not artifact_dir.is_dir():
@@ -242,7 +251,13 @@ def assemble_glm5x_expert_bundle(
     artifact_metadata: list[dict[str, object]] = []
     tensor_count = 0
     for artifact in artifacts:
-        metadata, count = _load_artifact(artifact, output, groups)
+        metadata, count = _load_artifact(
+            artifact,
+            output,
+            groups,
+            verify_payloads=verify_payloads,
+            verify_root=verify_root,
+        )
         artifact_metadata.append(metadata)
         tensor_count += count
     complete = []

@@ -202,7 +202,14 @@ def stream_checkpoint(
 
     assembled = False
     if not dry_run and max_shards is None:
-        bundle_report = assemble_glm5x_expert_bundle(output_dir, bundle_path)
+        # Every shard was strict-reader verified before its source deletion marker.
+        # Reuse that gate and avoid a second full payload scan for the final index.
+        bundle_report = assemble_glm5x_expert_bundle(
+            output_dir,
+            bundle_path,
+            verify_payloads=False,
+            verify_root=False,
+        )
         assembled = bundle_report.completed
     return {
         "repo": repo,
