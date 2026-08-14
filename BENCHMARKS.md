@@ -399,3 +399,16 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Mode: CMake configure/build, CTest, Python/cross-language suite with explicit skips only for absent migrated B-0006 through B-0024 historical artifacts.
 - Result: correctness workflow `31795971197` passed in `3m21s`; CodeQL workflow `31795971207` passed. The previous 50 `FileNotFoundError` failures were eliminated without skipping new GLM5X tests.
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality: not measured.
+
+## 2026-08-14 -- Exact GLM layer-10 MLA/DSA bundle smoke after reader reuse
+
+- Commit: `a2d6b6d`.
+- Hardware: WSL2 on the configured target PC; CPU PyTorch reference path, CUDA not used for this record.
+- Model/checkpoint: five bounded `zai-org/GLM-5.2` probe artifacts, complete layer 10, 277 complete expert groups in the bundle; no full checkpoint.
+- Mode: exact q-residual projection, official-shaped causal DSA indexer, compressed MLA KV state, natural Top-8 sigmoid MoE, `cache_experts=true`, two random BF16 tokens.
+- Bundle construction/root verification: `250.637263 s`.
+- Cold two-token layer forward: `5.969859 s`; cached repeat: `0.057331 s`.
+- Output: `[1,2,6144]` BF16; 16 unique routed experts loaded in the cold block; DSA selection shape `[1,2,2]` because the causal sequence contains two positions; cached output maximum absolute difference `0.0`.
+- Reader-reuse comparison: the pre-reuse sample on the same five artifacts took `491.483777 s` to construct the layer, so one shared validated reader reduced open/verification time by approximately `49.0%`. This comparison is storage/open latency, not decode throughput.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, measured expert-cache hit rate, speculative acceptance, quality score, and end-to-end model throughput: not measured.
+- Caveat: this is a correctness and storage-latency gate for one real layer boundary. It is not a full 78-layer run, a CUDA result, or a TPS claim.

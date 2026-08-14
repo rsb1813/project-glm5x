@@ -43,6 +43,8 @@
 - [x] Make Linux correctness reproducible when migrated historical benchmark evidence is absent; keep new GLM tests active.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [x] Add lazy official-router/shared-SwiGLU layer-10 reference over the bounded five-shard bundle.
+- [x] Add exact q-residual, MLA compressed state, official DSA incremental state, and full-vs-incremental layer parity.
+- [x] Add a bundle-backed layer-10 loader that shares one validated reader across attention, indexer, norms, and lazy MoE experts.
 - [ ] Validate BF16 dequantized execution against nonzero real GLM shard data and quality metrics.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.
 - [ ] Add MTP/DSpark expert-major verification to the GLM path.

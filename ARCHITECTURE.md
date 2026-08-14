@@ -38,10 +38,12 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - CPU/reference `GLM5XDSAState` and `GLM5XDSAIndexer` that connect descriptor index metadata, explicit query/key projection matrices, an index-key store, compressed KV blocks, exact top-k refresh, and an explicitly stale fast refresh policy. Its 600k/1M capacity numbers are allocation-free estimates.
 - Official-shape CPU/reference `GLM5XOfficialDSAIndexer` with `wq_b` query projection, `wk` + LayerNorm key projection, interleaved/non-interleaved indexer RoPE, `weights_proj` head weights, ReLU aggregation, causal masking, and Top-K selection. The loader reads only the five indexer tensors needed from a source shard.
 - CPU/reference `GLM5XLayer10MoEReference` with the official GLM router contract (float32 sigmoid scores, group selection, exact Top-8 normalization and routed scale), shared SwiGLU, and explicit token-major expert scatter. `from_bundle()` maps the copy-free cross-shard bundle to lazy exact raw-BF16 expert role loads, so a forward materializes only the selected experts.
+- CPU/reference `GLM5XMLAReference` with q-residual projection, compressed MLA KV state, per-token RoPE, causal attention, and incremental state reuse. `GLM5XOfficialDSAState` is appended by the exact official-shaped indexer and its causal Top-K mask is passed into MLA without changing natural routing.
+- `GLM5XDecoderLayerReference` now executes the layer boundary in official order: input RMS norm, q-residual/DSA, MLA, residual, post-attention RMS norm, shared/routed MoE, and residual. It supports full-vs-incremental parity and a bundle-backed layer loader that shares one validated `GLM5XExpertBundle` reader across attention, indexer, and lazy expert loads.
 
 ### In progress
 
-- GLM-5.2 reference graph with exact DSA/MLA and MoE routing.
+- Extend the exact layer-10 reference boundary to the remaining GLM-5.2 layers and final logits/MTP path.
 - Synthetic GLM-5.2 checkpoint round-trip.
 - Exact DSA/MLA graph around the official indexer, q-residual production projection, nonzero real-shard parity, quantization/calibration, and runtime consumption of the cross-shard expert bundle.
 - Wiring GLM DSA/MTP state and exact routing around the existing expert-major batch path.

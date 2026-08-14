@@ -272,3 +272,19 @@
 - Evidence: the five-shard bundle contains 277 complete expert groups and a complete layer 10. A real layer-10 smoke selected 15 unique experts; cold and cached forwards produced identical `[2,6144]` BF16 outputs. No quality or tok/s claim is inferred.
 - Accepted because: it proves the official sigmoid router/shared-SwiGLU boundary without requiring the full checkpoint in RAM/VRAM and provides the exact selected-expert set needed by the next packed CUDA integration.
 - Revisit: after q-residual plus exact MLA/DSA and full-layer parity are connected; only then compare the lazy reference with the resident CUDA scheduler.
+
+## D-0035 -- Make q-residual, MLA, DSA, and MoE one exact incremental reference boundary
+
+- Decision: add `GLM5XMLAReference`, `GLM5XOfficialDSAState`, and `GLM5XDecoderLayerReference` as the CPU correctness path. Preserve compressed MLA state and DSA index keys across calls, pass the exact causal DSA Top-K mask into MLA, and keep the official natural Top-8 MoE route unchanged.
+- Alternatives: connect CUDA kernels before a complete reference boundary, approximate DSA with a stale refresh in the default path, or test MLA and MoE as disconnected components only.
+- Evidence: the focused GLM reference suite passed 42/42; full-vs-incremental synthetic layer output and final state lengths match, the bundle-backed loader reads real bounded layer-10 attention/indexer/norm tensors, and the real two-token smoke returned cached output maximum absolute difference `0.0`.
+- Accepted because: every later CUDA, prefetch, and expert-major optimization can compare against one stateful layer contract without downloading the full checkpoint. The reference path remains CPU-only and is not a throughput claim.
+- Revisit: when all 78 layers, final logits, MTP, and nonzero CUDA layer parity are connected.
+
+## D-0036 -- Reuse one validated bundle reader for a layer construction
+
+- Decision: `GLM5XDecoderLayerReference.from_bundle()` opens and root-verifies the cross-shard bundle once, shares its tensor readers with the attention/indexer/norm loader and lazy MoE loader, and retains the bundle through the expert-loader closure.
+- Alternatives: let the attention and MoE constructors independently open the same bundle, disable root verification for the second open, or materialize all layer experts to avoid a shared reader.
+- Evidence: a real five-artifact layer-10 smoke measured bundle construction at `250.637263 s` after reuse versus `491.483777 s` before reuse, a `49.0%` reduction. Cold forward was `5.969859 s`, warm cached forward `0.057331 s`, and cached output maximum absolute difference was `0.0`.
+- Accepted because: it removes duplicate multi-gigabyte root hashing without weakening validation and keeps expert payloads lazy. The improvement is storage/open latency only; it does not establish model tok/s.
+- Revisit: when the runtime switches to a persistent process-level artifact registry or direct asynchronous extent reads, while retaining one verified identity per artifact.

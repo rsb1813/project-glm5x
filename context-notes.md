@@ -211,3 +211,9 @@
 - The public `correctness` workflow failed on `b94c8b8` because migrated K3X tests referenced historical `results/b0006` through `b0024` artifacts that are intentionally not in the GLM5X repository. The actual C++ build/tests passed; CodeQL also passed.
 - Commit `a00beec` marks only those historical evidence/manifest tests as skipped when their recorded artifacts are absent and skips old-baseline-dependent ablations with an explicit reason. New GLM5X tests remain active. GitHub Actions correctness and CodeQL both passed on the pushed commit.
 - Added `GLM5XLayer10MoEReference` with official sigmoid router, exact Top-8 normalization/routed scale, shared SwiGLU, and lazy exact raw-BF16 bundle reads. A five-shard real bundle smoke selected 15 unique layer-10 experts and returned identical cold/cached outputs; this is reference correctness evidence only.
+
+## 2026-08-14 Exact MLA/DSA layer boundary and bundle-open reduction
+
+- Added q-residual MLA projection, compressed incremental MLA state, official causal DSA index-key state, and the decoder-layer order connecting them to the lazy natural Top-8 MoE reference. Synthetic full-vs-incremental parity and bundle-loader coverage are green.
+- The first real five-shard layer-10 smoke exposed duplicate `GLM5XExpertBundle.open()` calls. A test reproduced two opens, then the loader was changed to share one root-verified bundle object with the attention/indexer/norm readers and lazy MoE closure.
+- Focused GLM Python tests passed 42/42 and WSL CTest passed 14/14 after the change. The real smoke measured `250.637263 s` bundle construction, `5.969859 s` cold forward, `0.057331 s` cached forward, and `0.0` maximum cached-output difference. Full-model throughput remains unmeasured.
