@@ -152,3 +152,10 @@
 - Direct raw BF16 on the two probe artifacts measured 8 experts x 4 tokens at 1,648,927 ns warm block median, 135,877,327 ns cold, 603,979,776 resident bytes, zero warm H2D, and 0.1351% maximum relative CPU difference. The prior dense wrapper measured 1,758,739 ns warm and 759,804,032 ns cold under the same command shape.
 - `test_cuda_dense` now exercises both the dense-wrapper and raw-byte APIs with a nonzero two-expert/two-token fixture. Full WSL CTest remains 26/26 and focused GLM Python remains 35/35.
 - The next bottleneck is pinned/asynchronous raw H2D plus exact natural Top-8/MLA/DSA layer integration; raw grid results are still FFN-block evidence, not model tok/s.
+
+## 2026-08-14 Pointer-array expert GEMM batching
+
+- Added cached cublasLt pointer-array layouts for the raw BF16 grid. Each multi-expert call now submits gate, up, and down as one batched projection plus one SiTU launch; the pointer arrays live in a reusable device scratch buffer.
+- The 2-expert nonzero CUDA regression now checks the pointer descriptor transfer counter (`144` bytes for its three pointer sets) and four kernel launches. Full WSL CTest remains 26/26 and focused GLM Python remains 35/35.
+- Isolated real-shard rerun: 8 experts x 4 tokens measured 1,065,026 ns warm median, 153,395,924 ns cold, 603,979,776 resident bytes, zero warm H2D, and 0.1359% maximum relative CPU error. The latest direct raw per-expert run was 1,648,927 ns warm, so the hot block improved by about 35.4%.
+- Single-expert measurements remained on the scalar plan because pointer-array setup was slower. The next bottleneck is pinned/asynchronous staging and full GLM layer integration, not another unverified TPS extrapolation.

@@ -192,3 +192,11 @@
 - Evidence: on the same RTX 5080 real-shard probe, 8 experts x 4 tokens improved from 1,758,739 ns to 1,648,927 ns warm median; cold execution fell from 759,804,032 ns to 135,877,327 ns, with resident bytes 603,979,776, warm H2D 0, and unchanged 0.1351% maximum relative CPU difference. The CUDA dense/raw parity test and full 26-test CTest suite passed.
 - Accepted because: the path removes seven unnecessary FP32 staging vectors from the multi-expert probe and makes the storage representation match the resident representation without changing the source bytes or routing semantics.
 - Revisit: after pinned/asynchronous raw H2D, direct tensor-core algorithm selection, full natural Top-8 layer parity, and quality evaluation beyond the last-expert FFN output.
+
+## D-0025 -- Batch multi-expert BF16 GEMMs with pointer-array layouts
+
+- Decision: for `RawBf16MlpView` grids with more than one expert, use cublasLt pointer-array batch layouts so gate, up, and down projections are submitted as three GEMM calls. Keep the scalar-grid plan for one expert and retain a heuristic-unavailable fallback to the prior per-expert plan.
+- Alternatives: keep one cublasLt call per expert, use a classic cuBLAS grouped handle, or pack all resident weights into a contiguous temporary matrix before GEMM.
+- Evidence: the 8-expert/4-token real-shard probe on RTX 5080 measured 1,065,026 ns warm median with 4 resident-grid launches/call and 576 pointer-descriptor bytes/call, versus 1,648,927 ns for the direct raw per-expert path. CPU maximum relative error remained 0.00135860045. The nonzero CUDA regression and full CTest suite passed.
+- Accepted because: it removes 24 expert-level projection launches from the hot block while preserving the same resident bytes, input/output layout, and raw source payloads. The one-expert branch avoids the measured pointer-array setup penalty.
+- Revisit: after pinned pointer staging, direct tensor-core algorithm profiling, larger candidate blocks, and full-layer quality parity.

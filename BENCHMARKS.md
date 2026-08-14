@@ -106,6 +106,16 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Decode tok/s, prefill tok/s, TTFT, GPU utilization, VRAM peak, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality benchmark: not measured.
 - Interpretation: direct raw-byte admission reduced the 8-expert warm block by approximately 6.2% and cold execution by approximately 5.6x relative to the preceding dense-wrapper probe. The cold comparison also excludes seven experts' FP32 reference materialization, so it is a storage/setup result, not a pure kernel speedup or end-to-end tok/s claim.
 
+## 2026-08-14 -- Pointer-array batched real BF16 expert grid
+
+- Commit: `d36ad21` (pointer-array implementation `36ab952`).
+- Hardware: NVIDIA GeForce RTX 5080, CUDA 13.3, WSL; same two bounded GLM probe artifacts.
+- Model/checkpoint: `zai-org/GLM-5.2`, layer 10, first 8 available real experts, 4 candidate tokens.
+- Mode: direct raw-BF16 resident grid with cublasLt pointer-array layouts. Gate, up, and down projections are each submitted as one multi-expert batch; the SiTU activation remains one fused launch. Five warmups and 20 measured iterations.
+- Result: warm block latency median 1,065,026 ns (approximately 266,257 ns per candidate token); cold latency 153,395,924 ns; host payload/load setup 4,285,733,935 ns; cold weight H2D 603,979,776 bytes; warm weight H2D 0; resident weight bytes 603,979,776; maximum relative CPU difference 0.00135860045 (0.136%). The cumulative 26 calls reported 104 resident-grid kernel launches and 14,976 descriptor bytes, equal to 4 launches and 576 descriptor bytes per call.
+- Decode tok/s, prefill tok/s, TTFT, GPU utilization, VRAM peak, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality benchmark: not measured.
+- Interpretation: the pointer-array path reduced the latest warm block from 1,648,927 ns to 1,065,026 ns (approximately 35.4%). Cold execution is slightly higher because pointer-plan creation and descriptor setup are included; single-expert calls remain on the scalar plan after measuring pointer setup overhead.
+
 ## 2026-08-14 -- Raw-BF16 expert directory C++ reader gate
 
 - Commit: working tree after `1b22bcb`; code change pending commit.
