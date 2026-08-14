@@ -48,7 +48,7 @@ GLM-5.2 shape/manifest boundary plus RTX 5080 resident native/BF16 expert-grid b
 
 ## Latest verified state
 
-- Focused GLM descriptor, manifest, CLI, toy reference, and TurboQuant tests: 16 passed, 1 CUDA Python test skipped on Windows because the WSL ELF binary is not a Windows executable.
+- Focused GLM descriptor, manifest, CLI, toy reference, and TurboQuant tests: 17 passed, 1 CUDA Python test skipped on Windows because the WSL ELF binary is not a Windows executable.
 - CUDA CMake build: successful in WSL with CUDA 13.3 and RTX 5080 compute capability 12.0.
 - CTest: 26/26 tests passed in WSL.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
@@ -56,5 +56,6 @@ GLM-5.2 shape/manifest boundary plus RTX 5080 resident native/BF16 expert-grid b
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
 - Resident expert-major batch result: 8 groups x 4 candidates, 1,641,591 ns/candidate token, cold weight H2D 160,432,128 bytes and warm weight H2D 0 bytes.
 - Resident BF16 grid result: 8 experts x 4 candidates, 2,582,527 ns/block versus native 5,394,131 ns/block; BF16 resident weight bytes 603,979,776 versus native 160,432,128; maximum absolute error 0 on the zero-weight fixture.
+- Latest rerun: native zero-pattern grid 5,510,632 ns/block; BF16 zero-pattern grid 4,386,083 ns/block; nonzero BF16 grid 4,044,675 ns/block with 0.9505% maximum relative difference versus the native GPU reference. These remain bounded synthetic measurements only.
 - Last known-good code HEAD: `29b6fde` (`fix: preflight resident BF16 capacity`).
 - Next bottleneck: nonzero GLM shard parity, exact DSA/indexer graph, variable-union expert grouping, and VRAM-pressure-aware choice between native MXFP4 and BF16 resident execution; full weights remain intentionally absent.

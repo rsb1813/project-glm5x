@@ -42,3 +42,9 @@
 - A deterministic nonzero packed pattern was added to the benchmark. BF16 grid versus a separate native GPU reference measured maximum relative difference 0.00950465 (0.95%) at 2,563,496 ns warm median. This is numeric parity evidence only, not calibrated GLM quality.
 - The CUDA parity gate initially exposed the expected BF16 accumulation rounding rather than an exact-float mismatch. The test now uses explicit bounded tolerances (2e-3 for the tiny batch, 4e-3 for the zero-grid fixture, and 0.5 for the larger nonzero fixture) and the full 26-test CTest suite is green.
 - BF16 grid capacity preflight now excludes already-resident BF16 keys and rejects the whole BF16 admission before native fallback if the remaining VRAM budget is insufficient. This prevents mixed BF16/native metadata collisions on repeated calls. The released-dimension 16-expert check now returns exact native output instead of `INVALID_EXTENT` under the 1 GiB budget.
+
+## 2026-08-14 Latest benchmark rerun
+
+- Re-ran the bounded GLM-5.2-shaped 8-expert/4-token grid on the RTX 5080 after the capacity guard was committed. Native zero-pattern median was 5,510,632 ns/block and resident BF16 median was 4,386,083 ns/block.
+- Re-ran the nonzero BF16 comparison at 4,044,675 ns/block. The maximum relative difference against the native GPU reference was 0.0095046479255 (0.9505%).
+- Recorded the new values as an additional benchmark entry rather than overwriting prior samples. The benchmark remains a layer/kernel measurement; no model tok/s or quality conclusion is permitted.

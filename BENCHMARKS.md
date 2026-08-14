@@ -100,3 +100,15 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 1
 - Result: BF16 preflight detected that dense trunk residency plus all selected BF16 experts exceeded the budget and returned to the exact native MXFP4 group path. Warm median was 14,319,240 ns, `resident_grid_fallbacks=10`, maximum absolute error 0 versus the native oracle.
 - Native comparison from the same fixture: 6,333,866 ns warm median at the same 16-expert shape and budget.
 - Interpretation: this is a guardrail result, not a BF16 speed claim. A BF16 mode must use a VRAM budget that includes dense trunk and expert residency; otherwise native fallback is intentionally selected.
+
+## 2026-08-14 -- Latest RTX 5080 BF16/native rerun
+
+- Commit: `ad4b1c6` (benchmark binary built from the BF16-capacity-guarded code at `29b6fde`).
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: no checkpoint; deterministic GLM-5.2-shaped synthetic tensors, 8 selected experts, hidden size 6144, expert intermediate size 2048, 4 candidate tokens.
+- Native zero-pattern grid: median 5,510,632 ns/block over 100 iterations after 20 warmups; cold weight H2D 160,432,128 bytes; resident weight bytes 160,432,128; activation H2D 9,830,400 bytes; device-to-host 78,643,200 bytes; peak VRAM 162,103,680 bytes; maximum absolute error 0.
+- BF16 zero-pattern grid: median 4,386,083 ns/block over 100 iterations after 20 warmups; cold BF16 weight H2D 603,979,776 bytes; resident BF16 weight bytes 603,979,776; activation H2D 4,915,200 bytes; device-to-host 78,643,200 bytes; peak VRAM 630,636,544 bytes; maximum absolute error 0.
+- Nonzero BF16 grid: median 4,044,675 ns/block over 30 iterations after 10 warmups; maximum absolute difference versus the native GPU reference 1,732.3086; maximum relative difference 0.0095046479255 (0.9505%).
+- Relative result: this rerun was 1.26x faster for warm BF16 grid latency, while resident selected-weight memory was 3.76x larger. The cold BF16 admission was roughly 3.77x the native payload and is not on the per-token hot path after residency.
+- Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, average Top-K, speculative acceptance, and task quality: not measured.
+- Interpretation: this is a bounded kernel/layer rerun only. The run-to-run latency differs from the earlier sample, so the repository records both samples instead of replacing history; no end-to-end GLM throughput or quality claim follows.
