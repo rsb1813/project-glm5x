@@ -60,6 +60,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - The final stream bundle assembly can reuse the per-shard strict verification gate with `verify_payloads=False, verify_root=False`; the public converter CLI remains strict by default. This avoids rereading every completed payload after the source-deletion markers already establish the conversion boundary.
 - Local conversion workers may own disjoint half-open shard ranges. Each worker downloads, converts, verifies, and deletes only its assigned shards; `--no-assemble` prevents partial workers from racing on the shared final bundle, and a coordinator assembles the bundle after all ranges finish.
 - `tools/benchmark_glm5x_reference.py` is the measured full-bundle gate. It accepts explicit token IDs and records prefill tok/s, TTFT, decode tok/s, generated tokens, device, cache policy, execution mode, and CUDA memory without turning projections or estimates into throughput claims.
+- `tools/monitor_glm5x_full_gate.sh` is an optional local coordinator. It waits for all 282 atomic source-deletion markers, invokes the stream's lazy final assembly without a payload copy, and then runs the one-token CUDA reference gate. It does not provision cloud resources or alter the conversion workers.
 
 ### In progress
 
