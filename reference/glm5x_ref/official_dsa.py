@@ -30,6 +30,18 @@ def build_glm_indexer_rope(
 
 
 @dataclass(frozen=True)
+class GLM5XOfficialDSAState:
+    """Positioned DSA index keys retained across incremental decoding."""
+
+    keys: torch.Tensor
+    positions: torch.Tensor
+
+    @property
+    def length(self) -> int:
+        return int(self.positions.shape[-1])
+
+
+@dataclass(frozen=True)
 class GLM5XOfficialDSAIndexer:
     """Reference implementation of the GLM-MoE-DSA indexer formula."""
 
@@ -214,3 +226,74 @@ class GLM5XOfficialDSAIndexer:
             index_scores = index_scores.masked_fill(causal, float("-inf"))
         topk = min(self.index_topk, index_scores.shape[-1])
         return torch.topk(index_scores, k=topk, dim=-1).indices.to(torch.int32)
+
+    @staticmethod
+    def _apply_interleaved_rope(
+        values: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, rope_dim: int
+    ) -> torch.Tensor:
+        if cos.shape != sin.shape or values.shape[:2] != cos.shape[:2]:
+            raise ValueError("DSA_INCREMENTAL_ROPE_SHAPE_MISMATCH")
+        if cos.ndim != 3 or values.ndim not in (3, 4) or rope_dim % 2:
+            raise ValueError("DSA_INCREMENTAL_ROPE_RANK")
+        half = rope_dim // 2
+        angles = cos[..., :half]
+        sine = sin[..., :half]
+        if values.ndim == 4:
+            angles = angles.unsqueeze(2)
+            sine = sine.unsqueeze(2)
+        rotated = values[..., :rope_dim]
+        even, odd = rotated[..., 0::2], rotated[..., 1::2]
+        encoded = torch.cat((even * angles - odd * sine, odd * angles + even * sine), dim=-1)
+        return torch.cat((encoded, values[..., rope_dim:]), dim=-1)
+
+    def select_topk_incremental(
+        self,
+        hidden_states: torch.Tensor,
+        q_resid: torch.Tensor,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor],
+        position_ids: torch.Tensor,
+        *,
+        state: GLM5XOfficialDSAState | None = None,
+    ) -> tuple[torch.Tensor, GLM5XOfficialDSAState]:
+        """Run exact indexer scoring while appending only the new key positions."""
+        hidden_states = torch.as_tensor(hidden_states)
+        q_resid = torch.as_tensor(q_resid)
+        position_ids = torch.as_tensor(position_ids)
+        if hidden_states.ndim != 3 or q_resid.shape != (*hidden_states.shape[:-1], self.q_lora_rank):
+            raise ValueError("DSA_INCREMENTAL_INPUT_SHAPE_MISMATCH")
+        if position_ids.shape != hidden_states.shape[:2]:
+            raise ValueError("DSA_INCREMENTAL_POSITION_SHAPE_MISMATCH")
+        cos, sin = (torch.as_tensor(item) for item in position_embeddings)
+        if cos.shape != sin.shape or cos.shape[:2] != position_ids.shape:
+            raise ValueError("DSA_INCREMENTAL_POSITION_EMBEDDING_SHAPE")
+        batch_size, seq_length, _ = hidden_states.shape
+        if state is not None:
+            if state.keys.ndim != 3 or state.positions.ndim != 2:
+                raise ValueError("DSA_INCREMENTAL_STATE_RANK")
+            if state.keys.shape[0] != batch_size or state.positions.shape != state.keys.shape[:2]:
+                raise ValueError("DSA_INCREMENTAL_STATE_SHAPE")
+
+        q = self.project_query(q_resid)
+        q = self._apply_interleaved_rope(q, cos, sin, self.qk_rope_head_dim)
+        current_keys = self.project_keys(hidden_states)
+        current_keys = self._apply_interleaved_rope(
+            current_keys, cos, sin, self.qk_rope_head_dim
+        )
+        if state is None:
+            keys = current_keys
+            key_positions = position_ids
+        else:
+            keys = torch.cat((state.keys, current_keys), dim=1)
+            key_positions = torch.cat((state.positions, position_ids), dim=1)
+        scores = torch.matmul(
+            q.to(torch.float32), keys.to(torch.float32).transpose(-1, -2).unsqueeze(1)
+        )
+        scores = torch.relu(scores) * (self.index_head_dim**-0.5)
+        weights = self.weights_proj.to(hidden_states.dtype)
+        weights = (hidden_states.to(weights.dtype) @ weights.T).float() * (self.index_n_heads**-0.5)
+        index_scores = torch.matmul(weights.unsqueeze(-2), scores).squeeze(-2)
+        causal = key_positions[:, None, :] > position_ids[:, :, None]
+        index_scores = index_scores.masked_fill(causal, float("-inf"))
+        topk = min(self.index_topk, index_scores.shape[-1])
+        indices = torch.topk(index_scores, k=topk, dim=-1).indices.to(torch.int32)
+        return indices, GLM5XOfficialDSAState(keys=keys, positions=key_positions)
