@@ -120,6 +120,19 @@ struct DenseMlpView {
     DenseWeightView down;
 };
 
+struct RawBf16WeightView {
+    std::uint64_t tensor_id;
+    std::span<const std::byte> values;
+    std::size_t rows;
+    std::size_t cols;
+};
+
+struct RawBf16MlpView {
+    RawBf16WeightView gate;
+    RawBf16WeightView up;
+    RawBf16WeightView down;
+};
+
 struct DenseVectorView {
     std::uint64_t tensor_id;
     std::span<const float> values;
@@ -173,6 +186,13 @@ public:
     virtual Result<std::vector<std::vector<float>>> dense_situ_mlp_grid(
         std::span<const float>, std::size_t,
         std::span<const DenseMlpView>, float,
+        std::optional<float>, std::uint32_t, ProfilePhase) {
+        return Result<std::vector<std::vector<float>>>::failure(
+            ErrorCode::backend_unavailable);
+    }
+    virtual Result<std::vector<std::vector<float>>> raw_bf16_situ_mlp_grid(
+        std::span<const float>, std::size_t,
+        std::span<const RawBf16MlpView>, float,
         std::optional<float>, std::uint32_t, ProfilePhase) {
         return Result<std::vector<std::vector<float>>>::failure(
             ErrorCode::backend_unavailable);

@@ -1453,7 +1453,31 @@ public:
         std::span<const DenseMlpView> experts, float situ_beta,
         std::optional<float> situ_linear, std::uint32_t layer,
         ProfilePhase phase) override {
-        return dense_situ_mlp_grid_bf16(
+        std::vector<RawBf16MlpView> raw_experts;
+        raw_experts.reserve(experts.size());
+        for (const auto& expert : experts) {
+            const auto to_raw = [this](DenseWeightView view) {
+                const auto* converted = rounded_dense_bf16_host(view);
+                if (converted == nullptr) return RawBf16WeightView{};
+                const auto bytes = std::as_bytes(std::span<const __nv_bfloat16>(
+                    converted->data(), converted->size()));
+                return RawBf16WeightView{
+                    view.tensor_id, bytes, view.rows, view.cols};
+            };
+            raw_experts.push_back({
+                to_raw(expert.gate), to_raw(expert.up), to_raw(expert.down)});
+        }
+        return raw_bf16_situ_mlp_grid_impl(
+            inputs, token_count, raw_experts, situ_beta, situ_linear, layer,
+            phase);
+    }
+
+    Result<std::vector<std::vector<float>>> raw_bf16_situ_mlp_grid(
+        std::span<const float> inputs, std::size_t token_count,
+        std::span<const RawBf16MlpView> experts, float situ_beta,
+        std::optional<float> situ_linear, std::uint32_t layer,
+        ProfilePhase phase) override {
+        return raw_bf16_situ_mlp_grid_impl(
             inputs, token_count, experts, situ_beta, situ_linear, layer,
             phase);
     }
@@ -3185,9 +3209,9 @@ public:
     std::string_view device_name() const noexcept override { return device_name_; }
 
 private:
-    Result<std::vector<std::vector<float>>> dense_situ_mlp_grid_bf16(
+    Result<std::vector<std::vector<float>>> raw_bf16_situ_mlp_grid_impl(
         std::span<const float> inputs, std::size_t token_count,
-        std::span<const DenseMlpView> experts, float situ_beta,
+        std::span<const RawBf16MlpView> experts, float situ_beta,
         std::optional<float> situ_linear, std::uint32_t layer,
         ProfilePhase phase) {
         constexpr auto precision = NumericPrecision::bf16_rounded;
@@ -3233,9 +3257,12 @@ private:
                 expert.up.rows != intermediate_width ||
                 expert.down.cols != intermediate_width ||
                 expert.down.rows != output_width ||
-                expert.gate.values.size() != input_width * intermediate_width ||
-                expert.up.values.size() != input_width * intermediate_width ||
-                expert.down.values.size() != intermediate_width * output_width ||
+                expert.gate.values.size() !=
+                    input_width * intermediate_width * sizeof(__nv_bfloat16) ||
+                expert.up.values.size() !=
+                    input_width * intermediate_width * sizeof(__nv_bfloat16) ||
+                expert.down.values.size() !=
+                    intermediate_width * output_width * sizeof(__nv_bfloat16) ||
                 expert.gate.tensor_id == 0 || expert.up.tensor_id == 0 ||
                 expert.down.tensor_id == 0 ||
                 !tensor_ids.insert(expert.gate.tensor_id).second ||
@@ -3250,7 +3277,7 @@ private:
                          view.rows, view.cols, 0})) {
                     continue;
                 }
-                const auto bytes = view.values.size() * sizeof(__nv_bfloat16);
+                const auto bytes = view.values.size();
                 if (bytes > std::numeric_limits<std::uint64_t>::max() -
                                 required_bf16_bytes) {
                     return Result<std::vector<std::vector<float>>>::failure(
@@ -3269,8 +3296,7 @@ private:
         }
 
         struct WeightMember {
-            DenseWeightView view;
-            const __nv_bfloat16* host{};
+            RawBf16WeightView view;
             void* device{};
             std::size_t bytes{};
         };
@@ -3285,23 +3311,14 @@ private:
             for (std::size_t projection = 0; projection < 3; ++projection) {
                 const auto view = projection == 0
                     ? expert.gate : (projection == 1 ? expert.up : expert.down);
-                const auto* values = rounded_dense_bf16_host(view);
-                if (values == nullptr) {
-                    return Result<std::vector<std::vector<float>>>::failure(
-                        ErrorCode::backend_unavailable,
-                        "CUDA BF16 dense grid host conversion failed");
-                }
                 WeightMember member{
-                    view, values->data(), nullptr,
-                    values->size() * sizeof(__nv_bfloat16)};
+                    view, nullptr, view.values.size()};
                 maximum_weight_bytes =
                     std::max(maximum_weight_bytes, member.bytes);
                 projection_bytes[projection] += member.bytes;
-                const auto bytes = std::as_bytes(
-                    std::span<const __nv_bfloat16>(values->data(), values->size()));
                 const auto acquisition = resident_weights_->acquire(
                     {view.tensor_id, cuda::WeightRepresentation::dense_bf16,
-                     view.rows, view.cols, 0}, bytes, {});
+                     view.rows, view.cols, 0}, view.values, {});
                 if (!acquisition) {
                     return Result<std::vector<std::vector<float>>>::failure(
                         acquisition.error(), acquisition.message());

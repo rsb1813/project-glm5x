@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <vector>
 
@@ -310,6 +311,42 @@ int test_bf16_resident_grid() {
          {705, rounded_weights[4], 2, 3},
          {706, rounded_weights[5], 2, 2}},
     }};
+    std::array<std::vector<std::byte>, 6> raw_weights;
+    for (std::size_t index = 0; index < rounded_weights.size(); ++index) {
+        raw_weights[index].resize(rounded_weights[index].size() * 2);
+        for (std::size_t value = 0; value < rounded_weights[index].size();
+             ++value) {
+            const auto bits = std::bit_cast<std::uint32_t>(
+                rounded_weights[index][value]);
+            const auto bf16_bits = static_cast<std::uint16_t>(bits >> 16U);
+            std::memcpy(raw_weights[index].data() + value * 2, &bf16_bits, 2);
+        }
+    }
+    const std::array<k3x::RawBf16MlpView, 2> raw_experts{{
+        {{701, raw_weights[0], 2, 3},
+         {702, raw_weights[1], 2, 3},
+         {703, raw_weights[2], 2, 2}},
+        {{704, raw_weights[3], 2, 3},
+         {705, raw_weights[4], 2, 3},
+         {706, raw_weights[5], 2, 2}},
+    }};
+    auto raw_backend = k3x::make_cuda_backend(options);
+    if (!raw_backend) return 76;
+    const auto raw_output = raw_backend.value()->raw_bf16_situ_mlp_grid(
+        input, 2, raw_experts, 1.0F, std::nullopt, 17,
+        k3x::ProfilePhase::decode);
+    if (!raw_output || raw_output.value().size() != output.value().size()) {
+        return 77;
+    }
+    for (std::size_t expert = 0; expert < output.value().size(); ++expert) {
+        for (std::size_t value = 0; value < output.value()[expert].size();
+             ++value) {
+            if (!nearly_equal(raw_output.value()[expert][value],
+                              output.value()[expert][value], 2.0e-2F)) {
+                return 78;
+            }
+        }
+    }
     auto cpu = k3x::make_cpu_backend();
     for (std::size_t expert = 0; expert < rounded_experts.size(); ++expert) {
         for (std::size_t token = 0; token < 2; ++token) {

@@ -107,6 +107,7 @@ struct RealExpertFixture {
     k3x::GlmBf16ExpertLoad payload;
     std::array<std::vector<float>, 3> weights;
     k3x::DenseMlpView dense{};
+    k3x::RawBf16MlpView raw{};
 };
 
 float bf16_to_float(const std::byte* bytes) {
@@ -237,23 +238,39 @@ int main(int argc, char** argv) {
         fixture.expert_id = expert_id;
         fixture.payload = std::move(loaded.value());
         host_payload_bytes += fixture.payload.payload_bytes;
-        for (std::size_t index = 0; index < fixture.weights.size(); ++index) {
-            fixture.weights[index] = decode_bf16(fixture.payload.roles[index]);
-            if (fixture.weights[index].empty()) return 7;
-            if (arguments->precision == "bf16-rounded") {
-                for (auto& value : fixture.weights[index]) value = round_to_bf16(value);
+        const auto needs_float_view = arguments->precision == "fp32" ||
+            expert_id == expert_ids.back();
+        if (needs_float_view) {
+            for (std::size_t index = 0; index < fixture.weights.size(); ++index) {
+                fixture.weights[index] = decode_bf16(fixture.payload.roles[index]);
+                if (fixture.weights[index].empty()) return 7;
+                if (arguments->precision == "bf16-rounded") {
+                    for (auto& value : fixture.weights[index]) {
+                        value = round_to_bf16(value);
+                    }
+                }
             }
         }
         const auto prefix = "model.layers." + std::to_string(arguments->layer) +
             ".mlp.experts." + std::to_string(expert_id) + ".";
-        fixture.dense = {
-            {k3x::fnv1a64((prefix + "gate_proj.weight").c_str()), fixture.weights[0],
-             kIntermediateSize, kHiddenSize},
-            {k3x::fnv1a64((prefix + "up_proj.weight").c_str()), fixture.weights[1],
-             kIntermediateSize, kHiddenSize},
-            {k3x::fnv1a64((prefix + "down_proj.weight").c_str()), fixture.weights[2],
-             kHiddenSize, kIntermediateSize},
+        const auto gate_id = k3x::fnv1a64(
+            (prefix + "gate_proj.weight").c_str());
+        const auto up_id = k3x::fnv1a64(
+            (prefix + "up_proj.weight").c_str());
+        const auto down_id = k3x::fnv1a64(
+            (prefix + "down_proj.weight").c_str());
+        fixture.raw = {
+            {gate_id, fixture.payload.roles[0], kIntermediateSize, kHiddenSize},
+            {up_id, fixture.payload.roles[1], kIntermediateSize, kHiddenSize},
+            {down_id, fixture.payload.roles[2], kHiddenSize, kIntermediateSize},
         };
+        if (needs_float_view) {
+            fixture.dense = {
+                {gate_id, fixture.weights[0], kIntermediateSize, kHiddenSize},
+                {up_id, fixture.weights[1], kIntermediateSize, kHiddenSize},
+                {down_id, fixture.weights[2], kHiddenSize, kIntermediateSize},
+            };
+        }
         fixtures.push_back(std::move(fixture));
     }
     const auto host_load_ns = static_cast<std::uint64_t>(
@@ -265,17 +282,18 @@ int main(int argc, char** argv) {
         input[index] = static_cast<float>(static_cast<int>(index % 29) - 14) * 0.01F;
         if (arguments->precision == "bf16-rounded") input[index] = round_to_bf16(input[index]);
     }
-    std::vector<k3x::DenseMlpView> dense_views;
-    dense_views.reserve(fixtures.size());
-    for (const auto& fixture : fixtures) dense_views.push_back(fixture.dense);
+    std::vector<k3x::RawBf16MlpView> raw_views;
+    raw_views.reserve(fixtures.size());
+    for (const auto& fixture : fixtures) {
+        raw_views.push_back(fixture.raw);
+    }
     k3x::BackendOptions options;
     options.kind = k3x::BackendKind::cuda_custom;
     options.dense_precision = arguments->precision == "bf16-rounded"
         ? k3x::DensePrecision::bf16_rounded : k3x::DensePrecision::fp32;
     options.cuda_allocation = k3x::CudaAllocationMode::reused;
     options.cuda_weights = k3x::CudaWeightMode::resident;
-    const auto use_grid = arguments->precision == "bf16-rounded" &&
-        (fixtures.size() > 1 || arguments->tokens > 1);
+    const auto use_grid = arguments->precision == "bf16-rounded";
     options.cuda_batching = use_grid
         ? k3x::CudaBatchingMode::resident_grid : k3x::CudaBatchingMode::scalar;
     options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
@@ -303,8 +321,8 @@ int main(int argc, char** argv) {
     }
     const auto execute = [&]() {
         if (use_grid) {
-            auto outputs = cuda.value()->dense_situ_mlp_grid(
-                input, arguments->tokens, dense_views, 1.0F, std::nullopt,
+            auto outputs = cuda.value()->raw_bf16_situ_mlp_grid(
+                input, arguments->tokens, raw_views, 1.0F, std::nullopt,
                 arguments->layer, k3x::ProfilePhase::decode);
             if (!outputs) {
                 return k3x::Result<std::vector<float>>::failure(
