@@ -4,7 +4,17 @@ No end-to-end GLM-5.2 throughput or quality benchmark has been run yet. The boun
 
 The first benchmark record must include the commit, hardware, model/checkpoint identity, mode, context length, decode and prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, quality result, and enabled optimizations.
 
-The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 23 passing tests. It is not a performance measurement.
+The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 28 passing tests. It is not a performance measurement.
+
+## 2026-08-14 -- Resumable GLM shard conversion gate
+
+- Commit: `3400c35`.
+- Hardware: Windows Python reference/converter path; no CUDA execution and no full-model load.
+- Model/checkpoint: synthetic two-tensor/two-shard fixtures for the restart gate; the previously downloaded single GLM-5.2 shard remains the only real payload.
+- Mode: source/config-fingerprinted `.partial` + `.resume.json` ledger, canonical aligned BF16 extents, source/partial CRC validation, complete same-shard expert-role directory records, and independent `convert-shards` orchestration.
+- Correctness result: 28 focused `test_glm5x_*.py` tests passed. The resume test reused the first completed tensor extent; the multi-shard test verified two independent outputs and skipped both finalized artifacts on retry.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, and quality benchmark: not measured.
+- Interpretation: this is a crash-safety and storage-boundary milestone, not a conversion-throughput or model-throughput benchmark. No GLM tok/s claim follows.
 
 ## 2026-08-14 — TurboQuant reference smoke
 

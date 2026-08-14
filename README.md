@@ -15,7 +15,8 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - `GLM5XTensorManifest` validation for safetensors shard maps and source byte totals before conversion.
 - Official manifest role resolution for GLM indexer `full/shared` layers and `wk/wq_b/weights_proj/k_norm` tensor names without opening a shard.
 - Header-only safetensors parity inspection for a bounded real GLM shard; names, shapes, and dtypes are checked without loading its 5.3 GB payload into RAM.
-- Experimental `glm5x-convert convert-shard` streams one validated shard into aligned BF16 extents and emits a tensor-name sidecar; the first real shard passed both Python and WSL C++ reader checks.
+- Experimental `glm5x-convert convert-shard` streams one validated shard into aligned BF16 extents, emits a tensor-name sidecar, and resumes after a worker interruption through a source/config-fingerprinted ledger. Complete `gate_proj/up_proj/down_proj` triples receive `EXPT` directory records; partial role groups remain sidecar-only.
+- `glm5x-convert convert-shards` treats every manifest shard as an independently restartable unit, skips already verified artifacts, and leaves completed shards intact when a later shard fails.
 - A GLM-5.2-shaped CUDA expert benchmark for hidden size 6144 and expert intermediate size 2048, including 1/2/4/8-token expert-major batching.
 - Exact resident MXFP4 reuse for CUDA expert-major batches; warm batches avoid re-uploading packed/scales weights.
 - Opt-in resident BF16 dequantized expert-grid path using cublasLt; the native exact MXFP4 path remains the default. Historical bounded samples measured 2.58 ms/block versus 5.39 ms native, and the latest rerun measured 4.386 ms versus 5.511 ms native. Both used about 604 MB instead of 160 MB for resident selected weights; neither is an end-to-end tok/s claim.
@@ -80,6 +81,17 @@ python -m glm5x_converter.cli convert-shard \
   --shard-name model-00001-of-00282.safetensors
 ```
 
+For a local checkpoint directory, convert all manifest shards as independent `.k3x` artifacts. The command never downloads missing files and does not require the complete checkpoint to fit in RAM.
+
+```bash
+python -m glm5x_converter.cli convert-shards \
+  /data/glm-5.2 /data/glm-5.2-k3x \
+  --config /data/glm-5.2/config.json \
+  --index /data/glm-5.2/model.safetensors.index.json
+```
+
+Each shard writes `<output>.partial` and `<output>.resume.json` while it is active. A retry validates the source SHA-256, converter/configuration fingerprint, canonical extent order, source CRC, and partial-file CRC before reusing completed extents. `--stop-after-tensors N` is available on `convert-shard` for crash/restart testing; it is not a production performance mode.
+
 On the RTX 5080 WSL build, the bounded expert-grid comparison is explicit about its execution mode.
 
 ```bash
@@ -98,7 +110,7 @@ The BF16 mode is experimental and can fall back to native MXFP4 when the configu
 1. GLM-5.2 descriptor, manifest, and tiny reference graph. (Descriptor/manifest and bounded CUDA baseline are complete.)
 2. TurboQuant reference KV parity and packed paged-KV contract. (Reference path is complete; packed CUDA storage is pending.)
 3. GLM-5.2 DSA/indexer state and 600k/1M capacity smoke. (Descriptor-shaped CPU/reference projections, metadata roles, and first-shard header parity are complete; conversion and learned parity are pending.)
-4. Resumable multi-shard conversion and exact CPU runtime/profiler. (Single-shard bounded writer is experimental.)
+4. Resumable multi-shard conversion and exact CPU runtime/profiler. (Independent shard conversion is implemented; exact runtime/profiler remains pending.)
 5. CUDA DSA/MLA, Top-8 MoE, and compressed-KV kernels.
 6. Three-tier asynchronous expert pipeline.
 7. MTP/AURORA and DSpark-compatible expert-major verification.
@@ -116,7 +128,7 @@ Every optimization keeps a reference mode. Every performance result records the 
 | `reference/glm5x_ref` | GLM descriptor and reference graph boundary |
 | `reference/glm5x_ref/turboquant.py` | CPU/reference compressed KV contract and capacity estimator |
 | `converter/k3x_converter` | Reused storage-format implementation |
-| `converter/glm5x_converter` | GLM5X-facing converter CLI |
+| `converter/glm5x_converter` | GLM5X-facing single- and multi-shard converter CLI |
 | `runtime/` | C++20 portable runtime and optional CUDA backend |
 | `tests/` | Python and C++ correctness gates |
 | `docs/superpowers/specs` | Accepted architectural design |

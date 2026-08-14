@@ -104,3 +104,11 @@
 - Evidence: the first 5,342,821,416-byte shard converted with an 8 MiB maximum source read; Python checks passed and the WSL C++ reader returned exit 0 on the 5,342,863,616-byte artifact.
 - Accepted because: it proves real shard streaming and reader compatibility without loading the full model, while keeping the native K3X storage core and a reversible experimental boundary.
 - Revisit: when resumability, expert directories, and BF16 CUDA consumption are implemented.
+
+## D-0014 -- Make GLM conversion independently resumable per shard
+
+- Decision: keep one `.k3x` artifact, sidecar, and source/config-fingerprinted resume ledger per safetensors shard. Reuse is allowed only for the canonical prefix of tensor extents after validating expected IDs, aligned offsets, lengths, source CRCs, partial-file CRCs, and the ledger file UUID. `convert-shards` orchestrates these units and skips only finalized artifacts whose source digest and reader metadata still match.
+- Alternatives: build one monolithic checkpoint writer, trust a JSON ledger's CRC values without recomputing source bytes, or delete partial work and restart a shard after interruption.
+- Evidence: the new red-green tests resume a two-tensor shard after one completed extent, reject changed/corrupted state through the existing K3X error boundary, record complete same-shard expert triples in `EXPT`, and convert two manifest shards independently; the focused GLM suite passes 28 tests.
+- Accepted because: Cloud Run/local worker preemption can retry a bounded shard without requiring full-model RAM/VRAM residency, while canonical validation prevents a syntactically valid but stale ledger from silently producing a wrong artifact.
+- Revisit: when cross-shard expert bundles, resumable object-store uploads, and full GLM quality parity are implemented.

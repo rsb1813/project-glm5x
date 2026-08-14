@@ -74,3 +74,11 @@
 - Added `glm5x-convert convert-shard` and a raw BF16 bounded writer that reuses K3X aligned extents, CRC32C, directory/root SHA-256, and a name-preserving sidecar.
 - Converted only `model-00001-of-00282.safetensors` with an 8 MiB chunk limit. The artifact contains 35 tensors and 78 layer records; Python checksum/root verification and WSL C++ `test_reader` both passed.
 - `DType.BF16` is now accepted by the portable reader, but no CUDA BF16 weight consumption or expert-directory semantics are claimed yet. The next task is resumable multi-shard conversion.
+
+## 2026-08-14 Resumable multi-shard conversion
+
+- `convert_glm5x_shard` now writes a source/config-fingerprinted `.resume.json` ledger beside the `.partial` artifact. Each completed tensor extent is recorded only after fsync, source CRC verification, and partial-file readback; resume accepts only the canonical prefix with expected IDs, aligned offsets, lengths, and recomputed source CRCs.
+- Finalization is crash-safe across the output rename, sidecar rename, and ledger cleanup. If a worker dies after the `.k3x` rename, the next invocation validates the final reader metadata and repairs the sidecar/ledger boundary.
+- `convert_glm5x_shards` treats every manifest shard as an independent unit and skips only finalized artifacts whose sidecar/source SHA-256 and K3X reader metadata match. This is the local equivalent of a restartable Cloud Run worker unit; object-store uploads and multi-worker scheduling remain future work.
+- Complete same-shard GLM raw-BF16 expert role triples receive `EXPT` records linked to their tensor IDs. Incomplete triples stay in the sidecar to avoid fabricating cross-shard links.
+- Focused GLM coverage is now 28 passing tests. No end-to-end GLM decode or conversion-throughput benchmark was added; the next bottleneck is exact learned DSA/indexer projection and cross-shard expert assembly.

@@ -13,6 +13,8 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - Manifest role resolution for the official indexer's `wk`, `wq_b`, `weights_proj`, and `k_norm` tensors, including nearest-previous `full` source resolution for `shared` indexer layers.
 - Header-only safetensors inspection and manifest parity validation; tensor payloads are not materialized while checking names, shapes, or dtypes.
 - Experimental bounded GLM shard writer that reuses K3X aligned extents, CRC/root checks, BF16 dtype metadata, and a name-preserving sidecar; the first real shard round-trips through Python and C++ readers.
+- The GLM writer is resumable per shard. Its atomic `.partial` plus `.resume.json` ledger binds the source SHA-256, converter/configuration fingerprint, canonical extent order, source CRC, and partial-file CRC before reuse. `convert-shards` schedules manifest shards as independent restartable units and verifies already finalized outputs instead of rewriting them.
+- Complete raw-BF16 `gate_proj/up_proj/down_proj` groups are represented by `EXPT` directory records with tensor-ID links. A shard containing only a subset of an expert's roles does not create a misleading directory record; its role names remain in the sidecar until a complete bundle is available.
 - A bounded RTX 5080 CUDA benchmark for GLM-5.2 expert dimensions (`hidden=6144`, `expert_intermediate=2048`, `group=32`) using the resident expert-grid backend.
 - Resident expert-major batch execution now admits packed/scales through the shared `ResidentWeightTable`; repeated candidate batches can reuse exact MXFP4 weights without another weight H2D upload.
 - Experimental resident BF16 expert-grid execution dequantizes exact MXFP4 values once per tensor and uses cublasLt BF16-input/FP32-output projections; native MXFP4 remains the default. A preflight budget check accounts for dense resident weights and warm BF16 keys before admission, then falls back to native without partial mixed-representation residency when the budget is insufficient.
@@ -25,7 +27,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - GLM model-specific extent roles and streaming conversion from the validated manifest.
 - GLM-5.2 reference graph with exact DSA/MLA and MoE routing.
 - Synthetic GLM-5.2 checkpoint round-trip.
-- Resumable multi-shard GLM5X conversion, expert-role directories, quantization/calibration, then the exact DSA/MLA graph and learned projection calibration.
+- Exact DSA/MLA graph and learned projection calibration, nonzero real-shard parity, quantization/calibration, and cross-shard expert bundling beyond complete same-shard triples.
 - Wiring GLM DSA/MTP state and exact routing around the existing expert-major batch path.
 
 ### Experimental
@@ -44,7 +46,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 
 ## Runtime data flow
 
-The converter reads bounded source shards, validates identity, emits execution-ordered extents, and releases source memory before the next unit. Runtime residency is tiered as L0 VRAM, L1 RAM, and L2 NVMe. Cache score combines frequency, transition probability, recency, predicted use, load latency, size, residency, and speculative usefulness.
+The converter reads one bounded source shard at a time, validates identity, emits execution-ordered extents, and releases source memory before the next unit. `convert-shards` keeps these units independent so a preemption or disk error does not invalidate completed artifacts. Runtime residency is tiered as L0 VRAM, L1 RAM, and L2 NVMe. Cache score combines frequency, transition probability, recency, predicted use, load latency, size, residency, and speculative usefulness.
 
 For speculative verification, GLM5X computes candidate routing first, forms a per-layer unique expert union, fetches each exact expert once, and batches candidate-token work by expert. Natural Top-8 routing remains the correctness reference.
 
