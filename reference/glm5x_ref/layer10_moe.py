@@ -388,8 +388,11 @@ class GLM5XLayer10MoEReference:
         hidden_size: int = 6144,
         execution_mode: str = "loop",
         expert_load_workers: int = 1,
+        expert_cache_capacity_bytes: int = 0,
     ) -> "GLM5XLayer10MoEReference":
-        bundle = GLM5XExpertBundle.open(bundle_path)
+        bundle = GLM5XExpertBundle.open(
+            bundle_path, expert_cache_capacity_bytes=expert_cache_capacity_bytes
+        )
         return cls._from_open_bundle(
             bundle,
             tensor_refs=_collect_tensor_refs(bundle),

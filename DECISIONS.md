@@ -473,3 +473,11 @@
 - Evidence: the batch loader preserves route/output/loaded-expert parity in `4/4` focused MoE tests, and the full layer/model reference regressions pass `8/8`. The real full-bundle I/O latency, NVMe contention, and H2D overlap are not measured yet.
 - Accepted because: it changes only scheduling of exact reads, preserves natural routing and payloads, and gives the first full-model gate a controlled I/O-overlap knob without silently changing quality.
 - Revisit: after the active 282-shard CUDA gate records cold/warm read latency, H2D bytes, and decode tok/s. Disable or retune if concurrent reads starve compute or increase residency pressure.
+
+## D-0060 -- Keep exact host payload caching bounded and opt-in
+
+- Decision: add a thread-safe byte-capacity cache inside `GLM5XExpertBundle` keyed by `(layer_id, expert_id)`. Cache raw exact BF16 role bytes across decoder-layer object lifetimes and token forwards, report hit/miss/eviction counts, and use capacity `0` as the default.
+- Alternatives: cache decoded CUDA tensors, retain complete decoder layers, use an unbounded process cache, or rely only on NVMe readahead.
+- Evidence: on the five-shard real layer-10 probe, the same eight experts fell from `3.070666336 s` cold to `0.094567934 s` on the second call with a 1,000,000,000-byte cache. Output maximum absolute difference was `0.0`; resident payload was `603,979,776` bytes and the cache reported 8 hits, 8 misses, and 0 evictions.
+- Accepted because: it removes repeat NVMe reads without changing exact weights, routing, or GPU residency policy, while making memory cost explicit and observable.
+- Revisit: after the 78-layer full-bundle cold/cached benchmark records decode tok/s, cache hit rate, host RAM, and NVMe GB/token. Increase, decrease, or disable the cache based on measured session locality and RAM pressure.

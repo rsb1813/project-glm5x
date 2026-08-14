@@ -8,7 +8,7 @@ from typing import Callable, Mapping, Sequence
 
 import torch
 
-from glm5x_converter.bundle import GLM5XExpertBundle
+from glm5x_converter.bundle import GLM5XExpertBundle, GLM5XExpertPayloadCacheStats
 
 from .layer_reference import GLM5XDecoderLayerForward, GLM5XDecoderLayerReference
 from .layer10_moe import GLM5XLayer10MoEReference, _collect_tensor_refs
@@ -189,6 +189,7 @@ class GLM5XDecoderModelReference:
         instance._rope_dim = rope_dim
         instance._layer_cache_capacity = min(layer_cache_capacity, layer_count)
         instance._layer_cache = OrderedDict()
+        instance._expert_bundle = None
         instance.final_norm = final_norm
         instance.lm_head = lm_head
         instance.rope_theta = float(rope_theta)
@@ -210,6 +211,7 @@ class GLM5XDecoderModelReference:
         device: torch.device | str | None = None,
         execution_mode: str = "loop",
         expert_load_workers: int = 1,
+        expert_cache_capacity_bytes: int = 0,
     ) -> "GLM5XDecoderModelReference":
         """Build an out-of-core model factory from one validated GLM bundle.
 
@@ -253,7 +255,10 @@ class GLM5XDecoderModelReference:
         indexer_sources = _bundle_indexer_sources(config, layer_count)
 
         bundle = GLM5XExpertBundle.open(
-            bundle_path, verify_payloads=verify_payloads, verify_root=verify_root
+            bundle_path,
+            verify_payloads=verify_payloads,
+            verify_root=verify_root,
+            expert_cache_capacity_bytes=expert_cache_capacity_bytes,
         )
         tensor_refs = _collect_tensor_refs(bundle)
         read = lambda name: GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)  # noqa: E731
@@ -297,7 +302,7 @@ class GLM5XDecoderModelReference:
                 expert_load_workers=expert_load_workers,
             )
 
-        return cls.from_layer_loader(
+        instance = cls.from_layer_loader(
             embedding=embedding,
             layer_count=layer_count,
             layer_loader=load_layer,
@@ -307,6 +312,8 @@ class GLM5XDecoderModelReference:
             rope_theta=rope_theta,
             layer_cache_capacity=layer_cache_capacity,
         )
+        instance._expert_bundle = bundle
+        return instance
 
     @property
     def vocab_size(self) -> int:
@@ -327,6 +334,13 @@ class GLM5XDecoderModelReference:
     @property
     def layer_cache_capacity(self) -> int:
         return self._layer_cache_capacity
+
+    @property
+    def expert_payload_cache_stats(self) -> GLM5XExpertPayloadCacheStats:
+        bundle = getattr(self, "_expert_bundle", None)
+        if bundle is None:
+            return GLM5XExpertPayloadCacheStats(0, 0, 0, 0, 0, 0)
+        return bundle.expert_payload_cache_stats
 
     @property
     def cached_layer_count(self) -> int:

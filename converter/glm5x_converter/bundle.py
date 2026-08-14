@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Mapping
 
 from k3x_converter.format import K3XError, TensorRecord
@@ -30,6 +32,75 @@ class GLM5XExpertBundleReport:
 
 
 @dataclass(frozen=True)
+class GLM5XExpertPayloadCacheStats:
+    capacity_bytes: int
+    resident_bytes: int
+    entries: int
+    hits: int
+    misses: int
+    evictions: int
+
+
+class GLM5XExpertPayloadCache:
+    """Bounded exact raw-BF16 payload cache shared across layer loads."""
+
+    def __init__(self, capacity_bytes: int) -> None:
+        if (
+            not isinstance(capacity_bytes, int)
+            or isinstance(capacity_bytes, bool)
+            or capacity_bytes <= 0
+        ):
+            raise ValueError("GLM5X_EXPERT_CACHE_CAPACITY")
+        self.capacity_bytes = capacity_bytes
+        self._entries: OrderedDict[
+            tuple[int, int], tuple[dict[str, bytes], int]
+        ] = OrderedDict()
+        self._resident_bytes = 0
+        self._hits = 0
+        self._misses = 0
+        self._evictions = 0
+        self._lock = Lock()
+
+    def get(self, key: tuple[int, int]) -> dict[str, bytes] | None:
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                self._misses += 1
+                return None
+            self._entries.move_to_end(key)
+            self._hits += 1
+            return dict(entry[0])
+
+    def put(self, key: tuple[int, int], payload: Mapping[str, bytes]) -> None:
+        value = {role: bytes(data) for role, data in payload.items()}
+        size = sum(len(data) for data in value.values())
+        if size > self.capacity_bytes:
+            return
+        with self._lock:
+            previous = self._entries.pop(key, None)
+            if previous is not None:
+                self._resident_bytes -= previous[1]
+            while self._entries and self._resident_bytes + size > self.capacity_bytes:
+                _, (_, evicted_size) = self._entries.popitem(last=False)
+                self._resident_bytes -= evicted_size
+                self._evictions += 1
+            self._entries[key] = (value, size)
+            self._resident_bytes += size
+
+    @property
+    def stats(self) -> GLM5XExpertPayloadCacheStats:
+        with self._lock:
+            return GLM5XExpertPayloadCacheStats(
+                capacity_bytes=self.capacity_bytes,
+                resident_bytes=self._resident_bytes,
+                entries=len(self._entries),
+                hits=self._hits,
+                misses=self._misses,
+                evictions=self._evictions,
+            )
+
+
+@dataclass(frozen=True)
 class GLM5XExpertBundle:
     """검증된 cross-shard expert 인덱스와 payload reader 묶음입니다."""
 
@@ -38,6 +109,7 @@ class GLM5XExpertBundle:
     artifact_paths: Mapping[str, Path]
     readers: Mapping[str, K3XReader]
     experts: Mapping[tuple[int, int], Mapping[str, Mapping[str, object]]]
+    payload_cache: GLM5XExpertPayloadCache | None = None
 
     @classmethod
     def open(
@@ -46,8 +118,15 @@ class GLM5XExpertBundle:
         *,
         verify_payloads: bool = True,
         verify_root: bool = True,
+        expert_cache_capacity_bytes: int = 0,
     ) -> "GLM5XExpertBundle":
         path = Path(path)
+        if (
+            not isinstance(expert_cache_capacity_bytes, int)
+            or isinstance(expert_cache_capacity_bytes, bool)
+            or expert_cache_capacity_bytes < 0
+        ):
+            raise ValueError("GLM5X_EXPERT_CACHE_CAPACITY")
         try:
             metadata = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -99,12 +178,21 @@ class GLM5XExpertBundle:
             if set(roles) != set(_ROLES):
                 raise K3XError("EXPERT_BUNDLE_INCOMPLETE_EXPERT", f"{layer_id}:{expert_id}")
             experts[key] = roles
-        return cls(path, metadata, artifact_paths, readers, experts)
+        payload_cache = (
+            GLM5XExpertPayloadCache(expert_cache_capacity_bytes)
+            if expert_cache_capacity_bytes
+            else None
+        )
+        return cls(path, metadata, artifact_paths, readers, experts, payload_cache)
 
     def read_expert(self, layer_id: int, expert_id: int) -> dict[str, bytes]:
         roles = self.experts.get((layer_id, expert_id))
         if roles is None:
             raise K3XError("EXPERT_BUNDLE_EXPERT_NOT_FOUND", f"{layer_id}:{expert_id}")
+        if self.payload_cache is not None:
+            cached = self.payload_cache.get((layer_id, expert_id))
+            if cached is not None:
+                return cached
         result: dict[str, bytes] = {}
         for role in _ROLES:
             item = roles[role]
@@ -142,7 +230,15 @@ class GLM5XExpertBundle:
             if auxiliary:
                 raise K3XError("EXPERT_BUNDLE_AUXILIARY_PAYLOAD", role)
             result[role] = data
+        if self.payload_cache is not None:
+            self.payload_cache.put((layer_id, expert_id), result)
         return result
+
+    @property
+    def expert_payload_cache_stats(self) -> GLM5XExpertPayloadCacheStats:
+        if self.payload_cache is None:
+            return GLM5XExpertPayloadCacheStats(0, 0, 0, 0, 0, 0)
+        return self.payload_cache.stats
 
 
 def _relative_artifact(path: Path, output: Path) -> str:

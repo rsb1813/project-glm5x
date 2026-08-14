@@ -89,6 +89,21 @@ def test_expert_bundle_joins_roles_from_independent_artifacts(tmp_path) -> None:
     lazy_payload = lazy_bundle.read_expert(0, 0)
     assert lazy_payload == payload
 
+    cached_bundle = GLM5XExpertBundle.open(
+        artifact_dir / "experts.json",
+        verify_payloads=False,
+        verify_root=False,
+        expert_cache_capacity_bytes=64,
+    )
+    assert cached_bundle.read_expert(0, 0) == payload
+    assert cached_bundle.expert_payload_cache_stats.hits == 0
+    assert cached_bundle.read_expert(0, 0) == payload
+    cache_stats = cached_bundle.expert_payload_cache_stats
+    assert cache_stats.hits == 1
+    assert cache_stats.misses == 1
+    assert cache_stats.entries == 1
+    assert cache_stats.resident_bytes == 48
+
 
 def test_expert_bundle_rejects_reference_offset_tampering(tmp_path) -> None:
     source = tmp_path / "source.safetensors"

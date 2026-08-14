@@ -84,9 +84,13 @@ class GLM5XDecoderLayerReference:
         device: torch.device | str | None = None,
         execution_mode: str = "loop",
         expert_load_workers: int = 1,
+        expert_cache_capacity_bytes: int = 0,
     ) -> "GLM5XDecoderLayerReference":
         bundle = GLM5XExpertBundle.open(
-            bundle_path, verify_payloads=verify_payloads, verify_root=verify_root
+            bundle_path,
+            verify_payloads=verify_payloads,
+            verify_root=verify_root,
+            expert_cache_capacity_bytes=expert_cache_capacity_bytes,
         )
         return cls.from_open_bundle(
             bundle,
@@ -135,10 +139,14 @@ class GLM5XDecoderLayerReference:
         device: torch.device | str | None = None,
         execution_mode: str = "loop",
         expert_load_workers: int = 1,
+        expert_cache_capacity_bytes: int = 0,
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
         """Open and validate one bundle once, then provide individual layers."""
         bundle = GLM5XExpertBundle.open(
-            bundle_path, verify_payloads=verify_payloads, verify_root=verify_root
+            bundle_path,
+            verify_payloads=verify_payloads,
+            verify_root=verify_root,
+            expert_cache_capacity_bytes=expert_cache_capacity_bytes,
         )
         refs = _collect_tensor_refs(bundle)
 

@@ -14,6 +14,7 @@ build-glm5x-worker-*.log
 build-glm5x-full-gate*.log
 build-glm5x-full-stream-final.json*
 build-glm5x-full-reference-cuda.json*
+build-glm5x-full-reference-cuda-*.json*
 *.k3x.partial
 *.k3x.resume.json
 *.gmlxact

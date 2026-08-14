@@ -6,7 +6,8 @@ output_dir="$repo_root/build-glm5x-full-k3x"
 source_dir="$repo_root/build-glm5x-full-source"
 bundle_path="$output_dir/glm5x-experts-full.json"
 stream_report="$repo_root/build-glm5x-full-stream-final.json"
-cuda_report="$repo_root/build-glm5x-full-reference-cuda.json"
+cold_cuda_report="$repo_root/build-glm5x-full-reference-cuda-cold.json"
+cached_cuda_report="$repo_root/build-glm5x-full-reference-cuda-cached.json"
 expected_shards="${EXPECTED_SHARDS:-282}"
 poll_seconds="${POLL_SECONDS:-60}"
 
@@ -35,7 +36,7 @@ python tools/stream_glm5x_checkpoint.py \
   > "$stream_partial"
 mv -f "$stream_partial" "$stream_report"
 
-cuda_partial="${cuda_report}.partial"
+cuda_partial="${cold_cuda_report}.partial"
 python tools/benchmark_glm5x_reference.py \
   --bundle "$bundle_path" \
   --config "$source_dir/config.json" \
@@ -43,8 +44,22 @@ python tools/benchmark_glm5x_reference.py \
   --new-tokens 1 \
   --device cuda \
   --expert-load-workers 4 \
+  --expert-cache-bytes 0 \
   --lazy-bundle \
   > "$cuda_partial"
-mv -f "$cuda_partial" "$cuda_report"
+mv -f "$cuda_partial" "$cold_cuda_report"
+
+cuda_partial="${cached_cuda_report}.partial"
+python tools/benchmark_glm5x_reference.py \
+  --bundle "$bundle_path" \
+  --config "$source_dir/config.json" \
+  --prompt 0 \
+  --new-tokens 2 \
+  --device cuda \
+  --expert-load-workers 4 \
+  --expert-cache-bytes 8589934592 \
+  --lazy-bundle \
+  > "$cuda_partial"
+mv -f "$cuda_partial" "$cached_cuda_report"
 
 printf '%s full gate completed\n' "$(date --iso-8601=seconds)"
