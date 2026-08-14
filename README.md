@@ -4,7 +4,7 @@
 
 GLM5X is a correctness-first runtime and storage project for running GLM-5.x on a machine with a 16 GB consumer GPU, large system RAM, and NVMe storage. It is designed around the model's sparse MoE routing, DSA/MLA attention, MTP speculative decoding, and expert-major verification rather than treating the workload as a dense model with a generic cache.
 
-> **Status:** GLM-5.2 shape/manifest, exact layer-10 q-residual/MLA/DSA/MoE reference, and a learned-router-aware ragged raw-BF16 expert-major CUDA dispatch boundary are implemented. No GLM weights are bundled and no end-to-end tok/s number is claimed. Linux correctness `31802692875` and CodeQL `31802692977` are green for `222d113`.
+> **Status:** GLM-5.2 shape/manifest, exact layer-10 q-residual/MLA/DSA/MoE reference, and a learned-router-aware raw-BF16 MoE sublayer CUDA boundary are implemented. No GLM weights are bundled and no end-to-end tok/s number is claimed. Linux correctness `31804542819` and CodeQL `31804542791` are green for `4b51617`.
 
 ## What is here now
 
@@ -32,6 +32,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - `scatter_expert_major_outputs` applies each retained router contribution and restores group outputs to token-major order on the reference side; CUDA remains responsible only for expert FFN slabs.
 - `CudaBackend::raw_bf16_situ_mlp_expert_major` now consumes those buckets, dispatches the raw-BF16 grid, and applies the explicit weighted scatter. On five bounded real shards, a deterministic 8-group/10-assignment/2-token probe measured 1.380 ms/block versus 1.651 ms for common input. This is a bounded FFN scheduling result, not learned routing or model tok/s.
 - `--input-mode learned-expert-major` now reads the real GLM-5.2 router and FP32 correction bias, selects natural Top-8 experts, and sends only that union to the same CUDA path. A two-token probe selected 15 experts and measured 1.906 ms/block with 0.0866% maximum CPU-relative difference under a 2 GiB resident budget. This is still an MoE/FFN block result, not full-model tok/s.
+- `--input-mode learned-moe-layer` adds the real layer shared expert to that natural routed union. The two-token bounded MoE sublayer measured 2.155 ms/block with 0.0586% maximum CPU-relative difference; the four-token run measured 3.968 ms/block with 0.0430% difference. This remains a sublayer result, not full-model tok/s.
 - The real-shard probe can compare `--input-mode common` with a deterministic `--input-mode sparse-packed` assignment pattern. The latter measured 0.966 ms/block versus 1.041 ms for common 2-token input in one 8-expert rerun; this is not learned routing or end-to-end tok/s.
 - The portable C++ reader validates raw-BF16 `EXPT` staging records as well as native MXFP4 records. The bounded real-shard CUDA bridge now consumes those payloads; full-layer routing and quality validation are still pending.
 - `glm5x-convert convert-shards` treats every manifest shard as an independently restartable unit, skips already verified artifacts, and leaves completed shards intact when a later shard fails.

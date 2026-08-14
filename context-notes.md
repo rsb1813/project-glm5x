@@ -239,6 +239,8 @@
 - The opt-in BF16-output cross-check measured `2,374,827 ns` for two tokens and `0.00111866334919` maximum CPU-relative difference, so FP32 output remains the default for this boundary.
 - This is the complete bounded MoE sublayer only. MLA/DSA, trunk residuals, final logits, incremental full-layer state, and end-to-end tok/s remain unmeasured.
 
+- Public verification for the implementation/docs pair passed after the change: correctness workflow `31804542819` and CodeQL workflow `31804542791` are green.
+
 ## 2026-08-14 — public CI and Dependabot diagnosis
 
 - Pushed learned-router evidence at `222d113`; Linux correctness `31802692875` passed in 2m43s and CodeQL `31802692977` passed in 4m10s.
