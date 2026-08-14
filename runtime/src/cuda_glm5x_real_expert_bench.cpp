@@ -3,6 +3,7 @@
 #include "k3x/checksums.hpp"
 #include "k3x/format.hpp"
 #include "k3x/glm5x_bundle.hpp"
+#include "k3x/glm5x_activation.hpp"
 #include "k3x/routing_policy.hpp"
 
 #include <algorithm>
@@ -44,6 +45,8 @@ struct Arguments {
     std::string precision{"fp32"};
     std::string output{"fp32"};
     std::string input_mode{"common"};
+    std::filesystem::path input_bf16;
+    std::filesystem::path expected_bf16;
 };
 
 std::optional<std::size_t> parse_size(std::string_view text) {
@@ -111,6 +114,10 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             result.output = value;
         } else if (key == "--input-mode") {
             result.input_mode = value;
+        } else if (key == "--input-bf16") {
+            result.input_bf16 = value;
+        } else if (key == "--expected-bf16") {
+            result.expected_bf16 = value;
         } else {
             return std::nullopt;
         }
@@ -131,6 +138,9 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
         return std::nullopt;
     }
     if (result.precision != "bf16-rounded" && result.output != "fp32") {
+        return std::nullopt;
+    }
+    if (!result.expected_bf16.empty() && result.input_bf16.empty()) {
         return std::nullopt;
     }
     return result;
@@ -341,7 +351,8 @@ int main(int argc, char** argv) {
         std::cerr << "usage: --artifact-dir DIR --layer N --expert N "
                      "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
                      "[--workspace-bytes N] [--resident-bytes N] [--precision fp32|bf16-rounded] "
-                     "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major|learned-expert-major|learned-moe-layer]\n";
+                     "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major|learned-expert-major|learned-moe-layer] "
+                     "[--input-bf16 FILE] [--expected-bf16 FILE]\n";
         return 2;
     }
     const auto paths = artifact_paths(arguments->artifact_dir);
@@ -390,6 +401,42 @@ int main(int argc, char** argv) {
     for (std::size_t index = 0; index < input.size(); ++index) {
         input[index] = static_cast<float>(static_cast<int>(index % 29) - 14) * 0.01F;
         if (arguments->precision == "bf16-rounded") input[index] = round_to_bf16(input[index]);
+    }
+    if (!arguments->input_bf16.empty()) {
+        if (arguments->precision != "bf16-rounded") {
+            std::cerr << "--input-bf16 requires --precision bf16-rounded\n";
+            return 7;
+        }
+        const auto activation = k3x::load_glm5x_bf16_activation(
+            arguments->input_bf16, static_cast<std::uint32_t>(arguments->tokens),
+            static_cast<std::uint32_t>(kHiddenSize));
+        if (!activation) {
+            std::cerr << k3x::error_code_name(activation.error()) << ": "
+                      << activation.message() << '\n';
+            return 7;
+        }
+        input = decode_bf16(activation.value().payload);
+        if (input.size() != input_value_count) {
+            std::cerr << "activation input shape mismatch\n";
+            return 7;
+        }
+    }
+    std::optional<std::vector<float>> expected_output;
+    if (!arguments->expected_bf16.empty()) {
+        const auto expected = k3x::load_glm5x_bf16_activation(
+            arguments->expected_bf16,
+            static_cast<std::uint32_t>(arguments->tokens),
+            static_cast<std::uint32_t>(kHiddenSize));
+        if (!expected) {
+            std::cerr << k3x::error_code_name(expected.error()) << ": "
+                      << expected.message() << '\n';
+            return 7;
+        }
+        expected_output = decode_bf16(expected.value().payload);
+        if (expected_output->size() != input_value_count) {
+            std::cerr << "activation expected shape mismatch\n";
+            return 7;
+        }
     }
     std::vector<k3x::ExpertMajorTokenRoute> learned_routes;
     std::vector<std::uint32_t> expert_ids;
@@ -799,6 +846,14 @@ int main(int argc, char** argv) {
     const auto stats_after = cuda.value()->runtime_stats();
     const auto cpu_abs = maximum_absolute_difference(actual, cpu_reference);
     const auto cpu_scale = std::max(maximum_absolute_value(cpu_reference), 1.0e-6F);
+    std::optional<float> expected_abs;
+    std::optional<float> expected_rel;
+    if (expected_output) {
+        expected_abs = maximum_absolute_difference(actual, *expected_output);
+        const auto expected_scale = std::max(
+            maximum_absolute_value(*expected_output), 1.0e-6F);
+        expected_rel = *expected_abs / expected_scale;
+    }
     std::cout << std::setprecision(12)
               << "{\"artifact_kind\":\""
               << ((expert_major || learned_route_mode)
@@ -837,6 +892,19 @@ int main(int argc, char** argv) {
               << ",\"latency_nanoseconds_median\":" << median(samples)
               << ",\"gpu_cpu_max_absolute_error\":" << cpu_abs
               << ",\"gpu_cpu_max_relative_error\":" << cpu_abs / cpu_scale
+              << ",\"expected_max_absolute_error\":";
+    if (expected_abs) {
+        std::cout << *expected_abs;
+    } else {
+        std::cout << "null";
+    }
+    std::cout << ",\"expected_max_relative_error\":";
+    if (expected_rel) {
+        std::cout << *expected_rel;
+    } else {
+        std::cout << "null";
+    }
+    std::cout
               << ",\"cold_weight_h2d_bytes\":"
               << stats_after_cold.weight_h2d_bytes
               << ",\"warm_weight_h2d_bytes\":"
