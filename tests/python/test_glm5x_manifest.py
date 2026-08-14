@@ -49,6 +49,24 @@ def test_manifest_reads_index_and_descriptor() -> None:
     )
 
 
+def test_manifest_resolves_shared_indexer_tensor_to_nearest_full_layer() -> None:
+    config = _config()
+    config["indexer_types"] = ["full", "shared"] + ["full"] * 76
+    index = {
+        "metadata": {"total_size": 1},
+        "weight_map": {
+            "model.layers.0.self_attn.indexer.wk.weight": "model-00001-of-00001.safetensors",
+        },
+    }
+    manifest = GLM5XTensorManifest.from_json(config, index)
+
+    assert manifest.indexer_source_layer(1) == 0
+    assert manifest.resolve_indexer_tensor(1, "wk.weight") == (
+        "model.layers.0.self_attn.indexer.wk.weight",
+        "model-00001-of-00001.safetensors",
+    )
+
+
 @pytest.mark.parametrize(
     "index, error",
     [
@@ -71,4 +89,3 @@ def test_manifest_rejects_incomplete_index(
 ) -> None:
     with pytest.raises(ValueError, match=error):
         GLM5XTensorManifest.from_json(_config(), index)
-

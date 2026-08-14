@@ -8,6 +8,11 @@ from typing import Mapping
 from .model import GLM5XModelDescriptor
 
 
+_INDEXER_COMPONENTS = frozenset(
+    {"k_norm.bias", "k_norm.weight", "weights_proj.weight", "wk.weight", "wq_b.weight"}
+)
+
+
 def _shard_name(value: object) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError("INVALID_SHARD_NAME")
@@ -34,6 +39,33 @@ class GLM5XTensorManifest:
     @property
     def shard_count(self) -> int:
         return len(self.shard_names)
+
+    def indexer_source_layer(self, layer_id: int) -> int:
+        if (
+            not isinstance(layer_id, int)
+            or isinstance(layer_id, bool)
+            or layer_id < 0
+            or layer_id >= self.descriptor.hidden_layers
+        ):
+            raise ValueError("INVALID_LAYER_ID")
+        if not self.descriptor.indexer_types:
+            return layer_id
+        if self.descriptor.indexer_types[layer_id] == "full":
+            return layer_id
+        for source in range(layer_id - 1, -1, -1):
+            if self.descriptor.indexer_types[source] == "full":
+                return source
+        raise ValueError("INDEXER_FULL_SOURCE_MISSING")
+
+    def resolve_indexer_tensor(self, layer_id: int, component: str) -> tuple[str, str]:
+        if component not in _INDEXER_COMPONENTS:
+            raise ValueError("INVALID_INDEXER_COMPONENT")
+        source_layer = self.indexer_source_layer(layer_id)
+        tensor_name = f"model.layers.{source_layer}.self_attn.indexer.{component}"
+        shard = dict(self.tensor_shards).get(tensor_name)
+        if shard is None:
+            raise ValueError("INDEXER_TENSOR_MISSING")
+        return tensor_name, shard
 
     @classmethod
     def from_json(
@@ -73,4 +105,3 @@ class GLM5XTensorManifest:
             shard_names=tuple(sorted(shard_names)),
             total_size=total_size,
         )
-

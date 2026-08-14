@@ -41,6 +41,17 @@ def _optional_bool(config: Mapping[str, object], key: str) -> bool:
     return value
 
 
+def _optional_string_tuple(
+    config: Mapping[str, object], key: str, allowed: set[str]
+) -> tuple[str, ...]:
+    value = config.get(key)
+    if value is None:
+        return ()
+    if not isinstance(value, list) or any(item not in allowed for item in value):
+        raise ValueError(f"INVALID_{key.upper()}")
+    return tuple(value)
+
+
 @dataclass(frozen=True)
 class GLM5XModelDescriptor:
     """모델 가중치와 runtime 정책 사이의 안정적인 GLM descriptor입니다."""
@@ -61,6 +72,7 @@ class GLM5XModelDescriptor:
     index_head_dim: int = 0
     index_share_for_mtp_iteration: bool = False
     max_position_embeddings: int = 0
+    indexer_types: tuple[str, ...] = ()
 
     @classmethod
     def from_config(cls, config: Mapping[str, object]) -> "GLM5XModelDescriptor":
@@ -90,10 +102,17 @@ class GLM5XModelDescriptor:
         if top_k > routed_experts:
             raise ValueError("INVALID_TOP_K")
 
+        hidden_layers = _positive_int(config, "num_hidden_layers")
+        indexer_types = _optional_string_tuple(
+            config, "indexer_types", {"full", "shared"}
+        )
+        if indexer_types and len(indexer_types) != hidden_layers:
+            raise ValueError("INVALID_INDEXER_TYPES_LENGTH")
+
         return cls(
             model_family="glm5",
             attention_kind="dsa",
-            hidden_layers=_positive_int(config, "num_hidden_layers"),
+            hidden_layers=hidden_layers,
             hidden_size=_positive_int(config, "hidden_size"),
             routed_experts=routed_experts,
             top_k=top_k,
@@ -117,4 +136,5 @@ class GLM5XModelDescriptor:
             max_position_embeddings=_optional_positive_int(
                 config, "max_position_embeddings"
             ),
+            indexer_types=indexer_types,
         )
