@@ -539,3 +539,15 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Mode: `GLM5XDecoderLayerReference.bundle_layer_loader`, one bundle open, two requests for the same layer.
 - Correctness/overhead contract: the monkeypatched open counter reported `1` bundle open for both layer requests; selected expert roles still loaded lazily through the verified bundle. Full Python passed `303 passed, 124 skipped`.
 - Performance/traffic: no tok/s, VRAM, RAM, NVMe, H2D, or quality metric was measured. The result removes repeated reader initialization but is not a throughput claim.
+
+## 2026-08-15 -- Lazy K3X payload/root admission on a real shard
+
+- Date: 2026-08-15.
+- Commit: `a726368`.
+- Hardware: Solidigm NVMe on the Windows host, measured through WSL2 Ubuntu-24.04 Python; no GPU execution.
+- Model/checkpoint: `zai-org/GLM-5.2`, `build-glm5x-hf-probe/first-shard.k3x`, 5,342,863,616 bytes, 35 tensors. No full checkpoint.
+- Strict mode: `K3XReader.open(verify_payloads=True, verify_root=True)` took `49.816001 s`.
+- Lazy mode: `verify_payloads=False, verify_root=False` opened and decoded directories in `0.003153 s`; reading the first selected tensor and performing its deferred CRC took `8.989272 s` for a `1,903,165,440`-byte payload.
+- Correctness: a one-byte mutation in lazy mode raised `DATA_CRC_MISMATCH` on first tensor read. Default eager mode and all existing bundle identity/CRC tests remain active.
+- Traffic/quality: no tok/s, TTFT, VRAM, system RAM, H2D, cache hit, or quality score was measured. The result is cold-start and selective-admission evidence only.
+- Status: experimental and opt-in. `verify_root=False` deliberately weakens whole-artifact integrity timing and is not a QUALITY default.

@@ -52,6 +52,7 @@
 - [x] Add multi-layer CPU decoder reference with final RMSNorm, LM-head logits, and incremental greedy parity.
 - [x] Add an opt-in per-layer loader contract so the reference model does not require all decoder layer weights in RAM.
 - [x] Reuse one validated bundle reader across per-layer reference loads instead of reopening artifacts for every layer.
+- [x] Add experimental lazy K3X payload/root admission with on-demand tensor CRC validation; keep eager correctness mode as default.
 - [x] Add a bundle-backed layer-10 loader that shares one validated reader across attention, indexer, norms, and lazy MoE experts.
 - [x] Separate official GLM SiLU gated MLP execution from the inherited legacy SiTU path and add CPU/CUDA parity coverage.
 - [x] Validate the real layer-10 `GLM5XACT` MoE input/output handoff with learned routing and BF16-boundary comparison.

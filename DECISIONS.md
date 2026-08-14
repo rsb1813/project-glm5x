@@ -376,3 +376,11 @@
 - Evidence: the bounded bundle test requested the same layer twice and observed exactly one `GLM5XExpertBundle.open` call; the full WSL Python suite passed `303 passed, 124 skipped`.
 - Accepted because: repeated root scans would directly multiply startup and layer-provider overhead, while reusing the already validated readers preserves artifact identity and expert CRC checks.
 - Revisit: after real 78-layer streaming measurements; add bounded reader lifetime and async prefetch only if they reduce deadline misses without increasing resident memory unexpectedly.
+
+## D-0048 -- Keep lazy payload/root admission experimental and opt-in
+
+- Decision: allow `K3XReader`/`GLM5XExpertBundle` to skip whole-file payload and root scans at open, then validate each selected tensor CRC on first read. Strict eager payload/root verification remains the default and the reference correctness path.
+- Alternatives: always scan every shard before the first token, skip all CRC checks in fast mode, or verify only the bundle JSON without checking selected payloads.
+- Evidence: on the real 5.34 GB first GLM shard, strict eager open took `49.816001 s`, while lazy directory open took `0.003153 s` and the first 1.90 GB tensor read/CRC took `8.989272 s`. A tampered lazy tensor raised `DATA_CRC_MISMATCH` on read; full Python passed `304 passed, 124 skipped`.
+- Accepted because: out-of-core startup cannot afford rereading every cold shard before knowing which layer/expert is needed, while first-use CRC preserves selected-payload correctness.
+- Revisit: after adding runtime recovery, optional deferred root verification, telemetry, and a measured 78-layer prefetch schedule. Do not promote `verify_root=False` to QUALITY mode without an integrity decision.
