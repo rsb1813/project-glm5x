@@ -2,8 +2,13 @@
 from __future__ import annotations
 
 import torch
+from safetensors.torch import save_file
 
+from glm5x_converter.bundle import assemble_glm5x_expert_bundle
+from glm5x_converter.shard import convert_glm5x_shard
 from glm5x_ref import GLM5XDecoderModelReference
+from glm5x_ref.layer10_moe import GLM5XDenseMlpReference, GLM5XLayer10MoEReference
+from glm5x_ref.manifest import GLM5XTensorManifest
 from test_glm5x_layer_reference import _make_layer
 
 
@@ -103,3 +108,148 @@ def test_model_reference_can_retain_trunk_layers_between_forwards() -> None:
     evicted_model.forward_tokens(torch.tensor([1, 2]))
     assert evicted_calls == [0, 1, 0, 1]
     assert evicted_model.cached_layer_count == 1
+
+
+def _add_tiny_bundle_layer(
+    names: dict[str, torch.Tensor],
+    layer_id: int,
+    *,
+    dense: bool,
+    include_indexer: bool,
+) -> None:
+    torch.manual_seed(200 + layer_id)
+    hidden_size = 8
+    heads = 2
+    q_rank = 4
+    kv_rank = 3
+    nope = 2
+    rope = 2
+    value = 2
+    intermediate = 3
+    prefix = f"model.layers.{layer_id}"
+    names.update(
+        {
+            f"{prefix}.input_layernorm.weight": torch.ones(hidden_size, dtype=torch.bfloat16),
+            f"{prefix}.post_attention_layernorm.weight": torch.ones(hidden_size, dtype=torch.bfloat16),
+            f"{prefix}.self_attn.q_a_proj.weight": torch.randn(q_rank, hidden_size).bfloat16(),
+            f"{prefix}.self_attn.q_a_layernorm.weight": torch.ones(q_rank, dtype=torch.bfloat16),
+            f"{prefix}.self_attn.q_b_proj.weight": torch.randn(heads * (nope + rope), q_rank).bfloat16(),
+            f"{prefix}.self_attn.kv_a_proj_with_mqa.weight": torch.randn(kv_rank + rope, hidden_size).bfloat16(),
+            f"{prefix}.self_attn.kv_a_layernorm.weight": torch.ones(kv_rank, dtype=torch.bfloat16),
+            f"{prefix}.self_attn.kv_b_proj.weight": torch.randn(heads * (nope + value), kv_rank).bfloat16(),
+            f"{prefix}.self_attn.o_proj.weight": torch.randn(hidden_size, heads * value).bfloat16(),
+        }
+    )
+    if include_indexer:
+        names.update(
+            {
+                f"{prefix}.self_attn.indexer.wq_b.weight": torch.randn(heads * 4, q_rank).bfloat16(),
+                f"{prefix}.self_attn.indexer.wk.weight": torch.randn(4, hidden_size).bfloat16(),
+                f"{prefix}.self_attn.indexer.k_norm.weight": torch.ones(4, dtype=torch.bfloat16),
+                f"{prefix}.self_attn.indexer.k_norm.bias": torch.zeros(4, dtype=torch.bfloat16),
+                f"{prefix}.self_attn.indexer.weights_proj.weight": torch.randn(heads, hidden_size).bfloat16(),
+            }
+        )
+    if dense:
+        names.update(
+            {
+                f"{prefix}.mlp.gate_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+                f"{prefix}.mlp.up_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+                f"{prefix}.mlp.down_proj.weight": torch.randn(hidden_size, intermediate).bfloat16(),
+            }
+        )
+        return
+    names.update(
+        {
+            f"{prefix}.mlp.gate.weight": torch.randn(2, hidden_size).bfloat16(),
+            f"{prefix}.mlp.gate.e_score_correction_bias": torch.zeros(2, dtype=torch.bfloat16),
+            f"{prefix}.mlp.shared_experts.gate_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+            f"{prefix}.mlp.shared_experts.up_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+            f"{prefix}.mlp.shared_experts.down_proj.weight": torch.randn(hidden_size, intermediate).bfloat16(),
+        }
+    )
+    for expert_id in range(2):
+        names.update(
+            {
+                f"{prefix}.mlp.experts.{expert_id}.gate_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+                f"{prefix}.mlp.experts.{expert_id}.up_proj.weight": torch.randn(intermediate, hidden_size).bfloat16(),
+                f"{prefix}.mlp.experts.{expert_id}.down_proj.weight": torch.randn(hidden_size, intermediate).bfloat16(),
+            }
+        )
+
+
+def test_model_reference_factory_loads_dense_sparse_and_shared_indexer_layers(tmp_path) -> None:
+    names: dict[str, torch.Tensor] = {
+        "model.embed_tokens.weight": torch.randn(16, 8).bfloat16(),
+        "model.norm.weight": torch.ones(8, dtype=torch.bfloat16),
+        "lm_head.weight": torch.randn(16, 8).bfloat16(),
+    }
+    _add_tiny_bundle_layer(names, 0, dense=True, include_indexer=True)
+    _add_tiny_bundle_layer(names, 1, dense=True, include_indexer=False)
+    _add_tiny_bundle_layer(names, 2, dense=False, include_indexer=True)
+    config: dict[str, object] = {
+        "architectures": ["GlmMoeDsaForCausalLM"],
+        "model_type": "glm_moe_dsa",
+        "num_hidden_layers": 3,
+        "hidden_size": 8,
+        "n_routed_experts": 2,
+        "num_experts_per_tok": 1,
+        "n_shared_experts": 1,
+        "moe_intermediate_size": 3,
+        "index_topk": 1,
+        "index_n_heads": 2,
+        "index_head_dim": 4,
+        "indexer_types": ["full", "shared", "full"],
+        "mlp_layer_types": ["dense", "dense", "sparse"],
+        "num_attention_heads": 2,
+        "q_lora_rank": 4,
+        "qk_nope_head_dim": 2,
+        "qk_rope_head_dim": 2,
+        "v_head_dim": 2,
+        "rms_norm_eps": 1e-5,
+        "rope_parameters": {"rope_theta": 10000.0},
+        "max_position_embeddings": 64,
+        "vocab_size": 16,
+        "num_nextn_predict_layers": 1,
+        "routed_scaling_factor": 2.5,
+    }
+    source = tmp_path / "model.safetensors"
+    save_file(names, str(source))
+    manifest = GLM5XTensorManifest.from_json(
+        config,
+        {
+            "metadata": {"total_size": source.stat().st_size},
+            "weight_map": {name: source.name for name in names},
+        },
+    )
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    convert_glm5x_shard(source, artifacts / "model.k3x", manifest, source.name)
+    bundle_path = artifacts / "experts.json"
+    assert assemble_glm5x_expert_bundle(artifacts, bundle_path).completed is True
+
+    model = GLM5XDecoderModelReference.from_bundle(
+        bundle_path,
+        config=config,
+        layer_cache_capacity=3,
+    )
+    forward = model.forward_tokens(torch.tensor([1, 2]))
+
+    assert isinstance(model._load_layer(0).moe, GLM5XDenseMlpReference)
+    assert isinstance(model._load_layer(1).moe, GLM5XDenseMlpReference)
+    assert isinstance(model._load_layer(2).moe, GLM5XLayer10MoEReference)
+    assert forward.layers[0].moe.topk_indices.shape[-1] == 0
+    assert forward.layers[1].moe.topk_indices.shape[-1] == 0
+    assert forward.layers[2].moe.topk_indices.shape[-1] == 1
+    assert forward.layers[2].moe.expert_load_count > 0
+
+    state = model.empty_state()
+    for index, token in enumerate((1, 2)):
+        step = model.forward_token(token, state)
+        torch.testing.assert_close(
+            step.logits,
+            forward.logits[:, index : index + 1],
+            rtol=1e-5,
+            atol=1e-5,
+        )
+        state = step.state

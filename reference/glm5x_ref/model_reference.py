@@ -3,11 +3,16 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from pathlib import Path
+from typing import Callable, Mapping, Sequence
 
 import torch
 
+from glm5x_converter.bundle import GLM5XExpertBundle
+
 from .layer_reference import GLM5XDecoderLayerForward, GLM5XDecoderLayerReference
+from .layer10_moe import GLM5XLayer10MoEReference, _collect_tensor_refs
+from .model import GLM5XModelDescriptor
 from .mla_dsa import GLM5XMLAState
 from .official_dsa import GLM5XOfficialDSAState
 
@@ -41,6 +46,61 @@ def _rope_embeddings(
     frequencies = positions[:, None] * inverse
     frequencies = torch.cat((frequencies, frequencies), dim=-1).view(1, count, rope_dim)
     return frequencies.cos(), frequencies.sin()
+
+
+def _positive_config_int(config: Mapping[str, object], key: str) -> int:
+    value = config.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"GLM5X_BUNDLE_CONFIG_{key.upper()}")
+    return value
+
+
+def _positive_config_float(
+    config: Mapping[str, object], key: str, *, default: float | None = None
+) -> float:
+    value = config.get(key, default)
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"GLM5X_BUNDLE_CONFIG_{key.upper()}")
+    return float(value)
+
+
+def _bundle_mlp_types(config: Mapping[str, object], layer_count: int) -> tuple[str, ...]:
+    raw_types = config.get("mlp_layer_types")
+    if raw_types is not None:
+        if (
+            not isinstance(raw_types, list)
+            or len(raw_types) != layer_count
+            or any(item not in {"dense", "sparse"} for item in raw_types)
+        ):
+            raise ValueError("GLM5X_BUNDLE_MLP_TYPES")
+        return tuple(str(item) for item in raw_types)
+    first_dense = config.get("first_k_dense_replace", 0)
+    if not isinstance(first_dense, int) or isinstance(first_dense, bool) or first_dense < 0:
+        raise ValueError("GLM5X_BUNDLE_FIRST_DENSE")
+    if first_dense > layer_count:
+        raise ValueError("GLM5X_BUNDLE_FIRST_DENSE")
+    return ("dense",) * first_dense + ("sparse",) * (layer_count - first_dense)
+
+
+def _bundle_indexer_sources(config: Mapping[str, object], layer_count: int) -> tuple[int, ...]:
+    raw_types = config.get("indexer_types")
+    if raw_types is None:
+        return tuple(range(layer_count))
+    if (
+        not isinstance(raw_types, list)
+        or len(raw_types) != layer_count
+        or any(item not in {"full", "shared"} for item in raw_types)
+    ):
+        raise ValueError("GLM5X_BUNDLE_INDEXER_TYPES")
+    sources: list[int] = []
+    for layer_id, indexer_type in enumerate(raw_types):
+        if indexer_type == "full":
+            sources.append(layer_id)
+            continue
+        if not sources:
+            raise ValueError("GLM5X_BUNDLE_INDEXER_SOURCE")
+        sources.append(sources[-1])
+    return tuple(sources)
 
 
 class GLM5XDecoderModelReference:
@@ -133,6 +193,109 @@ class GLM5XDecoderModelReference:
         instance.lm_head = lm_head
         instance.rope_theta = float(rope_theta)
         return instance
+
+    @classmethod
+    def from_bundle(
+        cls,
+        bundle_path: str | Path,
+        *,
+        config: Mapping[str, object],
+        embedding: torch.Tensor | None = None,
+        final_norm: torch.Tensor | None = None,
+        lm_head: torch.Tensor | None = None,
+        cache_experts: bool = False,
+        verify_payloads: bool = True,
+        verify_root: bool = True,
+        layer_cache_capacity: int = 0,
+    ) -> "GLM5XDecoderModelReference":
+        """Build an out-of-core model factory from one validated GLM bundle.
+
+        Embedding, final norm, and LM-head tensors are read once when they are
+        present in the bundle. Bounded probes may provide those three tensors
+        explicitly while still loading decoder layers from real artifacts.
+        Decoder layers remain provider-owned and are constructed only when
+        requested; dense/sparse MLP kind and shared indexer source are resolved
+        from the official configuration.
+        """
+        descriptor = GLM5XModelDescriptor.from_config(config)
+        layer_count = descriptor.hidden_layers
+        hidden_size = descriptor.hidden_size
+        num_heads = _positive_config_int(config, "num_attention_heads")
+        qk_nope_head_dim = _positive_config_int(config, "qk_nope_head_dim")
+        qk_rope_head_dim = _positive_config_int(config, "qk_rope_head_dim")
+        v_head_dim = _positive_config_int(config, "v_head_dim")
+        if descriptor.index_topk <= 0:
+            raise ValueError("GLM5X_BUNDLE_CONFIG_INDEX_TOPK")
+        if descriptor.moe_intermediate_size <= 0:
+            raise ValueError("GLM5X_BUNDLE_CONFIG_MOE_INTERMEDIATE_SIZE")
+        rms_norm_eps = _positive_config_float(config, "rms_norm_eps", default=1e-5)
+        routed_scaling_factor = _positive_config_float(
+            config, "routed_scaling_factor", default=2.5
+        )
+        rope_parameters = config.get("rope_parameters", {})
+        if not isinstance(rope_parameters, Mapping):
+            raise ValueError("GLM5X_BUNDLE_ROPE_PARAMETERS")
+        rope_theta_value = rope_parameters.get("rope_theta", config.get("rope_theta", 10000.0))
+        if not isinstance(rope_theta_value, (int, float)) or isinstance(rope_theta_value, bool):
+            raise ValueError("GLM5X_BUNDLE_ROPE_THETA")
+        rope_theta = float(rope_theta_value)
+        if rope_theta <= 0.0:
+            raise ValueError("GLM5X_BUNDLE_ROPE_THETA")
+        indexer_rope_interleave = config.get(
+            "indexer_rope_interleave", config.get("rope_interleave", True)
+        )
+        if not isinstance(indexer_rope_interleave, bool):
+            raise ValueError("GLM5X_BUNDLE_INDEXER_ROPE")
+        mlp_types = _bundle_mlp_types(config, layer_count)
+        indexer_sources = _bundle_indexer_sources(config, layer_count)
+
+        bundle = GLM5XExpertBundle.open(
+            bundle_path, verify_payloads=verify_payloads, verify_root=verify_root
+        )
+        tensor_refs = _collect_tensor_refs(bundle)
+        read = lambda name: GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)  # noqa: E731
+        if embedding is None:
+            embedding = read("model.embed_tokens.weight")
+        if final_norm is None:
+            final_norm = read("model.norm.weight")
+        if lm_head is None:
+            lm_head = read("lm_head.weight")
+
+        def load_layer(layer_id: int) -> GLM5XDecoderLayerReference:
+            if not isinstance(layer_id, int) or isinstance(layer_id, bool):
+                raise ValueError("GLM5X_BUNDLE_LAYER_ID")
+            if layer_id < 0 or layer_id >= layer_count:
+                raise ValueError("GLM5X_BUNDLE_LAYER_ID")
+            return GLM5XDecoderLayerReference.from_open_bundle(
+                bundle,
+                tensor_refs=tensor_refs,
+                layer_id=layer_id,
+                cache_experts=cache_experts,
+                num_heads=num_heads,
+                qk_nope_head_dim=qk_nope_head_dim,
+                qk_rope_head_dim=qk_rope_head_dim,
+                v_head_dim=v_head_dim,
+                index_topk=descriptor.index_topk,
+                top_k=descriptor.top_k,
+                routed_scaling_factor=routed_scaling_factor,
+                expert_intermediate_size=descriptor.moe_intermediate_size,
+                hidden_size=hidden_size,
+                rms_norm_eps=rms_norm_eps,
+                mlp_type=mlp_types[layer_id],
+                indexer_source_layer=indexer_sources[layer_id],
+                indexer_rope_interleave=indexer_rope_interleave,
+            )
+
+        return cls.from_layer_loader(
+            embedding=embedding,
+            layer_count=layer_count,
+            layer_loader=load_layer,
+            final_norm=final_norm,
+            lm_head=lm_head,
+            rope_dim=qk_rope_head_dim,
+            rope_theta=rope_theta,
+            layer_cache_capacity=layer_cache_capacity,
+        )
 
     @property
     def vocab_size(self) -> int:

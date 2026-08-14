@@ -80,6 +80,7 @@ class GLM5XDecoderLayerReference:
         verify_root: bool = True,
         mlp_type: str = "sparse",
         indexer_source_layer: int | None = None,
+        indexer_rope_interleave: bool = True,
     ) -> "GLM5XDecoderLayerReference":
         bundle = GLM5XExpertBundle.open(
             bundle_path, verify_payloads=verify_payloads, verify_root=verify_root
@@ -101,6 +102,7 @@ class GLM5XDecoderLayerReference:
             rms_norm_eps=rms_norm_eps,
             mlp_type=mlp_type,
             indexer_source_layer=indexer_source_layer,
+            indexer_rope_interleave=indexer_rope_interleave,
         )
 
     @classmethod
@@ -123,6 +125,7 @@ class GLM5XDecoderLayerReference:
         verify_root: bool = True,
         mlp_type: str = "sparse",
         indexer_source_layer: int | None = None,
+        indexer_rope_interleave: bool = True,
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
         """Open and validate one bundle once, then provide individual layers."""
         bundle = GLM5XExpertBundle.open(
@@ -148,6 +151,7 @@ class GLM5XDecoderLayerReference:
                 rms_norm_eps=rms_norm_eps,
                 mlp_type=mlp_type,
                 indexer_source_layer=indexer_source_layer,
+                indexer_rope_interleave=indexer_rope_interleave,
             )
 
         return load
@@ -172,6 +176,7 @@ class GLM5XDecoderLayerReference:
         rms_norm_eps: float = 1e-5,
         mlp_type: str = "sparse",
         indexer_source_layer: int | None = None,
+        indexer_rope_interleave: bool = True,
     ) -> "GLM5XDecoderLayerReference":
         if mlp_type not in {"dense", "sparse"}:
             raise ValueError("GLM5X_LAYER_MLP_TYPE")
@@ -204,7 +209,7 @@ class GLM5XDecoderLayerReference:
             weights_proj=read(f"{indexer_prefix}.weights_proj.weight"),
             qk_rope_head_dim=qk_rope_head_dim,
             index_topk=index_topk,
-            indexer_rope_interleave=True,
+            indexer_rope_interleave=indexer_rope_interleave,
         )
         if mlp_type == "dense":
             moe = GLM5XDenseMlpReference(
