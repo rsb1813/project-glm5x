@@ -233,7 +233,7 @@
 
 ## 2026-08-14 -- Learned GLM MoE sublayer CUDA boundary
 
-- Commit `c1b7926` adds `learned-moe-layer`. It loads the real layer-10 shared expert (`gate_proj`, `up_proj`, `down_proj`) in addition to the selected routed union, executes routed expert-major scatter plus shared raw-BF16 grid, and compares the sum with the CPU dense reference.
+- Commit `8017bd2` adds `learned-moe-layer`. It loads the real layer-10 shared expert (`gate_proj`, `up_proj`, `down_proj`) in addition to the selected routed union, executes routed expert-major scatter plus shared raw-BF16 grid, and compares the sum with the CPU dense reference.
 - With two tokens and a 2 GiB resident budget, 15 routed experts plus one shared expert used `1,207,959,552` resident bytes and measured `2,155,188 ns` warm median/block. Maximum CPU-relative difference was `0.000585675588809` and warm weight H2D was `0`.
 - With four tokens and a 4 GiB budget, 29 routed experts plus one shared expert used `2,264,924,160` resident bytes and measured `3,968,243 ns` warm median/block. Maximum CPU-relative difference was `0.000429985491792` and warm weight H2D was `0`.
 - The opt-in BF16-output cross-check measured `2,374,827 ns` for two tokens and `0.00111866334919` maximum CPU-relative difference, so FP32 output remains the default for this boundary.

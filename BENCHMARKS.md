@@ -439,7 +439,7 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 
 ## 2026-08-14 -- Learned GLM MoE sublayer with shared expert
 
-- Commit: `c1b7926`.
+- Commit: `8017bd2`.
 - Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL on the configured target PC.
 - Model/checkpoint: five bounded `zai-org/GLM-5.2` probe artifacts, complete layer 10; no full checkpoint.
 - Mode: `k3x_cuda_glm5x_real_expert_bench --input-mode learned-moe-layer`, official sigmoid natural Top-8, routed scale 2.5, raw-BF16 expert-major routed scatter plus the real shared-expert raw-BF16 grid, FP32 output, 20 warmups and 100 measured iterations, synchronous transfers.
