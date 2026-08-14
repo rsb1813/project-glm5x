@@ -368,3 +368,11 @@
 - Evidence: the two-layer loader test observed exactly `[0, 1]` requests and returned the same logits/state contract as the eager model. WSL passed `303 passed, 124 skipped`, host CTest `15/15`, and CUDA CTest `27/27`.
 - Accepted because: a full GLM-5.2 checkpoint cannot be assumed to fit a single resident tier, and the loader boundary makes layer-at-a-time conversion/admission testable without changing natural routing.
 - Revisit: when real all-layer tensors are available; add bounded layer cache, pinned staging, transfer deadlines, and a CUDA provider only after measurements show they reduce stalls without changing logits.
+
+## D-0047 -- Reuse one verified bundle reader for layer providers
+
+- Decision: expose `GLM5XDecoderLayerReference.bundle_layer_loader`, which opens the cross-shard bundle once and closes over its verified readers and tensor-reference map. Each call still constructs only the requested layer and keeps selected expert payloads lazy.
+- Alternatives: call `from_bundle` for every layer, copy all layer tensors into a model-wide map, or bypass bundle identity/CRC checks in a fast path.
+- Evidence: the bounded bundle test requested the same layer twice and observed exactly one `GLM5XExpertBundle.open` call; the full WSL Python suite passed `303 passed, 124 skipped`.
+- Accepted because: repeated root scans would directly multiply startup and layer-provider overhead, while reusing the already validated readers preserves artifact identity and expert CRC checks.
+- Revisit: after real 78-layer streaming measurements; add bounded reader lifetime and async prefetch only if they reduce deadline misses without increasing resident memory unexpectedly.

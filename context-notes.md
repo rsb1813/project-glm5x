@@ -302,3 +302,9 @@
 - Added `GLM5XDecoderModelReference.from_layer_loader`. The model keeps embedding/final-logit tensors plus recurrent per-layer MLA/DSA state, while requesting a decoder layer by ID only during a forward.
 - The focused loader test verifies a two-layer forward calls IDs `[0, 1]` and returns both layer records. WSL full Python passed `303 passed, 124 skipped`; WSL host/CUDA CTest remained `15/15` and `27/27`.
 - This is a residency contract, not a performance claim. The next step is a real-shard layer provider that reads only the selected layer and its routed expert union, then overlaps its transfer with the preceding layer.
+
+## 2026-08-15 -- Reuse cross-shard bundle readers
+
+- Added `GLM5XDecoderLayerReference.bundle_layer_loader`. It opens the bundle and builds the tensor-reference map once, then creates requested layer objects against the same verified readers; expert payloads remain lazy.
+- The bounded bundle test requested the same layer twice and observed one bundle open, while full Python stayed green at `303 passed, 124 skipped`.
+- This removes repeated root verification from the reference layer provider but does not claim a tok/s gain; real layer admission and CUDA overlap remain the next performance boundary.

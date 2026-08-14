@@ -530,3 +530,12 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Correctness: the loader was called exactly in order `[0, 1]`; output contains both layer forwards. Full WSL Python passed `303 passed, 124 skipped` in `70.47 s`; WSL host CTest `15/15` and CUDA CTest `27/27` passed.
 - Performance/traffic: no tok/s, VRAM, RAM, NVMe, H2D, or quality result was measured. The test proves the residency contract only.
 - Interpretation: layer weights can now be supplied lazily without changing model-level state semantics. A real-shard provider and async transfer overlap are the next measurable boundaries.
+
+## 2026-08-15 -- Cross-shard bundle reader reuse
+
+- Date: 2026-08-15.
+- Commit: `75dc00c`.
+- Hardware/model: WSL2 Ubuntu-24.04 CPU reference and the bounded synthetic bundle fixture; no full checkpoint.
+- Mode: `GLM5XDecoderLayerReference.bundle_layer_loader`, one bundle open, two requests for the same layer.
+- Correctness/overhead contract: the monkeypatched open counter reported `1` bundle open for both layer requests; selected expert roles still loaded lazily through the verified bundle. Full Python passed `303 passed, 124 skipped`.
+- Performance/traffic: no tok/s, VRAM, RAM, NVMe, H2D, or quality metric was measured. The result removes repeated reader initialization but is not a throughput claim.
