@@ -4,10 +4,11 @@
 
 GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a multi-layer CPU reference with final logits and greedy incremental parity, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, an explicit GLM SiLU path, on-demand model layer loading, shared bundle readers, opt-in lazy payload validation, opt-in bounded trunk-layer caching, an explicit dense-MLP path for the first three GLM-5.2 layers, a configuration-driven all-layer bundle factory, CUDA device staging/parity, resumable local full-checkpoint streaming, lazy final bundle indexing, marker-aware resume without redownloading completed shards, and disjoint local shard-range workers are implemented. The current verified implementation/docs commit is `543f185`; public Linux correctness `31837469436` and CodeQL `31837469517` are green. As of 2026-08-15 05:17 KST, 32 of 282 real shards had finalized at the documentation snapshot; the live conversion has since advanced to 35. Three workers produced 22 new artifacts in 37m39s at the recorded snapshot, an aggregate sample of approximately 35.1 shards/hour. This projects roughly 7.1 hours for the remaining 250 shards at that snapshot, with a conservative 7.5–9 hour window including variance, plus final indexing and full-model correctness gates; it is not a guaranteed completion time. Full real-checkpoint logits, MTP, CUDA final logits, and end-to-end tok/s remain unmeasured.
 
-## Current live snapshot -- 2026-08-15 05:17 KST
+## Current live snapshot -- 2026-08-15 06:00 KST
 
 - Local source/output: `build-glm5x-full-source` -> `build-glm5x-full-k3x`; three WSL2 Ubuntu-24.04 workers own non-overlapping ranges `10..100`, `101..191`, and `192..281`.
-- Materialization: 32/282 `.k3x` artifacts and 32/282 atomic source-deleted markers are present. Active workers keep only bounded in-progress source files and interruption-safe `.part` state; completed sources are not redownloaded.
+- Materialization: 57/282 `.k3x` artifacts and 57/282 atomic source-deleted markers are present. Active workers keep only bounded in-progress source files and interruption-safe `.part` state; completed sources are not redownloaded.
+- Live conversion refresh: 47 artifacts were produced after the 04:39:53 three-worker launch, ending at 06:00:02. The observed aggregate remains approximately 35.1 shards/hour, leaving 225 shards and roughly 6.4 hours at that rate; plan 6.5--7.5 hours for variance and retries.
 - Storage: C: has approximately 1.550 TB decimal free at this snapshot. The official GLM-5.2 source byte total is approximately 1.507 TB, so the streaming layout has a measured positive margin, but final assembly must not create a second full payload copy and free space must be rechecked.
 - Conversion estimate: 22 artifacts completed after the parallel launch at 04:39:53, ending at 05:17:32. The 35.1-shards/hour sample implies about 7.1 hours for the remaining 250 artifacts; a conservative planning window is 7.5–9 hours because network, NTFS, and retry behavior are not stationary.
 - Execution estimate: after conversion, lazy bundle indexing is a short metadata step. First full-model reference logits still require an all-layer/final-head gate, and full CUDA hidden-state handoff, asynchronous residency, and a real RTX 5080 tok/s run remain separate engineering gates. No end-to-end execution time or tok/s is claimed yet.
@@ -53,6 +54,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Added `GLM5XDSAConfig`, `GLM5XDSAIndexer`, and `GLM5XDSAState`, connecting descriptor index metadata and explicit query/key projections to compressed KV blocks, exact top-k refresh, and a separately marked stale fast refresh cadence.
 - Added `GLM5XOfficialDSAIndexer` with official-shaped `wq_b/wk/k_norm/weights_proj` tensors, interleaved/non-interleaved indexer RoPE, ReLU score aggregation, causal masking, and Top-K reference parity. Its safetensors loader reads only the five indexer tensors needed for a selected layer.
 - Added `GLM5XLayer10MoEReference` with official sigmoid routing, exact Top-8 normalization/routed scale, shared SwiGLU, and lazy exact raw-BF16 expert loading from the copy-free bundle.
+- Added an opt-in reference expert-major MoE execution mode, propagated through decoder-layer and model factories. The loop reference remains the default; parity and real RTX 5080 trade-offs are recorded in `BENCHMARKS.md`.
 - Added `GLM5XMLAReference`, incremental compressed MLA state, official causal DSA state, and `GLM5XDecoderLayerReference` with full-vs-incremental parity and bundle-backed attention/indexer/norm/MoE construction.
 - Added `GLM5XDecoderModelReference` with per-layer MLA/DSA state, final RMSNorm, LM-head logits, prompt prefill, one-token continuation, and greedy generation parity over a synthetic two-layer graph.
 - Reused one root-verified `GLM5XExpertBundle` reader across the layer loader and lazy MoE closure; the real five-shard construction smoke fell from 491.483777 s to 250.637263 s.
@@ -87,7 +89,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 
 ## Known blockers
 
-- Full GLM-5.2 local materialization is in progress. 32 of 282 shards are finalized as verified `.k3x` artifacts and their source-deleted markers are present; full checkpoint correctness and local TPS are not measured yet.
+- Full GLM-5.2 local materialization is in progress. 57 of 282 shards are finalized as verified `.k3x` artifacts and their source-deleted markers are present; full checkpoint correctness and local TPS are not measured yet.
 - The reference MXFP4 encoder is not a production weight path yet. A real layer-10 expert's three projections compressed to 26.56% of BF16 storage, while FFN relative L2 error remained 19.86% (`max_abs`) or 19.07% (`mse`).
 - No Cloud Run conversion or paid resource has been authorized or attempted. The active stream is local and uses resumable HTTP-range downloads with one-shard-at-a-time conversion.
 - Current Dependabot state: PRs 1-4 were closed after their setup-python, checkout, numpy, and setuptools bumps were integrated and verified on `a3fb8a8`; the repository Dependabot security-alert endpoint is disabled, so no CVE alert was verified.
@@ -96,6 +98,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - CUDA build and bounded RTX 5080 kernel measurements are validated in WSL; native Linux end-to-end throughput has not been measured.
 - The TurboQuant implementation is CPU/reference only; it does not yet contain a packed CUDA kernel or full PolarQuant/QJL production path.
 - 600k/1M capacity is a formula estimate only until a real GLM-5.2 DSA state is allocated and restored.
+- The Python expert-major experiment temporarily stacks selected real expert weights and added about 1.97 GB peak VRAM in the four-token probe; it is not safe as a default 16 GB runtime policy until a resident-weight-aware C++ path replaces the temporary stack.
 
 ## Hardware assumptions
 
@@ -107,7 +110,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 
 ## Latest verified state
 
-- Focused GLM descriptor, manifest, CLI, toy/reference graph, TurboQuant, DSA, official indexer, shard-converter, bundle loader, exact MLA/DSA layer/model reference, dense first-three-layer path, configuration-driven bundle factory, lazy layer/bundle admission, bounded trunk-layer caching, device staging, source-deletion resume, and multi-shard tests: `311 passed, 124 skipped` in WSL Python (`79.98 s`). Host CTest is `15/15`. CUDA layer/model parity tests pass in WSL; the Windows Python interpreter still lacks pytest.
+- Focused GLM descriptor, manifest, CLI, toy/reference graph, TurboQuant, DSA, official indexer, shard-converter, bundle loader, exact MLA/DSA layer/model reference, dense first-three-layer path, configuration-driven bundle factory, lazy layer/bundle admission, bounded trunk-layer caching, device staging, source-deletion resume, expert-major reference mode, and multi-shard tests: `319 passed, 124 skipped` in WSL Python (`132.68 s`). Host CTest remains green. CUDA layer/model parity tests pass in WSL; the Windows Python interpreter still lacks pytest.
 - CUDA CMake build: successful in WSL with CUDA 13.3 and RTX 5080 compute capability 12.0.
 - CTest: 27/27 tests passed in WSL, including `glm5x_activation`.
 - CPU WSL CTest: 15/15 tests passed after the expert-major CUDA API change.

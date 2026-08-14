@@ -399,3 +399,10 @@
 - Added a chunked reference encoder for native E2M1/E8M0 payloads with explicit `max_abs` and `mse` scale modes. Focused tests passed `11/11`; the full WSL Python suite passed `318 passed, 124 skipped` in `141.53 s`.
 - On real layer-10 expert 4, three BF16 projections shrank from `75,497,472` to `20,054,016` bytes (`26.5625%`). Max-abs scales produced `19.861969%` FFN relative L2 error; MSE scales produced `19.069034%` while taking `7.439 s` instead of `0.442 s` for the three projections.
 - The encoder is deliberately not connected to conversion or the default runtime. The next quantization task is calibrated outlier/mixed-precision storage, with exact raw-BF16 reference retained for quality comparisons.
+
+## 2026-08-15 -- Reference expert-major batching gate
+
+- Added an explicit `execution_mode` switch to the GLM5X reference MoE, decoder-layer factory, and model factory. The default loop path is unchanged; the new expert-major path batches selected assignments with `torch.bmm` and retains the exact route/scatter contract.
+- Focused parity passed `11/11`; the full WSL Python suite passed `319 passed, 124 skipped` in `132.68 s`.
+- Real RTX 5080 evidence was mixed: four-token direct MoE improved from `21.670 ms` to `18.652 ms`, but one-token direct MoE worsened from `5.584 ms` to `7.359 ms`, and the full four-token layer worsened from `18.676 ms` to `20.082 ms`.
+- The grouped path temporarily allocates about `1.97 GB` for stacked weights on the four-token probe. Keep it opt-in and pursue the resident-weight-aware C++ expert-major path for production.

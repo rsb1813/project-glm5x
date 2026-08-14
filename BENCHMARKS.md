@@ -651,3 +651,15 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - `mse` mode: all three projections encoded in `7.439 s`; weight relative L2 was `11.127%`, `11.125%`, and `11.116%`; FFN output max absolute error was `0.0018991`, mean absolute error `0.00036631`, and relative L2 error `19.069034%`.
 - Correctness: both encoded payloads decoded to valid native MXFP4 shapes and passed the focused round-trip suite; the full WSL Python suite passed `318 passed, 124 skipped` in `141.53 s`.
 - Interpretation: the compression ratio is promising for bandwidth, but uncalibrated BF16-to-MXFP4 quality is not acceptable as a default. No converter/runtime integration, full-model quality score, or end-to-end tok/s is claimed.
+
+## 2026-08-15 -- Reference expert-major MoE batching gate
+
+- Date: 2026-08-15.
+- Commit: `553a2a1`.
+- Hardware/model: RTX 5080, WSL2 Ubuntu-24.04, CUDA 13.3, official GLM-5.2 layer-10 partial bundle, exact raw-BF16 expert roles, no full checkpoint.
+- Correctness: `tests/python/test_glm5x_layer10_moe.py`, layer-reference, and model-reference focused tests passed `11/11`; the full WSL Python suite passed `319 passed, 124 skipped` in `132.68 s`. Router logits, Top-8 indices/weights, loaded-expert order, and output parity were checked between loop and expert-major modes.
+- Four-token MoE sublayer: loop warm median `21.670 ms`; expert-major warm median `18.652 ms`; selected expert union `26`; output maximum absolute difference `0.03125` at BF16 boundary.
+- One-token MoE sublayer: loop warm median `5.584 ms`; expert-major warm median `7.359 ms`; selected expert union `8`; output maximum absolute difference `0.015625` at BF16 boundary.
+- Four-token full layer: loop warm median `18.676 ms`; expert-major warm median `20.082 ms`; this is a reference-layer timing, not decode tok/s.
+- Memory: loop added about `0.20 MB` peak over its cached baseline; expert-major added about `1.97 GB` peak because it stacks selected expert weights for batched `bmm`.
+- Interpretation: the grouped reference path is an opt-in experiment only. It is not enabled by default, not a full-model throughput result, and not a reason to claim a 15--25 tok/s target.
