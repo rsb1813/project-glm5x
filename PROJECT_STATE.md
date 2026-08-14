@@ -12,7 +12,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Storage: C: has approximately 1.106 TB decimal free; the current K3X output is approximately 0.622 TB and the active source remainder is bounded. The projected final output still fits with an estimated roughly 0.12--0.16 TB margin, but free space must be rechecked before final assembly.
 - Conversion estimate: at the observed range, shard conversion reaches 282 around 11:45--12:30 KST. Lazy bundle indexing and the first cold/cached CUDA reference gates add an unmeasured but expected short post-conversion phase; the first complete-run window is therefore approximately 12:00--13:30 KST.
 - Execution estimate: after conversion, lazy bundle indexing is a short metadata step. First full-model reference logits still require an all-layer/final-head gate, and full CUDA hidden-state handoff, asynchronous residency, and a real RTX 5080 tok/s run remain separate engineering gates. No end-to-end execution time or tok/s is claimed yet.
-- GitHub: `d4ab056` Linux correctness `31846309527` and CodeQL `31846309591` both completed successfully. The recurring red Linux notifications point to stale run `31795400168` on `b94c8b8`, not an active failure on `main`.
+- GitHub: `8618eec` Linux correctness `31847213944` and CodeQL `31847213842` both completed successfully. The recurring red Linux notifications point to stale run `31795400168` on `b94c8b8`, not an active failure on `main`.
 - Dependency status: Dependabot update PRs 1-4 are closed after their changes were integrated. Repository Dependabot security alerts are disabled, so the API returns `403` and cannot establish a vulnerability count.
 
 ## Completed
