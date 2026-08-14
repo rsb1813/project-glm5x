@@ -33,6 +33,7 @@
 - [x] Measure the real 8-expert/4-token BF16 grid on the RTX 5080 probe artifacts.
 - [x] Add direct raw-BF16 resident admission without FP32 conversion for the expert grid.
 - [x] Batch multi-expert raw-BF16 projections with pointer-array GEMM and retain a scalar single-expert path.
+- [x] Add and parity-test an opt-in BF16-output raw resident grid; keep FP32 output as the default.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [ ] Validate BF16 dequantized execution against nonzero real GLM shard data and quality metrics.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.

@@ -29,6 +29,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - Extended the real-expert benchmark with `--tokens`; 8 real experts over 4 candidate tokens now run through the BF16 grid while FP32 keeps the scalar numerical reference path.
 - Added direct `RawBf16MlpView` admission so selected `.k3x` BF16 expert bytes do not pass through FP32 staging; the real probe decodes only the last expert for CPU comparison.
 - Added cublasLt pointer-array batching for multi-expert raw BF16 grids, reducing three projection phases to three batched GEMM calls plus one SiTU launch; the single-expert path remains scalar.
+- Added an opt-in BF16-output raw grid path that keeps projection intermediates and final device output in BF16, with a separate BF16 SiTU kernel; FP32 output remains the default reference path.
 - Added and measured `k3x_cuda_glm5x_moe_bench` on the real RTX 5080 at GLM-5.2 expert dimensions.
 - Added an expert-major candidate-token benchmark mode for 1/2/4/8 tokens.
 - Added resident exact MXFP4 reuse to the CUDA expert-major batch backend and allowed resident weights in the CLI validation contract.
@@ -44,6 +45,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - Connect the real expert-major grid to exact GLM DSA/MTP state and retain strict natural Top-8 verification.
 - Validate nonzero full-layer routing/MLA/DSA parity and measure VRAM-bank pressure before considering BF16 grid mode a default.
 - Replace host float decode plus conversion with direct raw-BF16/tensor-core storage views where quality permits.
+- Measure whether BF16-output resident grids remain inside the chosen quality budget on nonzero full-layer GLM data.
 
 ## Known blockers
 
@@ -77,6 +79,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - Real expert-major gate: 8 real layer-10 experts over 4 candidate tokens measured 1,758,739 ns BF16 grid warm median (approximately 439,685 ns per candidate), 603,979,776 resident bytes, zero warm H2D, and 0.1351% maximum relative CPU error.
 - Direct raw-BF16 gate: the same 8-expert/4-token probe measured 1,648,927 ns warm median (approximately 412,232 ns per candidate), 135,877,327 ns cold, 603,979,776 resident bytes, zero warm H2D, and unchanged 0.1351% maximum relative CPU error.
 - Pointer-array gate: the same 8-expert/4-token probe measured 1,065,026 ns warm median (approximately 266,257 ns per candidate), 153,395,924 ns cold, 603,979,776 resident bytes, zero warm H2D, four grid launches/call, and 0.1359% maximum relative CPU error.
+- BF16-output gate: paired 8-expert/4-token real-shard runs measured 1,034,950 ns warm median versus 1,091,122 ns with FP32 output; maximum CPU-relative error was 0.3167% versus 0.1359%. This is an opt-in bounded FFN experiment, not a model tok/s result.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
@@ -88,5 +91,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
-- Last known-good code HEAD: `d36ad21` (`bench: expose resident grid batch telemetry`). Focused Python and WSL CTest gates are green.
+- Last known-good code HEAD: `95f596d` (`perf: add optional bf16 resident grid outputs`). Focused Python and WSL CTest gates are green.
 - Next bottleneck: pinned/asynchronous raw H2D, direct tensor-core algorithm selection, q-residual production projection, exact MLA/DSA state, natural Top-8 routing, nonzero full-layer parity, and VRAM-pressure-aware multi-expert residency; full weights remain intentionally absent.

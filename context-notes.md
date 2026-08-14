@@ -159,3 +159,10 @@
 - The 2-expert nonzero CUDA regression now checks the pointer descriptor transfer counter (`144` bytes for its three pointer sets) and four kernel launches. Full WSL CTest remains 26/26 and focused GLM Python remains 35/35.
 - Isolated real-shard rerun: 8 experts x 4 tokens measured 1,065,026 ns warm median, 153,395,924 ns cold, 603,979,776 resident bytes, zero warm H2D, and 0.1359% maximum relative CPU error. The latest direct raw per-expert run was 1,648,927 ns warm, so the hot block improved by about 35.4%.
 - Single-expert measurements remained on the scalar plan because pointer-array setup was slower. The next bottleneck is pinned/asynchronous staging and full GLM layer integration, not another unverified TPS extrapolation.
+
+## 2026-08-14 BF16 resident-grid output experiment
+
+- Added `CudaBf16OutputMode` with `fp32` as the default and `bf16` as an explicit raw-grid experiment. Gate/up/down cublasLt outputs use BF16 layouts in the experimental mode; a separate BF16 SiTU kernel keeps the intermediate activation in BF16; the public result is converted back to float only after the final D2H copy.
+- `test_cuda_dense` now checks the BF16-output path against the rounded CPU reference and checks the halved physical D2H byte count on the two-expert fixture. The focused CUDA regression passed after the change.
+- Paired real-shard probe on RTX 5080: FP32 output 1,091,122 ns warm median and 0.135860% maximum relative CPU difference; BF16 output 1,034,950 ns and 0.316691% difference. The speed improvement is modest and the error increases, so the default remains FP32.
+- This is a bounded FFN-block experiment. It does not justify a full-model tok/s estimate or automatic quality-mode promotion.

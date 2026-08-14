@@ -294,3 +294,15 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Relative result: this rerun was 1.26x faster for warm BF16 grid latency, while resident selected-weight memory was 3.76x larger. The cold BF16 admission was roughly 3.77x the native payload and is not on the per-token hot path after residency.
 - Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, average Top-K, speculative acceptance, and task quality: not measured.
 - Interpretation: this is a bounded kernel/layer rerun only. The run-to-run latency differs from the earlier sample, so the repository records both samples instead of replacing history; no end-to-end GLM throughput or quality claim follows.
+
+## 2026-08-14 -- Opt-in BF16-output real expert grid
+
+- Commit: `95f596d`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: two bounded `zai-org/GLM-5.2` probe artifacts; layer 10, experts 0-7, exact raw BF16 role bytes. No full checkpoint.
+- Mode: raw-BF16 resident pointer-array grid, 4 candidate tokens, 10 warmups, 30 measured iterations. Paired runs changed only `--output fp32` versus `--output bf16`; native routing, proxy, pruning, and speculation were not involved.
+- FP32-output result: 1,091,122 ns warm median per 8-expert/4-token block, 1,065,026 ns in the earlier pointer-array sample, 603,979,776 resident weight bytes, zero warm weight H2D, and 0.00135860045 maximum CPU-relative difference in the paired command.
+- BF16-output result: 1,034,950 ns warm median per block, 603,979,776 resident weight bytes, zero warm weight H2D, and 0.00316690677 maximum CPU-relative difference. Gate/up/down intermediate and final device output buffers use BF16; the public result is converted to float after D2H.
+- Relative result: BF16 output was approximately 5.1% faster than the paired FP32-output run and halves the physical final D2H bytes. The higher numerical difference keeps the mode experimental and opt-in.
+- Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, cache hit rate, natural average Top-K, speculative acceptance, and task quality: not measured.
+- Caveat: this is one FFN block over bounded real shards. It does not establish full-layer, end-to-end, or 10+ tok/s performance.

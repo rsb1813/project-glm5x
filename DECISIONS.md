@@ -200,3 +200,11 @@
 - Evidence: the 8-expert/4-token real-shard probe on RTX 5080 measured 1,065,026 ns warm median with 4 resident-grid launches/call and 576 pointer-descriptor bytes/call, versus 1,648,927 ns for the direct raw per-expert path. CPU maximum relative error remained 0.00135860045. The nonzero CUDA regression and full CTest suite passed.
 - Accepted because: it removes 24 expert-level projection launches from the hot block while preserving the same resident bytes, input/output layout, and raw source payloads. The one-expert branch avoids the measured pointer-array setup penalty.
 - Revisit: after pinned pointer staging, direct tensor-core algorithm profiling, larger candidate blocks, and full-layer quality parity.
+
+## D-0026 -- Keep BF16 resident-grid output as an opt-in experiment
+
+- Decision: add `CudaBf16OutputMode::bf16` for the raw BF16 resident grid, but keep `fp32` output as the default and do not enable it in quality modes automatically.
+- Alternatives: make BF16 output the default, retain FP32 intermediates and output only, or quantize the raw expert payloads further.
+- Evidence: on the RTX 5080 with the two real probe artifacts, 8 experts x 4 tokens measured 1,034,950 ns warm median with BF16 output versus 1,091,122 ns in the paired FP32-output run. The maximum CPU-relative difference was 0.00316690677 (0.317%) for BF16 output versus 0.00135860045 (0.136%) for FP32 output. The physical final output transfer is halved.
+- Accepted because: BF16 output removes a measured memory-traffic component without changing routing or source weights, and the reference mode remains one option away. It is not a quality-preserving default until a full GLM layer and model-level comparison exists.
+- Revisit: after direct tensor-core algorithm profiling, full natural Top-8 routing, nonzero attention/trunk parity, and task-quality evaluation. Promote only if quality divergence stays within the selected quality-mode budget.
