@@ -137,6 +137,26 @@ def test_glm5x_mla_incremental_state_matches_prefill_last_token() -> None:
     assert last.state.kv_nope.shape[-2] == 4
 
 
+def test_glm5x_mla_reuses_precomputed_q_residual_without_output_drift() -> None:
+    sample = _synthetic_mla()
+    model = GLM5XMLAReference(sample.weights)
+    q_resid = model.q_residual(sample.hidden)
+    baseline = model(
+        sample.hidden,
+        (sample.cos, sample.sin),
+        position_ids=torch.arange(4).view(1, 4),
+    )
+    reused = model(
+        sample.hidden,
+        (sample.cos, sample.sin),
+        position_ids=torch.arange(4).view(1, 4),
+        q_residual=q_resid,
+    )
+    torch.testing.assert_close(reused.q_resid, q_resid)
+    torch.testing.assert_close(reused.output, baseline.output)
+    torch.testing.assert_close(reused.state.kv_nope, baseline.state.kv_nope)
+
+
 def _synthetic_indexer() -> GLM5XOfficialDSAIndexer:
     torch.manual_seed(23)
     return GLM5XOfficialDSAIndexer(

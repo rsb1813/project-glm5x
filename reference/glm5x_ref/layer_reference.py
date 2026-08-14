@@ -317,6 +317,7 @@ class GLM5XDecoderLayerReference:
             position_ids=position_ids,
             state=attention_state,
             topk_indices=topk_indices,
+            q_residual=q_resid,
         )
         post_attention = hidden_states + attention.output
         moe_input = _rms_norm(

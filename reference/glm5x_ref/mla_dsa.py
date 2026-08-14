@@ -177,6 +177,7 @@ class GLM5XMLAReference:
         position_ids: torch.Tensor | None = None,
         state: GLM5XMLAState | None = None,
         topk_indices: torch.Tensor | None = None,
+        q_residual: torch.Tensor | None = None,
     ) -> GLM5XMLAForward:
         hidden_states = torch.as_tensor(hidden_states)
         if hidden_states.ndim != 3 or hidden_states.shape[-1] != self.weights.hidden_size:
@@ -194,7 +195,12 @@ class GLM5XMLAReference:
             if position_ids.shape != (batch_size, seq_length):
                 raise ValueError("GLM5X_MLA_POSITION_ID_SHAPE")
 
-        q_resid = self.q_residual(hidden_states)
+        if q_residual is None:
+            q_resid = self.q_residual(hidden_states)
+        else:
+            q_resid = torch.as_tensor(q_residual, device=hidden_states.device)
+            if q_resid.shape != (batch_size, seq_length, self.weights.q_lora_rank):
+                raise ValueError("GLM5X_MLA_Q_RESIDUAL_SHAPE")
         qk_head_dim = self.weights.qk_nope_head_dim + self.weights.qk_rope_head_dim
         q_states = self._linear(q_resid, self.weights.q_b_proj, None).view(
             batch_size, seq_length, self.weights.num_heads, qk_head_dim
