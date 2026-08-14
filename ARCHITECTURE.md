@@ -74,13 +74,15 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - Expert-major union scheduling and cost-aware speculation.
 - Shared-expert device accumulation for the raw-BF16 learned-MoE path (`--device-accumulate 1 --fuse-shared 1`).
 - TurboQuant 2.5/3.5-bit KV schedules, UltraQuant-style asymmetric K/V and block-scale variants.
-- Mixed weight quantization and CUDA fusion.
+- Reference-only native MXFP4 encoding from BF16/FP32 matrices with E2M1 nibbles, E8M0 group scales, and `max_abs` or calibration-style `mse` scale selection. It is not converter-integrated or a runtime default because the first real layer-10 expert probe measured 19.86% FFN relative L2 error for `max_abs` and 19.07% for `mse`.
+- Mixed weight quantization, outlier residuals, and CUDA fusion.
 
 ### Proposed
 
 - GLM-5.3 checkpoint descriptor and calibration swap.
 - Full RTX 5080 native CUDA kernels beyond the current scalar MXFP4 grid path.
 - Making dequantized BF16 the default, or storing all GLM experts in BF16, is rejected until VRAM pressure and quality are measured with real shards.
+- Promoting direct BF16-to-MXFP4 conversion to a QUALITY or BALANCED default is rejected until calibrated outlier/mixed-precision storage brings the real-layer quality error down.
 - Cloud-side shard conversion through the existing SKYFORGE concept.
 
 ## Runtime data flow

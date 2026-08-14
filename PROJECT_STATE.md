@@ -68,6 +68,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Added an opt-in bounded LRU for validated reference trunk layers. Capacity zero preserves strict layer-at-a-time loading; positive capacity removes repeated layer-provider calls without changing logits. Expert payload residency remains a separate policy.
 - Added `GLM5XDenseMlpReference` and explicit `mlp_type="dense"` bundle loading for GLM-5.2's first three dense layers. The path uses official SwiGLU, preserves the decoder output schema, and reports empty routing with zero expert loads.
 - Added `GLM5XDecoderModelReference.from_bundle`, which resolves official dense/sparse MLP types and shared-indexer sources while keeping decoder layers provider-owned. Bounded probes can override only missing head tensors; real decoder-layer payloads remain exact and lazy.
+- Added a reference-only native MXFP4 encoder with deterministic E8M0 `max_abs` and `mse` scale modes, chunked packing, and BF16/FP32 shape/finite-value validation. It is not integrated into the converter because the first real layer-10 quality probe is still too lossy for a default path.
 
 ## In progress
 
@@ -79,6 +80,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Replace host float decode plus conversion with direct raw-BF16/tensor-core storage views where quality permits.
 - Measure whether BF16-output resident grids remain inside the chosen quality budget on nonzero full-layer GLM data.
 - Measure the new CUDA bucket loop with exact nonzero GLM router assignments, then add pinned asynchronous staging after full-layer parity is established.
+- Calibrate expert quantization with outlier residuals or mixed precision; direct BF16-to-MXFP4 remains experimental after the measured real-layer quality gate.
 - Real five-shard layer-10 reference smoke at `a2d6b6d`: bundle open/root verification 250.637263 s, cold two-token forward 5.969859 s, cached repeat 0.057331 s, 16 unique selected experts, cached output max difference 0.0. These are layer/storage reference timings, not tok/s.
 - Latest bounded real layer-10 learned-MoE result at `f07d78c`: two tokens, 16 routed experts plus one shared expert, 2,091,698 ns warm median per MoE sublayer block, 1,283,457,024 resident expert bytes, zero warm H2D, GPU-versus-CPU relative error `0.000452667358331`, and BF16-rounded expected-artifact relative error `0.00152439018711`. Route IDs and contributions match between Python and C++.
 - Latest device-accumulate rerun at `1514d11`: the same two-token learned-MoE boundary measured three baseline medians `2,198,145`, `2,736,064`, `2,492,351 ns` and three device-accumulate medians `1,991,721`, `1,981,629`, `2,446,610 ns`. Median-of-runs improved from `2,492,351 ns` to `1,991,721 ns` (about 20.1%) with unchanged GPU/CPU relative error `0.000571510172449`; this remains an opt-in bounded sublayer result, not tok/s.
@@ -86,6 +88,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 ## Known blockers
 
 - Full GLM-5.2 local materialization is in progress. 32 of 282 shards are finalized as verified `.k3x` artifacts and their source-deleted markers are present; full checkpoint correctness and local TPS are not measured yet.
+- The reference MXFP4 encoder is not a production weight path yet. A real layer-10 expert's three projections compressed to 26.56% of BF16 storage, while FFN relative L2 error remained 19.86% (`max_abs`) or 19.07% (`mse`).
 - No Cloud Run conversion or paid resource has been authorized or attempted. The active stream is local and uses resumable HTTP-range downloads with one-shard-at-a-time conversion.
 - Current Dependabot state: PRs 1-4 were closed after their setup-python, checkout, numpy, and setuptools bumps were integrated and verified on `a3fb8a8`; the repository Dependabot security-alert endpoint is disabled, so no CVE alert was verified.
 - Historical Dependabot note: the original PR branches first failed with 50 `FileNotFoundError` cases from absent migrated K3X evidence; their rebased replacement checks were green before the exact updates were integrated on main and the PRs were closed. Repository Dependabot and vulnerability-alert APIs are disabled, so no CVE alert is confirmed.

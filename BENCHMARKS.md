@@ -640,3 +640,14 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Difference: the fused/device-accumulate warm median is approximately `13.3%` lower in this paired bounded sublayer sample. Cold latency was higher in the fused run, so this does not establish an end-to-end speedup or a default policy.
 - Correctness: both modes reported GPU-vs-CPU maximum relative error `0.000643727718852` and CPU-expected maximum relative error `0.00484962016344`; route IDs/contributions were identical. No decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, or quality score was measured.
 - Interpretation: this is a real-weight, real-routing CUDA kernel boundary only. The next bottleneck remains all-layer hidden-state/final-head parity and full-model scheduling; the result must not be converted into a model tok/s claim.
+
+## 2026-08-15 -- Reference MXFP4 encoding quality gate
+
+- Date: 2026-08-15.
+- Commit: working-tree experiment after `2dafbcf`; Python implementation and tests are now recorded in the next code commit.
+- Hardware/model: WSL2 Ubuntu-24.04 CPU reference, official `zai-org/GLM-5.2` layer-10 expert 4 from `glm5x-experts-partial.json`, real four-token `layer10-real4-moe-input.gmlxact`.
+- Payload: three BF16 projections, each `25,165,824` bytes; total `75,497,472` bytes. Native MXFP4 output is `6,684,672` bytes per projection and `20,054,016` bytes total, exactly `26.5625%` of BF16 before any outlier metadata.
+- `max_abs` mode: all three projections encoded in `0.442 s`; weight relative L2 was `11.735%`, `11.732%`, and `11.654%`; FFN output max absolute error was `0.0018968`, mean absolute error `0.00038270`, and relative L2 error `19.861969%`.
+- `mse` mode: all three projections encoded in `7.439 s`; weight relative L2 was `11.127%`, `11.125%`, and `11.116%`; FFN output max absolute error was `0.0018991`, mean absolute error `0.00036631`, and relative L2 error `19.069034%`.
+- Correctness: both encoded payloads decoded to valid native MXFP4 shapes and passed the focused round-trip suite; the full WSL Python suite passed `318 passed, 124 skipped` in `141.53 s`.
+- Interpretation: the compression ratio is promising for bandwidth, but uncalibrated BF16-to-MXFP4 quality is not acceptable as a default. No converter/runtime integration, full-model quality score, or end-to-end tok/s is claimed.

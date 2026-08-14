@@ -441,3 +441,11 @@
 - Follow-up evidence: at `05:17:32`, the same three workers had finalized 22 additional artifacts after launch, 32/282 total, in `37m39s`, or approximately `35.1 shards/hour`. The longer sample remains consistent with a conditional `~7.1 h` for the remaining 250 artifacts; a `7.5–9 h` planning window is recorded because the rate can change with network, NTFS, and retries.
 - Accepted because: independent artifacts and source-deletion markers make range ownership naturally restartable, and the shared final bundle is explicitly serialized. No routing or weight semantics change.
 - Revisit: after at least ten completed shards per worker, record sustained shards/hour, CPU, NVMe traffic, and failure/retry behavior before choosing a default worker count.
+
+## D-0056 -- Keep direct BF16-to-MXFP4 conversion experimental
+
+- Decision: implement and retain a reference-only chunked encoder, but do not make it part of the GLM converter or default runtime until calibration and quality gates are available.
+- Alternatives: immediately rewrite all raw-BF16 expert shards as native MXFP4, keep raw BF16 only, or add a mixed/outlier residual format before measuring a plain MXFP4 baseline.
+- Evidence: on the real layer-10 expert 4 from the bounded bundle, three BF16 projections were `75,497,472` bytes and encoded native MXFP4 was `20,054,016` bytes (`26.5625%`). The max-abs encoder took `0.442 s` and produced `19.861969%` FFN relative L2 error on the four-token GLM5XACT input. MSE scale search took `7.439 s`, reduced weight relative L2 from roughly `11.7%` to `11.1%`, and reduced FFN relative L2 only to `19.069034%`. An offline four-outlier correction simulation reached `12.346%` FFN relative L2 but is not an implemented storage or runtime path.
+- Accepted because: the storage reduction is materially useful for VRAM/NVMe/PCIe pressure, but the measured quality loss is too large to silently apply to coding/agentic workloads. The reference encoder and raw-BF16 path preserve a reversible comparison baseline.
+- Revisit: after real-layer calibration, outlier-index/value storage, mixed 6/8-bit alternatives, or a model-quality suite shows a measured Pareto point that satisfies the quality contract.

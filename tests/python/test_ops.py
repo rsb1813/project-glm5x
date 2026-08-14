@@ -2,7 +2,7 @@
 import pytest
 import torch
 
-from k3x_ref.mxfp4 import decode_mxfp4, mxfp4_matmul
+from k3x_ref.mxfp4 import decode_mxfp4, encode_mxfp4, mxfp4_matmul
 from k3x_ref.ops import rms_norm, situ_glu
 
 
@@ -51,3 +51,51 @@ def test_mxfp4_matmul_matches_literal_dense_result() -> None:
         cols=32,
     )
     assert torch.equal(got, torch.tensor([[4.0]]))
+
+
+def test_mxfp4_encoder_preserves_native_nibble_order_and_scale() -> None:
+    source = torch.tensor(
+        [[0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0] + [0.0] * 24]
+    )
+
+    packed, scales = encode_mxfp4(source)
+
+    assert packed[:2] == bytes([0x10, 0x32])
+    assert scales == bytes([127])
+    assert torch.equal(decode_mxfp4(packed, scales, 1, 32), source)
+
+
+def test_mxfp4_encoder_selects_power_of_two_group_scale() -> None:
+    source = torch.full((1, 32), 12.0)
+
+    packed, scales = encode_mxfp4(source)
+
+    assert scales == bytes([128])
+    assert torch.equal(decode_mxfp4(packed, scales, 1, 32), source)
+
+
+def test_mxfp4_encoder_rejects_invalid_shape_and_nonfinite_values() -> None:
+    with pytest.raises(ValueError, match="group_size"):
+        encode_mxfp4(torch.zeros(1, 30))
+    with pytest.raises(ValueError, match="finite"):
+        encode_mxfp4(torch.tensor([[float("nan")] + [0.0] * 31]))
+
+
+def test_mxfp4_encoder_mse_scale_mode_never_worsens_group_error() -> None:
+    source = torch.randn((2, 32), generator=torch.Generator().manual_seed(31))
+
+    max_packed, max_scales = encode_mxfp4(source, scale_mode="max_abs")
+    mse_packed, mse_scales = encode_mxfp4(source, scale_mode="mse")
+    max_error = (decode_mxfp4(max_packed, max_scales, 2, 32) - source).square().mean()
+    mse_error = (decode_mxfp4(mse_packed, mse_scales, 2, 32) - source).square().mean()
+
+    assert mse_error <= max_error + 1e-7
+
+
+def test_mxfp4_encoder_keeps_scale_bytes_across_chunks() -> None:
+    source = torch.cat((torch.full((1, 32), 1.0), torch.full((1, 32), 2.0)))
+
+    packed, scales = encode_mxfp4(source, chunk_groups=1)
+
+    assert scales == bytes([125, 126])
+    assert torch.equal(decode_mxfp4(packed, scales, 2, 32), source)

@@ -393,3 +393,9 @@
 - Dependabot update PRs 1–4 are closed and their action/package bumps are present on `main`. Repository Dependabot security alerts are disabled; the API returns `403`, so no vulnerability count is confirmed. The local WSL environment passes `python -m pip check`; the stale Windows `.venv` has missing optional torch dependencies and was not changed.
 - At 05:17:32 KST, three disjoint workers had finalized 32/282 artifacts and source-deleted markers. 22 artifacts were produced after the 04:39:53 launch in 37m39s, approximately 35.1 shards/hour; 250 remain. This gives a conditional `~7.1 h` conversion estimate and a conservative `7.5–9 h` planning window, not a completion promise. C: had approximately 1.550 TB decimal free.
 - A four-token real layer-10 learned-MoE CUDA comparison at 4 GB resident budget measured `4,317,561 ns` baseline versus `3,741,291 ns` fused/device-accumulate warm median, about 13.3% lower in the bounded warm sample. Both paths retained GPU-vs-CPU maximum relative error `0.000643727718852`; the fused cold latency was higher. This is not full-model tok/s.
+
+## 2026-08-15 -- MXFP4 encoder quality gate
+
+- Added a chunked reference encoder for native E2M1/E8M0 payloads with explicit `max_abs` and `mse` scale modes. Focused tests passed `11/11`; the full WSL Python suite passed `318 passed, 124 skipped` in `141.53 s`.
+- On real layer-10 expert 4, three BF16 projections shrank from `75,497,472` to `20,054,016` bytes (`26.5625%`). Max-abs scales produced `19.861969%` FFN relative L2 error; MSE scales produced `19.069034%` while taking `7.439 s` instead of `0.442 s` for the three projections.
+- The encoder is deliberately not connected to conversion or the default runtime. The next quantization task is calibrated outlier/mixed-precision storage, with exact raw-BF16 reference retained for quality comparisons.
