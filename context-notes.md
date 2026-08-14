@@ -411,3 +411,9 @@
 
 - Added `tools/benchmark_glm5x_reference.py`. It takes `--bundle`, `--config`, and explicit comma-separated `--prompt` IDs, then measures prefill, TTFT, incremental decode, generated IDs, cache/execution settings, and CUDA peak memory.
 - Strict bundle admission is the default; `--lazy-bundle` is explicit. No tokenizer or estimated TPS is hidden inside the tool. The first real full-model JSON remains pending the 282-shard assembly.
+
+## 2026-08-15 -- Current CI and materialization refresh
+
+- Commit `0e6972d` passed Linux correctness run `31842116346` and CodeQL run `31842116338`; the red Linux notification refers to the historical stale run documented above.
+- Dependabot update PRs 1--4 are closed and their dependency/action changes are present on `main`. Dependabot security alerts are disabled for this public repository, so the API returned `403` and no CVE count was verified.
+- At 06:24 KST, 72/282 shard artifacts and source-deleted markers were finalized. The three disjoint workers produced 62 artifacts after the 04:39:53 launch, an observed aggregate of approximately 35.8 shards/hour. 210 artifacts remain, giving approximately 5.9 hours at the observed rate and a conservative 6--7 hour conversion/indexing window. Full-model logits and end-to-end tok/s remain unmeasured.
