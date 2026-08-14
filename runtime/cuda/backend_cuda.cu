@@ -1448,6 +1448,16 @@ public:
         return Result<std::vector<float>>::success(std::move(output));
     }
 
+    Result<std::vector<std::vector<float>>> dense_situ_mlp_grid(
+        std::span<const float> inputs, std::size_t token_count,
+        std::span<const DenseMlpView> experts, float situ_beta,
+        std::optional<float> situ_linear, std::uint32_t layer,
+        ProfilePhase phase) override {
+        return dense_situ_mlp_grid_bf16(
+            inputs, token_count, experts, situ_beta, situ_linear, layer,
+            phase);
+    }
+
     Result<std::vector<std::vector<float>>> mxfp4_situ_mlp_group(
         std::span<const float> input, std::span<const Mxfp4MlpView> experts,
         float situ_beta, std::optional<float> situ_linear,
@@ -3175,6 +3185,303 @@ public:
     std::string_view device_name() const noexcept override { return device_name_; }
 
 private:
+    Result<std::vector<std::vector<float>>> dense_situ_mlp_grid_bf16(
+        std::span<const float> inputs, std::size_t token_count,
+        std::span<const DenseMlpView> experts, float situ_beta,
+        std::optional<float> situ_linear, std::uint32_t layer,
+        ProfilePhase phase) {
+        constexpr auto precision = NumericPrecision::bf16_rounded;
+        const auto operation_start = std::chrono::steady_clock::now();
+        const auto multiply_fits = [](std::size_t left, std::size_t right) {
+            return right == 0 ||
+                   left <= std::numeric_limits<std::size_t>::max() / right;
+        };
+        if (options_.kind != BackendKind::cuda_custom ||
+            options_.dense_precision != DensePrecision::bf16_rounded ||
+            options_.cuda_boundary != CudaBoundaryMode::ffn_block ||
+            options_.cuda_allocation != CudaAllocationMode::reused ||
+            options_.cuda_weights != CudaWeightMode::resident ||
+            options_.cuda_transfer != CudaTransferMode::synchronous ||
+            options_.cuda_batching != CudaBatchingMode::resident_grid ||
+            options_.cuda_moe_fusion != CudaMoeFusionMode::none ||
+            resident_weights_ == nullptr || token_count == 0 ||
+            token_count > 65535 || experts.empty() || experts.size() > 65535 ||
+            !std::isfinite(situ_beta) || situ_beta <= 0.0F ||
+            (situ_linear &&
+             (!std::isfinite(*situ_linear) || *situ_linear <= 0.0F))) {
+            return Result<std::vector<std::vector<float>>>::failure(
+                ErrorCode::invalid_extent);
+        }
+        const auto input_width = experts.front().gate.cols;
+        const auto intermediate_width = experts.front().gate.rows;
+        const auto output_width = experts.front().down.rows;
+        if (input_width == 0 || intermediate_width == 0 || output_width == 0 ||
+            !multiply_fits(token_count, input_width) ||
+            inputs.size() != token_count * input_width ||
+            !multiply_fits(experts.size(), token_count) ||
+            !multiply_fits(experts.size() * token_count, intermediate_width) ||
+            !multiply_fits(experts.size() * token_count, output_width)) {
+            return Result<std::vector<std::vector<float>>>::failure(
+                ErrorCode::invalid_extent);
+        }
+        std::unordered_set<std::uint64_t> tensor_ids;
+        std::uint64_t required_bf16_bytes = 0;
+        for (const auto& expert : experts) {
+            if (expert.gate.cols != input_width ||
+                expert.gate.rows != intermediate_width ||
+                expert.up.cols != input_width ||
+                expert.up.rows != intermediate_width ||
+                expert.down.cols != intermediate_width ||
+                expert.down.rows != output_width ||
+                expert.gate.values.size() != input_width * intermediate_width ||
+                expert.up.values.size() != input_width * intermediate_width ||
+                expert.down.values.size() != intermediate_width * output_width ||
+                expert.gate.tensor_id == 0 || expert.up.tensor_id == 0 ||
+                expert.down.tensor_id == 0 ||
+                !tensor_ids.insert(expert.gate.tensor_id).second ||
+                !tensor_ids.insert(expert.up.tensor_id).second ||
+                !tensor_ids.insert(expert.down.tensor_id).second) {
+                return Result<std::vector<std::vector<float>>>::failure(
+                    ErrorCode::invalid_extent);
+            }
+            for (const auto view : {expert.gate, expert.up, expert.down}) {
+                if (resident_weights_->contains(
+                        {view.tensor_id, cuda::WeightRepresentation::dense_bf16,
+                         view.rows, view.cols, 0})) {
+                    continue;
+                }
+                const auto bytes = view.values.size() * sizeof(__nv_bfloat16);
+                if (bytes > std::numeric_limits<std::uint64_t>::max() -
+                                required_bf16_bytes) {
+                    return Result<std::vector<std::vector<float>>>::failure(
+                        ErrorCode::invalid_extent);
+                }
+                required_bf16_bytes += bytes;
+            }
+        }
+        if (required_bf16_bytes > options_.cuda_resident_bytes ||
+            runtime_stats_.resident_weight_bytes >
+                options_.cuda_resident_bytes - required_bf16_bytes) {
+            ++runtime_stats_.resident_grid_fallbacks;
+            return Result<std::vector<std::vector<float>>>::failure(
+                ErrorCode::backend_unavailable,
+                "CUDA BF16 dense grid resident capacity exceeded");
+        }
+
+        struct WeightMember {
+            DenseWeightView view;
+            const __nv_bfloat16* host{};
+            void* device{};
+            std::size_t bytes{};
+        };
+        std::vector<WeightMember> members;
+        members.reserve(experts.size() * 3);
+        std::uint64_t total_weight_transfer = 0;
+        std::array<std::uint64_t, 3> projection_bytes{};
+        std::size_t maximum_weight_bytes = 0;
+        for (std::size_t expert_index = 0; expert_index < experts.size();
+             ++expert_index) {
+            const auto& expert = experts[expert_index];
+            for (std::size_t projection = 0; projection < 3; ++projection) {
+                const auto view = projection == 0
+                    ? expert.gate : (projection == 1 ? expert.up : expert.down);
+                const auto* values = rounded_dense_bf16_host(view);
+                if (values == nullptr) {
+                    return Result<std::vector<std::vector<float>>>::failure(
+                        ErrorCode::backend_unavailable,
+                        "CUDA BF16 dense grid host conversion failed");
+                }
+                WeightMember member{
+                    view, values->data(), nullptr,
+                    values->size() * sizeof(__nv_bfloat16)};
+                maximum_weight_bytes =
+                    std::max(maximum_weight_bytes, member.bytes);
+                projection_bytes[projection] += member.bytes;
+                const auto bytes = std::as_bytes(
+                    std::span<const __nv_bfloat16>(values->data(), values->size()));
+                const auto acquisition = resident_weights_->acquire(
+                    {view.tensor_id, cuda::WeightRepresentation::dense_bf16,
+                     view.rows, view.cols, 0}, bytes, {});
+                if (!acquisition) {
+                    return Result<std::vector<std::vector<float>>>::failure(
+                        acquisition.error(), acquisition.message());
+                }
+                if (acquisition.value().disposition ==
+                    cuda::ResidentDisposition::bypass) {
+                    return Result<std::vector<std::vector<float>>>::failure(
+                        ErrorCode::backend_unavailable,
+                        "CUDA BF16 dense grid resident admission bypassed");
+                }
+                member.device = const_cast<void*>(acquisition.value().primary);
+                total_weight_transfer += acquisition.value().uploaded_bytes;
+                members.push_back(member);
+            }
+        }
+
+        const auto expert_tokens = experts.size() * token_count;
+        const auto input_count = token_count * input_width;
+        const auto input_bytes = input_count * sizeof(__nv_bfloat16);
+        const auto intermediate_count = expert_tokens * intermediate_width;
+        const auto intermediate_bytes = intermediate_count * sizeof(float);
+        const auto activation_bytes = intermediate_count * sizeof(__nv_bfloat16);
+        const auto output_count = expert_tokens * output_width;
+        const auto output_bytes = output_count * sizeof(float);
+        std::vector<__nv_bfloat16> host_input(input_count);
+        for (std::size_t index = 0; index < input_count; ++index) {
+            host_input[index] = __float2bfloat16_rn(inputs[index]);
+        }
+        if (ffn_input_scratch_.reserve(input_bytes) != cudaSuccess ||
+            ffn_weight_scratch_.reserve(maximum_weight_bytes) != cudaSuccess ||
+            ffn_gate_scratch_.reserve(intermediate_bytes) != cudaSuccess ||
+            ffn_up_scratch_.reserve(intermediate_bytes) != cudaSuccess ||
+            ffn_activation_scratch_.reserve(activation_bytes) != cudaSuccess ||
+            ffn_output_scratch_.reserve(output_bytes) != cudaSuccess) {
+            return Result<std::vector<std::vector<float>>>::failure(
+                ErrorCode::backend_unavailable,
+                "CUDA BF16 dense grid reusable allocation failed");
+        }
+        auto* device_input = static_cast<__nv_bfloat16*>(ffn_input_scratch_.get());
+        auto* device_gate = static_cast<float*>(ffn_gate_scratch_.get());
+        auto* device_up = static_cast<float*>(ffn_up_scratch_.get());
+        auto* device_activation = static_cast<__nv_bfloat16*>(
+            ffn_activation_scratch_.get());
+        auto* device_output = static_cast<float*>(ffn_output_scratch_.get());
+        auto* gate_plan = resolve_dense_batch_plan(
+            intermediate_width, input_width, token_count);
+        auto* down_plan = resolve_dense_batch_plan(
+            output_width, intermediate_width, token_count);
+        if (!gate_plan || !down_plan) {
+            return Result<std::vector<std::vector<float>>>::failure(
+                ErrorCode::backend_unavailable,
+                "CUDA BF16 dense grid plan creation failed");
+        }
+        for (auto& event : resident_grid_events_) {
+            if (event.ensure() != cudaSuccess) {
+                return Result<std::vector<std::vector<float>>>::failure(
+                    ErrorCode::backend_unavailable,
+                    "CUDA BF16 dense grid event creation failed");
+            }
+        }
+        if (cudaMemcpyAsync(device_input, host_input.data(), input_bytes,
+                            cudaMemcpyHostToDevice, stream_) != cudaSuccess) {
+            return Result<std::vector<std::vector<float>>>::failure(
+                ErrorCode::backend_unavailable,
+                "CUDA BF16 dense grid activation upload failed");
+        }
+        constexpr float alpha = 1.0F;
+        constexpr float beta = 0.0F;
+        const auto launch_projection =
+            [&](std::size_t event_pair, std::size_t projection,
+                DensePlan* plan, std::size_t rows, std::size_t source_stride,
+                void* source, void* output) {
+                auto& start = resident_grid_events_[event_pair * 2];
+                auto& end = resident_grid_events_[event_pair * 2 + 1];
+                if (cudaEventRecord(start.get(), stream_) != cudaSuccess) {
+                    return false;
+                }
+                for (std::size_t expert_index = 0;
+                     expert_index < experts.size(); ++expert_index) {
+                    auto& member = members[expert_index * 3 + projection];
+                    auto* member_output = static_cast<std::byte*>(output) +
+                        expert_index * token_count * rows * sizeof(float);
+                    const void* member_source = projection == 2
+                        ? static_cast<const void*>(
+                              static_cast<const std::byte*>(source) +
+                              expert_index * token_count * source_stride *
+                                  sizeof(__nv_bfloat16))
+                        : static_cast<const void*>(device_input);
+                    if (cublasLtMatmul(
+                            handle_, plan->operation.get(), &alpha,
+                            member.device, plan->weight_layout.get(),
+                            member_source, plan->input_layout.get(), &beta,
+                            member_output, plan->output_layout.get(),
+                            member_output, plan->output_layout.get(),
+                            &plan->heuristic.algo, nullptr, 0, stream_) !=
+                        CUBLAS_STATUS_SUCCESS) {
+                        return false;
+                    }
+                }
+                return cudaEventRecord(end.get(), stream_) == cudaSuccess;
+            };
+        if (!launch_projection(0, 0, gate_plan, intermediate_width,
+                               intermediate_width, device_gate, device_gate) ||
+            !launch_projection(1, 1, gate_plan, intermediate_width,
+                               intermediate_width, device_up, device_up) ||
+            cudaEventRecord(resident_grid_events_[4].get(), stream_) !=
+                cudaSuccess ||
+            cuda::launch_situ_glu(
+                device_gate, device_up, device_activation, intermediate_count,
+                situ_beta, situ_linear.has_value(), situ_linear.value_or(0.0F),
+                true, stream_) != cudaSuccess ||
+            cudaEventRecord(resident_grid_events_[5].get(), stream_) !=
+                cudaSuccess ||
+            !launch_projection(3, 2, down_plan, output_width,
+                               intermediate_width, device_activation,
+                               device_output)) {
+            return Result<std::vector<std::vector<float>>>::failure(
+                ErrorCode::backend_unavailable,
+                "CUDA BF16 dense grid launch failed");
+        }
+        std::vector<float> flat_output(output_count);
+        const auto d2h_start = std::chrono::steady_clock::now();
+        if (cudaMemcpyAsync(flat_output.data(), device_output, output_bytes,
+                            cudaMemcpyDeviceToHost, stream_) != cudaSuccess ||
+            cudaStreamSynchronize(stream_) != cudaSuccess) {
+            return Result<std::vector<std::vector<float>>>::failure(
+                ErrorCode::backend_unavailable,
+                "CUDA BF16 dense grid output or synchronization failed");
+        }
+        std::array<std::uint64_t, 4> durations{};
+        for (std::size_t pair = 0; pair < durations.size(); ++pair) {
+            float milliseconds = 0.0F;
+            if (cudaEventElapsedTime(&milliseconds,
+                                     resident_grid_events_[pair * 2].get(),
+                                     resident_grid_events_[pair * 2 + 1].get()) !=
+                cudaSuccess) {
+                return Result<std::vector<std::vector<float>>>::failure(
+                    ErrorCode::backend_unavailable,
+                    "CUDA BF16 dense grid timing failed");
+            }
+            durations[pair] = static_cast<std::uint64_t>(std::llround(
+                static_cast<double>(milliseconds) * 1.0e6));
+        }
+        std::vector<std::vector<float>> outputs(experts.size());
+        const auto values_per_expert = token_count * output_width;
+        for (std::size_t expert_index = 0; expert_index < experts.size();
+             ++expert_index) {
+            outputs[expert_index].assign(
+                flat_output.begin() + expert_index * values_per_expert,
+                flat_output.begin() + (expert_index + 1) * values_per_expert);
+        }
+        ++runtime_stats_.stream_synchronization_count;
+        runtime_stats_.activation_h2d_bytes += input_bytes;
+        runtime_stats_.weight_h2d_bytes += total_weight_transfer;
+        runtime_stats_.device_to_host_bytes += output_bytes;
+        ++runtime_stats_.ffn_block_calls;
+        runtime_stats_.ffn_block_experts += experts.size();
+        ++runtime_stats_.resident_grid_calls;
+        runtime_stats_.resident_grid_experts += experts.size();
+        runtime_stats_.resident_grid_tokens += token_count;
+        runtime_stats_.resident_grid_expert_tokens += expert_tokens;
+        runtime_stats_.resident_grid_kernel_launches +=
+            3 * experts.size() + 1;
+        record(phase, ProfileOperation::activation_host_to_device, precision,
+               layer, operation_start, 0, input_bytes, 0, true);
+        record(phase, ProfileOperation::weight_host_to_device, precision,
+               layer, operation_start, 0, total_weight_transfer, 0, true);
+        record(phase, ProfileOperation::device_to_host, precision, layer,
+               d2h_start, 0, output_bytes, 0, true);
+        for (std::size_t projection = 0; projection < 3; ++projection) {
+            record(phase, ProfileOperation::dense_matvec, precision, layer,
+                   operation_start, projection_bytes[projection], 0,
+                   durations[projection == 2 ? 3 : projection], true);
+        }
+        record(phase, ProfileOperation::situ_glu, precision, layer,
+               operation_start, intermediate_bytes, 0, durations[2], true);
+        return Result<std::vector<std::vector<float>>>::success(
+            std::move(outputs));
+    }
+
     Result<std::vector<std::vector<float>>>
     mxfp4_situ_mlp_batch_dequantized_bf16(
         std::span<const float> inputs, std::size_t batch_size,

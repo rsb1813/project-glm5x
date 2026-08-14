@@ -170,6 +170,13 @@ public:
         std::span<const float> input, DenseMlpView weights,
         float situ_beta, std::optional<float> situ_linear,
         std::uint32_t layer, ProfilePhase phase) = 0;
+    virtual Result<std::vector<std::vector<float>>> dense_situ_mlp_grid(
+        std::span<const float>, std::size_t,
+        std::span<const DenseMlpView>, float,
+        std::optional<float>, std::uint32_t, ProfilePhase) {
+        return Result<std::vector<std::vector<float>>>::failure(
+            ErrorCode::backend_unavailable);
+    }
     virtual Result<std::vector<std::vector<float>>> mxfp4_situ_mlp_group(
         std::span<const float> input, std::span<const Mxfp4MlpView> experts,
         float situ_beta, std::optional<float> situ_linear,

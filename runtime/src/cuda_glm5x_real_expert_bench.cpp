@@ -32,6 +32,7 @@ struct Arguments {
     std::uint32_t layer{};
     std::uint32_t expert{};
     std::size_t experts{1};
+    std::size_t tokens{1};
     std::size_t warmup{2};
     std::size_t iterations{10};
     std::string precision{"fp32"};
@@ -74,6 +75,12 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             const auto parsed = parse_size(value);
             if (!parsed || *parsed == 0) return std::nullopt;
             result.experts = *parsed;
+        } else if (key == "--tokens") {
+            const auto parsed = parse_size(value);
+            if (!parsed || *parsed == 0 || *parsed > 65535) {
+                return std::nullopt;
+            }
+            result.tokens = *parsed;
         } else if (key == "--warmup") {
             const auto parsed = parse_size(value);
             if (!parsed) return std::nullopt;
@@ -173,7 +180,7 @@ int main(int argc, char** argv) {
     const auto arguments = parse_arguments(argc, argv);
     if (!arguments || !std::filesystem::is_directory(arguments->artifact_dir)) {
         std::cerr << "usage: --artifact-dir DIR --layer N --expert N "
-                     "[--experts N] [--warmup N] [--iterations N] "
+                     "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
                      "[--precision fp32|bf16-rounded]\n";
         return 2;
     }
@@ -252,17 +259,25 @@ int main(int argc, char** argv) {
     const auto host_load_ns = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - host_start).count());
-    std::vector<float> input(kHiddenSize);
+    const auto input_value_count = arguments->tokens * kHiddenSize;
+    std::vector<float> input(input_value_count);
     for (std::size_t index = 0; index < input.size(); ++index) {
         input[index] = static_cast<float>(static_cast<int>(index % 29) - 14) * 0.01F;
         if (arguments->precision == "bf16-rounded") input[index] = round_to_bf16(input[index]);
     }
+    std::vector<k3x::DenseMlpView> dense_views;
+    dense_views.reserve(fixtures.size());
+    for (const auto& fixture : fixtures) dense_views.push_back(fixture.dense);
     k3x::BackendOptions options;
     options.kind = k3x::BackendKind::cuda_custom;
     options.dense_precision = arguments->precision == "bf16-rounded"
         ? k3x::DensePrecision::bf16_rounded : k3x::DensePrecision::fp32;
     options.cuda_allocation = k3x::CudaAllocationMode::reused;
     options.cuda_weights = k3x::CudaWeightMode::resident;
+    const auto use_grid = arguments->precision == "bf16-rounded" &&
+        (fixtures.size() > 1 || arguments->tokens > 1);
+    options.cuda_batching = use_grid
+        ? k3x::CudaBatchingMode::resident_grid : k3x::CudaBatchingMode::scalar;
     options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
     options.cuda_transfer = k3x::CudaTransferMode::synchronous;
     options.cuda_weight_validation = k3x::CudaWeightValidationMode::admission;
@@ -274,21 +289,47 @@ int main(int argc, char** argv) {
         return 7;
     }
     auto cpu = k3x::make_cpu_backend();
-    const auto cpu_reference = cpu->dense_situ_mlp(
-        input, fixtures.back().dense, 1.0F, std::nullopt, arguments->layer,
-        k3x::ProfilePhase::decode);
-    if (!cpu_reference) return 8;
+    std::vector<float> cpu_reference;
+    cpu_reference.reserve(arguments->tokens * kHiddenSize);
+    for (std::size_t token = 0; token < arguments->tokens; ++token) {
+        const auto token_input = std::span<const float>(input).subspan(
+            token * kHiddenSize, kHiddenSize);
+        const auto reference = cpu->dense_situ_mlp(
+            token_input, fixtures.back().dense, 1.0F, std::nullopt,
+            arguments->layer, k3x::ProfilePhase::decode);
+        if (!reference) return 8;
+        cpu_reference.insert(cpu_reference.end(), reference.value().begin(),
+                             reference.value().end());
+    }
     const auto execute = [&]() {
-        k3x::Result<std::vector<float>> last =
-            k3x::Result<std::vector<float>>::success({});
-        for (const auto& fixture : fixtures) {
-            auto output = cuda.value()->dense_situ_mlp(
-                input, fixture.dense, 1.0F, std::nullopt, arguments->layer,
-                k3x::ProfilePhase::decode);
-            if (!output) return output;
-            last = std::move(output);
+        if (use_grid) {
+            auto outputs = cuda.value()->dense_situ_mlp_grid(
+                input, arguments->tokens, dense_views, 1.0F, std::nullopt,
+                arguments->layer, k3x::ProfilePhase::decode);
+            if (!outputs) {
+                return k3x::Result<std::vector<float>>::failure(
+                    outputs.error(), outputs.message());
+            }
+            return k3x::Result<std::vector<float>>::success(
+                std::move(outputs.value().back()));
         }
-        return last;
+        std::vector<float> last;
+        last.reserve(arguments->tokens * kHiddenSize);
+        for (std::size_t token = 0; token < arguments->tokens; ++token) {
+            const auto token_input = std::span<const float>(input).subspan(
+                token * kHiddenSize, kHiddenSize);
+            k3x::Result<std::vector<float>> token_output =
+                k3x::Result<std::vector<float>>::success({});
+            for (const auto& fixture : fixtures) {
+                token_output = cuda.value()->dense_situ_mlp(
+                    token_input, fixture.dense, 1.0F, std::nullopt,
+                    arguments->layer, k3x::ProfilePhase::decode);
+                if (!token_output) return token_output;
+            }
+            last.insert(last.end(), token_output.value().begin(),
+                        token_output.value().end());
+        }
+        return k3x::Result<std::vector<float>>::success(std::move(last));
     };
     const auto cold_start = std::chrono::steady_clock::now();
     const auto cold = execute();
@@ -319,13 +360,14 @@ int main(int argc, char** argv) {
         samples.push_back(elapsed);
     }
     const auto stats_after = cuda.value()->runtime_stats();
-    const auto cpu_abs = maximum_absolute_difference(actual, cpu_reference.value());
-    const auto cpu_scale = std::max(maximum_absolute_value(cpu_reference.value()), 1.0e-6F);
+    const auto cpu_abs = maximum_absolute_difference(actual, cpu_reference);
+    const auto cpu_scale = std::max(maximum_absolute_value(cpu_reference), 1.0e-6F);
     std::cout << std::setprecision(12)
               << "{\"artifact_kind\":\"glm5.2_real_bf16_expert\""
               << ",\"layer_id\":" << arguments->layer
               << ",\"expert_id\":" << expert_ids.front()
               << ",\"expert_count\":" << expert_ids.size()
+              << ",\"token_count\":" << arguments->tokens
               << ",\"last_expert_id\":" << expert_ids.back()
               << ",\"shard_count\":" << paths.size()
               << ",\"precision\":\"" << arguments->precision << "\""

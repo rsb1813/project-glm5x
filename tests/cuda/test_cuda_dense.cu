@@ -233,6 +233,114 @@ int test_grouped_execution() {
     return 0;
 }
 
+int test_bf16_resident_grid() {
+    k3x::BackendOptions options;
+    options.kind = k3x::BackendKind::cuda_custom;
+    options.dense_precision = k3x::DensePrecision::bf16_rounded;
+    options.cuda_allocation = k3x::CudaAllocationMode::reused;
+    options.cuda_weights = k3x::CudaWeightMode::resident;
+    options.cuda_batching = k3x::CudaBatchingMode::resident_grid;
+    options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
+    options.cuda_transfer = k3x::CudaTransferMode::synchronous;
+    options.cuda_resident_bytes = 1ULL << 20;
+    auto backend = k3x::make_cuda_backend(options);
+    if (!backend) return 70;
+
+    const std::vector<float> input{
+        0.31F, -0.72F, 1.13F,
+        -0.44F, 0.27F, 0.91F,
+    };
+    const std::vector<float> gate0{
+        0.20F, -0.40F, 0.70F,
+        -0.80F, 0.50F, 0.10F,
+    };
+    const std::vector<float> up0{
+        0.60F, 0.30F, -0.20F,
+        0.10F, -0.90F, 0.40F,
+    };
+    const std::vector<float> down0{
+        0.50F, -0.10F,
+        0.20F, 0.80F,
+    };
+    const std::vector<float> gate1{
+        -0.30F, 0.90F, 0.20F,
+        0.70F, -0.60F, 0.40F,
+    };
+    const std::vector<float> up1{
+        -0.50F, 0.20F, 0.80F,
+        0.90F, 0.10F, -0.70F,
+    };
+    const std::vector<float> down1{
+        -0.40F, 0.60F,
+        0.30F, 0.20F,
+    };
+    const std::array<k3x::DenseMlpView, 2> experts{{
+        {{701, gate0, 2, 3}, {702, up0, 2, 3}, {703, down0, 2, 2}},
+        {{704, gate1, 2, 3}, {705, up1, 2, 3}, {706, down1, 2, 2}},
+    }};
+    const auto output = backend.value()->dense_situ_mlp_grid(
+        input, 2, experts, 1.0F, std::nullopt, 17,
+        k3x::ProfilePhase::decode);
+    if (!output || output.value().size() != experts.size()) return 71;
+    for (const auto& values : output.value()) {
+        if (values.size() != 4) return 72;
+    }
+
+    std::vector<float> rounded_input(input.size());
+    for (std::size_t index = 0; index < input.size(); ++index) {
+        rounded_input[index] = round_to_bf16(input[index]);
+    }
+    std::array<std::vector<float>, 6> rounded_weights;
+    const std::array<std::span<const float>, 6> source_weights{{
+        gate0, up0, down0, gate1, up1, down1,
+    }};
+    for (std::size_t index = 0; index < source_weights.size(); ++index) {
+        rounded_weights[index].resize(source_weights[index].size());
+        for (std::size_t value = 0; value < source_weights[index].size();
+             ++value) {
+            rounded_weights[index][value] =
+                round_to_bf16(source_weights[index][value]);
+        }
+    }
+    const std::array<k3x::DenseMlpView, 2> rounded_experts{{
+        {{701, rounded_weights[0], 2, 3},
+         {702, rounded_weights[1], 2, 3},
+         {703, rounded_weights[2], 2, 2}},
+        {{704, rounded_weights[3], 2, 3},
+         {705, rounded_weights[4], 2, 3},
+         {706, rounded_weights[5], 2, 2}},
+    }};
+    auto cpu = k3x::make_cpu_backend();
+    for (std::size_t expert = 0; expert < rounded_experts.size(); ++expert) {
+        for (std::size_t token = 0; token < 2; ++token) {
+            const auto expected = cpu->dense_situ_mlp(
+                std::span<const float>(rounded_input).subspan(token * 3, 3),
+                rounded_experts[expert], 1.0F, std::nullopt, 17,
+                k3x::ProfilePhase::decode);
+            if (!expected || expected.value().size() != 2) return 73;
+            for (std::size_t value = 0; value < expected.value().size();
+                 ++value) {
+                if (!nearly_equal(output.value()[expert][token * 2 + value],
+                                  expected.value()[value], 2.0e-2F)) {
+                    return 74;
+                }
+            }
+        }
+    }
+    const auto stats = backend.value()->runtime_stats();
+    if (stats.resident_grid_calls != 1 ||
+        stats.resident_grid_experts != experts.size() ||
+        stats.resident_grid_tokens != 2 ||
+        stats.resident_grid_expert_tokens != experts.size() * 2 ||
+        stats.resident_grid_kernel_launches != 7 ||
+        stats.weight_h2d_bytes != 64 ||
+        stats.activation_h2d_bytes != 12 ||
+        stats.device_to_host_bytes != 32) {
+        return 75;
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -242,5 +350,7 @@ int main() {
     if (bf16_result != 0) return bf16_result;
     const auto allocation_result = test_allocation_modes();
     if (allocation_result != 0) return allocation_result;
-    return test_grouped_execution();
+    const auto grouped_result = test_grouped_execution();
+    if (grouped_result != 0) return grouped_result;
+    return test_bf16_resident_grid();
 }
