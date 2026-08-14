@@ -66,6 +66,23 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 3
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
 - Interpretation: caching removed the repeated 75 MiB host conversion and made the bounded BF16 path faster than FP32 at half resident weight bytes. It remains experimental pending full-layer/model quality.
 
+## 2026-08-14 -- Eight-real-expert resident pressure, BF16
+
+- Commit: working tree after `718cc1e`; code change pending commit.
+- Hardware/model: RTX 5080, CUDA 13.3 in WSL; GLM-5.2 layer 10, the first 8 available real experts from the two probe artifacts.
+- Mode: `k3x_cuda_glm5x_real_expert_bench --experts 8`, cached BF16-rounded resident dense SiTU, sequential expert calls, 5 warmups and 20 measured iterations.
+- Result: host payload 603,979,776 bytes; host load 4,859,331,588 ns; cold latency 777,923,116 ns; warm median 1,854,140 ns; cold H2D 603,979,776 bytes; warm H2D 0; resident bytes 603,979,776; last-expert CPU relative error 0.00174141617.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, cache hit rate, average Top-K, speculative acceptance, and quality result: not measured.
+- Interpretation: this is sequential multi-expert pressure evidence, not expert-major batching or a full GLM layer.
+
+## 2026-08-14 -- Eight-real-expert resident pressure, FP32 reference
+
+- Commit: same working tree after `718cc1e`; code change pending commit.
+- Hardware/model/mode: same RTX 5080 WSL and layer-10 8-expert set, FP32 resident dense SiTU, 5 warmups and 20 measured iterations.
+- Result: host payload 603,979,776 bytes; host load 4,849,276,671 ns; cold latency 241,241,333 ns; warm median 13,153,048 ns; cold H2D 1,207,959,552 bytes; warm H2D 3,019,898,880 bytes; resident bytes 1,056,964,608; last-expert CPU relative error 3.8448615669e-07.
+- Decode tok/s, prefill tok/s, TTFT, quality result, and cache hit rate: not measured.
+- Interpretation: the configured 1 GiB resident budget forces FP32 bypass/eviction for this bank. This is the numerical reference, not the recommended multi-expert placement.
+
 ## 2026-08-14 -- Raw-BF16 expert directory C++ reader gate
 
 - Commit: working tree after `1b22bcb`; code change pending commit.

@@ -129,3 +129,10 @@
 - The first BF16-rounded real-expert run spent most of its 28.15 ms warm median reconverting 75 MiB of FP32 views to BF16 on every call. Added a tensor-identity/shape/pointer keyed host BF16 cache in the CUDA backend; input conversion remains per call because activations can change.
 - Rerun with 5 warmups and 20 samples measured BF16-rounded warm median 236,593 ns, cold latency 197,436,559 ns, cold H2D 75,497,472 bytes, warm H2D 0, and resident bytes 75,497,472. CPU relative difference remained 0.00182774465 (0.1828%).
 - FP32 rerun measured 271,493 ns warm median, 150,994,944 resident bytes, and `8.38190317154e-09` maximum absolute CPU difference. The cached BF16 path is now the faster bounded candidate, but remains experimental until full-layer/model quality is measured.
+
+## 2026-08-14 Real multi-expert resident pressure
+
+- Extended `k3x_cuda_glm5x_real_expert_bench` with `--experts N`; for `N>1` it selects the first available expert IDs on the requested layer and executes them sequentially through the existing resident dense path.
+- Eight layer-10 experts in BF16-rounded mode loaded 603,979,776 payload bytes, took 4,859,331,588 ns for the cold host reads, and measured 1,854,140 ns warm median over 20 iterations with warm H2D 0 and resident bytes 603,979,776.
+- Eight FP32 experts required 1,207,959,552 resident bytes. Under the 1 GiB budget, residency bypass caused 3,019,898,880 warm H2D bytes and 13,153,048 ns warm median. This confirms BF16 residency is required for multi-expert pressure on the target card.
+- The current path is sequential, so this is a lower bound for an expert-major batch implementation rather than a final MoE layer result.

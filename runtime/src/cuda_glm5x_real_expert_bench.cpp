@@ -16,6 +16,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -30,6 +31,7 @@ struct Arguments {
     std::filesystem::path artifact_dir;
     std::uint32_t layer{};
     std::uint32_t expert{};
+    std::size_t experts{1};
     std::size_t warmup{2};
     std::size_t iterations{10};
     std::string precision{"fp32"};
@@ -68,6 +70,10 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             const auto parsed = parse_u32(value);
             if (!parsed) return std::nullopt;
             result.expert = *parsed;
+        } else if (key == "--experts") {
+            const auto parsed = parse_size(value);
+            if (!parsed || *parsed == 0) return std::nullopt;
+            result.experts = *parsed;
         } else if (key == "--warmup") {
             const auto parsed = parse_size(value);
             if (!parsed) return std::nullopt;
@@ -88,6 +94,13 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
     }
     return result;
 }
+
+struct RealExpertFixture {
+    std::uint32_t expert_id{};
+    k3x::GlmBf16ExpertLoad payload;
+    std::array<std::vector<float>, 3> weights;
+    k3x::DenseMlpView dense{};
+};
 
 float bf16_to_float(const std::byte* bytes) {
     const auto low = std::to_integer<std::uint8_t>(bytes[0]);
@@ -160,7 +173,8 @@ int main(int argc, char** argv) {
     const auto arguments = parse_arguments(argc, argv);
     if (!arguments || !std::filesystem::is_directory(arguments->artifact_dir)) {
         std::cerr << "usage: --artifact-dir DIR --layer N --expert N "
-                     "[--warmup N] [--iterations N] [--precision fp32|bf16-rounded]\n";
+                     "[--experts N] [--warmup N] [--iterations N] "
+                     "[--precision fp32|bf16-rounded]\n";
         return 2;
     }
     const auto paths = artifact_paths(arguments->artifact_dir);
@@ -181,41 +195,68 @@ int main(int argc, char** argv) {
     std::vector<const k3x::Reader*> shard_views;
     shard_views.reserve(readers.size());
     for (const auto& reader : readers) shard_views.push_back(&reader);
+    std::set<std::uint32_t> available_experts;
+    for (const auto& reader : readers) {
+        for (const auto& record : reader.tensors()) {
+            if (record.layer_id == static_cast<std::int32_t>(arguments->layer) &&
+                record.expert_id >= 0) {
+                available_experts.insert(static_cast<std::uint32_t>(record.expert_id));
+            }
+        }
+    }
+    std::vector<std::uint32_t> expert_ids;
+    if (arguments->experts == 1) {
+        if (!available_experts.contains(arguments->expert)) return 5;
+        expert_ids.push_back(arguments->expert);
+    } else {
+        if (available_experts.size() < arguments->experts) return 5;
+        expert_ids.assign(available_experts.begin(), available_experts.end());
+        expert_ids.resize(arguments->experts);
+    }
     const auto host_start = std::chrono::steady_clock::now();
-    const auto loaded = k3x::load_glm5x_bf16_expert(
-        shard_views, arguments->layer, arguments->expert,
-        kHiddenSize, kIntermediateSize);
+    std::vector<RealExpertFixture> fixtures;
+    fixtures.reserve(expert_ids.size());
+    std::uint64_t host_payload_bytes = 0;
+    for (const auto expert_id : expert_ids) {
+        auto loaded = k3x::load_glm5x_bf16_expert(
+            shard_views, arguments->layer, expert_id,
+            kHiddenSize, kIntermediateSize);
+        if (!loaded) {
+            std::cerr << k3x::error_code_name(loaded.error()) << ": "
+                      << loaded.message() << '\n';
+            return 6;
+        }
+        RealExpertFixture fixture;
+        fixture.expert_id = expert_id;
+        fixture.payload = std::move(loaded.value());
+        host_payload_bytes += fixture.payload.payload_bytes;
+        for (std::size_t index = 0; index < fixture.weights.size(); ++index) {
+            fixture.weights[index] = decode_bf16(fixture.payload.roles[index]);
+            if (fixture.weights[index].empty()) return 7;
+            if (arguments->precision == "bf16-rounded") {
+                for (auto& value : fixture.weights[index]) value = round_to_bf16(value);
+            }
+        }
+        const auto prefix = "model.layers." + std::to_string(arguments->layer) +
+            ".mlp.experts." + std::to_string(expert_id) + ".";
+        fixture.dense = {
+            {k3x::fnv1a64((prefix + "gate_proj.weight").c_str()), fixture.weights[0],
+             kIntermediateSize, kHiddenSize},
+            {k3x::fnv1a64((prefix + "up_proj.weight").c_str()), fixture.weights[1],
+             kIntermediateSize, kHiddenSize},
+            {k3x::fnv1a64((prefix + "down_proj.weight").c_str()), fixture.weights[2],
+             kHiddenSize, kIntermediateSize},
+        };
+        fixtures.push_back(std::move(fixture));
+    }
     const auto host_load_ns = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - host_start).count());
-    if (!loaded) {
-        std::cerr << k3x::error_code_name(loaded.error()) << ": "
-                  << loaded.message() << '\n';
-        return 5;
-    }
-    std::array<std::vector<float>, 3> weights;
-    for (std::size_t index = 0; index < weights.size(); ++index) {
-        weights[index] = decode_bf16(loaded.value().roles[index]);
-        if (weights[index].empty()) return 6;
-        if (arguments->precision == "bf16-rounded") {
-            for (auto& value : weights[index]) value = round_to_bf16(value);
-        }
-    }
     std::vector<float> input(kHiddenSize);
     for (std::size_t index = 0; index < input.size(); ++index) {
         input[index] = static_cast<float>(static_cast<int>(index % 29) - 14) * 0.01F;
         if (arguments->precision == "bf16-rounded") input[index] = round_to_bf16(input[index]);
     }
-    const auto prefix = "model.layers." + std::to_string(arguments->layer) +
-        ".mlp.experts." + std::to_string(arguments->expert) + ".";
-    const k3x::DenseMlpView dense_weights{
-        {k3x::fnv1a64((prefix + "gate_proj.weight").c_str()), weights[0],
-         kIntermediateSize, kHiddenSize},
-        {k3x::fnv1a64((prefix + "up_proj.weight").c_str()), weights[1],
-         kIntermediateSize, kHiddenSize},
-        {k3x::fnv1a64((prefix + "down_proj.weight").c_str()), weights[2],
-         kHiddenSize, kIntermediateSize},
-    };
     k3x::BackendOptions options;
     options.kind = k3x::BackendKind::cuda_custom;
     options.dense_precision = arguments->precision == "bf16-rounded"
@@ -234,13 +275,20 @@ int main(int argc, char** argv) {
     }
     auto cpu = k3x::make_cpu_backend();
     const auto cpu_reference = cpu->dense_situ_mlp(
-        input, dense_weights, 1.0F, std::nullopt, arguments->layer,
+        input, fixtures.back().dense, 1.0F, std::nullopt, arguments->layer,
         k3x::ProfilePhase::decode);
     if (!cpu_reference) return 8;
     const auto execute = [&]() {
-        return cuda.value()->dense_situ_mlp(
-            input, dense_weights, 1.0F, std::nullopt, arguments->layer,
-            k3x::ProfilePhase::decode);
+        k3x::Result<std::vector<float>> last =
+            k3x::Result<std::vector<float>>::success({});
+        for (const auto& fixture : fixtures) {
+            auto output = cuda.value()->dense_situ_mlp(
+                input, fixture.dense, 1.0F, std::nullopt, arguments->layer,
+                k3x::ProfilePhase::decode);
+            if (!output) return output;
+            last = std::move(output);
+        }
+        return last;
     };
     const auto cold_start = std::chrono::steady_clock::now();
     const auto cold = execute();
@@ -276,10 +324,12 @@ int main(int argc, char** argv) {
     std::cout << std::setprecision(12)
               << "{\"artifact_kind\":\"glm5.2_real_bf16_expert\""
               << ",\"layer_id\":" << arguments->layer
-              << ",\"expert_id\":" << arguments->expert
+              << ",\"expert_id\":" << expert_ids.front()
+              << ",\"expert_count\":" << expert_ids.size()
+              << ",\"last_expert_id\":" << expert_ids.back()
               << ",\"shard_count\":" << paths.size()
               << ",\"precision\":\"" << arguments->precision << "\""
-              << ",\"host_payload_bytes\":" << loaded.value().payload_bytes
+              << ",\"host_payload_bytes\":" << host_payload_bytes
               << ",\"host_load_nanoseconds\":" << host_load_ns
               << ",\"cold_latency_nanoseconds\":" << cold_ns
               << ",\"latency_nanoseconds_median\":" << median(samples)

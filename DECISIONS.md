@@ -168,3 +168,11 @@
 - Evidence: the real layer 10 expert BF16-rounded path fell from 28,154,650 ns to 236,593 ns warm median after caching, while resident bytes stayed 75,497,472 and GPU-vs-CPU relative error stayed 0.1828%. FP32 rerun was 271,493 ns.
 - Accepted because: this removes a measured host-side cost without changing CUDA math or model weights. The cache invalidates when pointer, byte size, or shape changes.
 - Revisit: when direct raw-BF16/tensor-core views can remove the remaining host decode and resident representation tradeoff.
+
+## D-0022 -- Prefer BF16 residency for multi-expert real-shard probes
+
+- Decision: use cached BF16-rounded resident weights as the bounded multi-expert candidate on the 16 GB target GPU; keep FP32 resident as the numerical reference and allow its capacity bypass to remain visible in telemetry.
+- Alternatives: force FP32 residency and accept repeated H2D, evict experts aggressively, or quantize real GLM payloads before a quality gate.
+- Evidence: eight real layer-10 experts used 603,979,776 BF16 resident bytes and measured 1,854,140 ns sequential warm median with zero warm H2D. FP32 required 1,207,959,552 bytes, exceeded the 1 GiB configured budget, transferred 3,019,898,880 warm bytes, and measured 13,153,048 ns.
+- Accepted because: BF16 is the only tested representation that keeps an 8-expert bank resident under the current budget. Quality remains an explicit gate because the per-expert relative numerical difference is 0.1828%.
+- Revisit: after expert-major batched GEMM, direct raw-BF16 storage, and full-layer quality comparison.

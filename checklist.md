@@ -28,6 +28,7 @@
 - [x] Add exact BF16 bundle-loader reads with artifact identity, extent, dtype, and CRC validation.
 - [x] Add a C++ cross-shard BF16 loader and real-shard host payload gate.
 - [x] Execute one nonzero real GLM expert through CUDA and compare against the CPU dense reference.
+- [x] Measure bounded multi-expert resident pressure with real GLM shard data.
 - [x] Record formula-only DSA capacity at 600k/1M tokens.
 - [ ] Validate BF16 dequantized execution against nonzero real GLM shard data and quality metrics.
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.
