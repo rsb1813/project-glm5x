@@ -160,6 +160,8 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
     }
     cache_stats = model.expert_payload_cache_stats
     device_cache_stats = model.expert_device_cache_stats
+    cache_lookups = cache_stats.hits + cache_stats.misses
+    device_cache_lookups = device_cache_stats.hits + device_cache_stats.misses
     payload.update(
         {
             "expert_cache_resident_bytes": cache_stats.resident_bytes,
@@ -167,11 +169,19 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             "expert_cache_hits": cache_stats.hits,
             "expert_cache_misses": cache_stats.misses,
             "expert_cache_evictions": cache_stats.evictions,
+            "expert_cache_hit_rate": (
+                cache_stats.hits / cache_lookups if cache_lookups else 0.0
+            ),
             "expert_device_cache_resident_bytes": device_cache_stats.resident_bytes,
             "expert_device_cache_entries": device_cache_stats.entries,
             "expert_device_cache_hits": device_cache_stats.hits,
             "expert_device_cache_misses": device_cache_stats.misses,
             "expert_device_cache_evictions": device_cache_stats.evictions,
+            "expert_device_cache_hit_rate": (
+                device_cache_stats.hits / device_cache_lookups
+                if device_cache_lookups
+                else 0.0
+            ),
         }
     )
     if device.type == "cuda":
