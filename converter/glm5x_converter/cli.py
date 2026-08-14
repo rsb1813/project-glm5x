@@ -11,6 +11,7 @@ from glm5x_ref.manifest import GLM5XTensorManifest
 from k3x_converter.reader import K3XReader
 from k3x_converter.writer import convert
 
+from .multi import convert_glm5x_shards
 from .shard import convert_glm5x_shard
 
 
@@ -30,6 +31,14 @@ def _parser() -> argparse.ArgumentParser:
     shard.add_argument("--shard-name", required=True)
     shard.add_argument("--chunk-bytes", type=int, default=8 * 1024 * 1024)
     shard.add_argument("--dry-run", action="store_true")
+    shard.add_argument("--stop-after-tensors", type=int)
+    shards = subcommands.add_parser("convert-shards")
+    shards.add_argument("source_dir", type=Path)
+    shards.add_argument("output_dir", type=Path)
+    shards.add_argument("--config", type=Path, required=True)
+    shards.add_argument("--index", type=Path, required=True)
+    shards.add_argument("--chunk-bytes", type=int, default=8 * 1024 * 1024)
+    shards.add_argument("--dry-run", action="store_true")
     validation = subcommands.add_parser("validate")
     validation.add_argument("artifact", type=Path)
     return parser
@@ -69,6 +78,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             args.shard_name,
             chunk_bytes=args.chunk_bytes,
             dry_run=args.dry_run,
+            stop_after_tensors=args.stop_after_tensors,
         )
         print(
             json.dumps(
@@ -80,6 +90,32 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     "sidecar": str(report.sidecar_path),
                     "source_sha256": report.source_sha256,
                     "tensor_count": report.tensor_count,
+                    "reused_extent_count": len(report.reused_extent_ids),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 0
+    if args.command == "convert-shards":
+        config = json.loads(args.config.read_text(encoding="utf-8"))
+        index = json.loads(args.index.read_text(encoding="utf-8"))
+        manifest = GLM5XTensorManifest.from_json(config, index)
+        report = convert_glm5x_shards(
+            args.source_dir,
+            args.output_dir,
+            manifest,
+            chunk_bytes=args.chunk_bytes,
+            dry_run=args.dry_run,
+        )
+        print(
+            json.dumps(
+                {
+                    "completed": report.completed,
+                    "dry_run": args.dry_run,
+                    "maximum_source_read_bytes": report.maximum_source_read_bytes,
+                    "output_count": len(report.output_paths),
+                    "skipped_shards": list(report.skipped_shards),
                 },
                 sort_keys=True,
                 separators=(",", ":"),

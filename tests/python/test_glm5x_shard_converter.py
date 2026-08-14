@@ -79,3 +79,85 @@ def test_bounded_glm_shard_streams_bf16_bytes_and_round_trips(tmp_path) -> None:
     sidecar = json.loads(report.sidecar_path.read_text(encoding="utf-8"))
     assert sidecar["tensor_count"] == 2
     assert {item["name"] for item in sidecar["tensors"]} == set(source_tensors)
+
+
+def test_bounded_glm_shard_resumes_completed_tensor_extents(tmp_path) -> None:
+    shard_name = "model-00001-of-00001.safetensors"
+    source = tmp_path / shard_name
+    save_file(
+        {
+            "model.embed_tokens.weight": torch.arange(32, dtype=torch.bfloat16).reshape(8, 4),
+            "model.layers.0.self_attn.indexer.wk.weight": torch.arange(8, dtype=torch.bfloat16).reshape(2, 4),
+        },
+        str(source),
+    )
+    manifest = GLM5XTensorManifest.from_json(
+        _config(),
+        {
+            "metadata": {"total_size": source.stat().st_size},
+            "weight_map": {
+                "model.embed_tokens.weight": shard_name,
+                "model.layers.0.self_attn.indexer.wk.weight": shard_name,
+            },
+        },
+    )
+    output = tmp_path / "resumable.k3x"
+
+    first = convert_glm5x_shard(
+        source,
+        output,
+        manifest,
+        shard_name,
+        chunk_bytes=17,
+        stop_after_tensors=1,
+    )
+    assert first.completed is False
+    resume = output.with_suffix(output.suffix + ".resume.json")
+    assert resume.exists()
+    partial = output.with_suffix(output.suffix + ".partial")
+    first_bytes = partial.read_bytes()
+
+    second = convert_glm5x_shard(
+        source,
+        output,
+        manifest,
+        shard_name,
+        chunk_bytes=17,
+    )
+    assert second.completed is True
+    assert second.reused_extent_ids == (f"{first.tensor_ids['model.embed_tokens.weight']:016x}:data",)
+    assert output.exists()
+    assert not partial.exists()
+    assert not resume.exists()
+    assert first_bytes
+
+
+def test_bounded_glm_shard_records_complete_expert_role_directory(tmp_path) -> None:
+    shard_name = "model-00001-of-00001.safetensors"
+    source = tmp_path / shard_name
+    names = [
+        "model.layers.0.mlp.experts.0.gate_proj.weight",
+        "model.layers.0.mlp.experts.0.up_proj.weight",
+        "model.layers.0.mlp.experts.0.down_proj.weight",
+    ]
+    save_file(
+        {name: torch.ones((2, 4), dtype=torch.bfloat16) for name in names},
+        str(source),
+    )
+    manifest = GLM5XTensorManifest.from_json(
+        _config(),
+        {
+            "metadata": {"total_size": source.stat().st_size},
+            "weight_map": {name: shard_name for name in names},
+        },
+    )
+
+    report = convert_glm5x_shard(source, tmp_path / "experts.k3x", manifest, shard_name)
+    reader = K3XReader.open(report.output_path)
+
+    assert len(reader.expert_records) == 1
+    expert = reader.expert_records[0]
+    assert (expert.layer_index, expert.expert_id, expert.physical_order) == (0, 0, 0)
+    assert {expert.gate_tensor_id, expert.up_tensor_id, expert.down_tensor_id} == {
+        report.tensor_ids[name] for name in names
+    }
