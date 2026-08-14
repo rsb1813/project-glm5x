@@ -328,3 +328,14 @@
 - Added `layer_cache_capacity` to `GLM5XDecoderModelReference.from_layer_loader`. Capacity zero preserves the prior out-of-core behavior; a positive value retains validated layer objects in an LRU and leaves expert payload caching to the layer/provider policy.
 - The focused cache test passed with identical logits and loader calls `[0, 1]` across two forwards at capacity 2. The full WSL Python suite passed `305 passed, 124 skipped` in `73.05 s`.
 - A small single-threaded synthetic sample measured `1.0073 ms` per forward with capacity 0 and `1.0310 ms` with capacity 2. This is too small to claim a speedup; the value is the measured elimination of repeated layer construction/admission calls, which must be rerun on real all-layer data.
+
+## 2026-08-15 -- Dense GLM MLP reference boundary
+
+- GLM-5.2 declares the first three decoder layers as dense MLPs. Added `GLM5XDenseMlpReference` with official `silu(gate_proj(x)) * up_proj(x)` then `down_proj` ordering and the shared `GLM5XMoEForward` schema.
+- `GLM5XDecoderLayerReference.from_bundle` and `bundle_layer_loader` now accept `mlp_type="dense"` plus an optional `indexer_source_layer`; sparse MoE remains the default. Dense forwards report empty routing and zero expert loads rather than inventing a router result.
+- Focused layer-reference tests passed `3/3`; the WSL Python suite passed `306 passed, 124 skipped` in `73.57 s`. No real all-layer weights, final logits, MTP, CUDA logits, or tok/s were measured.
+
+## 2026-08-15 -- Dense-layer public verification
+
+- Pushed implementation commit `fb3aa7d`. GitHub correctness `31826654966` passed C++ configure/build/CTest and the full Python/cross-language suite; CodeQL `31826655082` also passed.
+- The hosted Linux job took about 7 minutes 10 seconds, with the Python step taking about 5 minutes 19 seconds. This is a hosted CI wall-time observation and does not change the local 73.57-second WSL test measurement or imply a runtime timeout.

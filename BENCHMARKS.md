@@ -561,3 +561,13 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Correctness: both modes produced identical logits. Capacity 2 retained two validated layer objects and the loader call sequence over two forwards was `[0, 1]`; the no-cache regression remains `[0, 1, 0, 1]`.
 - Performance/traffic: the synthetic model is too small for a meaningful latency claim. A single-threaded 8-forward sample measured `1.0073 ms/forward` with capacity 0 and `1.0310 ms/forward` with capacity 2, so no speedup is claimed. The measurable benefit is eliminating repeated layer construction and future real-shard admission calls; real 78-layer RAM/NVMe traffic remains unmeasured.
 - Status: opt-in and runtime-selectable. Capacity 0 remains the default until real trunk footprint and quality parity are measured.
+
+## 2026-08-15 -- Dense GLM MLP reference boundary
+
+- Date: 2026-08-15.
+- Commit: `fb3aa7d`.
+- Hardware/model: WSL2 Ubuntu-24.04 CPU reference; synthetic GLM5X-compatible bundle; no full checkpoint.
+- Mode: `GLM5XDenseMlpReference` plus `GLM5XDecoderLayerReference.from_bundle(..., mlp_type="dense")`, BF16 SwiGLU, explicit empty routing contract.
+- Correctness: focused layer-reference tests passed `3/3`; the full WSL Python suite passed `306 passed, 124 skipped` in `73.57 s`. The dense bundle path produced zero expert loads and retained the decoder-layer shape/state contract.
+- Performance/traffic: decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, and quality were not measured. This is a model-graph correctness boundary only.
+- Status: implemented in the reference path; public correctness `31826654966` and CodeQL `31826655082` both passed. The hosted Linux job took about 7 minutes 10 seconds, including a roughly 5 minute 19 second Python step; this is CI wall time, not model throughput.

@@ -67,3 +67,4 @@
 - [x] Add an opt-in parity-tested device-side expert-major accumulation path and measure it against the `f07d78c` baseline; keep default-off pending full-layer quality evidence.
 - [x] Add opt-in shared-expert device accumulation for the learned MoE path and benchmark it on the exact GLM5XACT handoff; keep default-off pending full-layer quality evidence.
 - [x] Add an opt-in bounded LRU for validated reference trunk layers; keep capacity zero as the default until real 78-layer RAM pressure is measured.
+- [x] Add the GLM-5.2 first-three-layer dense MLP reference path and bundle-backed empty-routing regression.

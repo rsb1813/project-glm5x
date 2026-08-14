@@ -52,6 +52,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - `GLM5XDecoderModelReference.from_layer_loader` provides an out-of-core reference boundary. A forward requests one layer by ID, consumes its MLA/DSA/MoE state, and releases the layer object before the next request; the state tuple retains only recurrent attention data. The loader is correctness-tested but does not yet perform real-shard tensor admission or CUDA overlap.
 - `from_layer_loader` accepts an opt-in `layer_cache_capacity` LRU. A nonzero capacity retains validated decoder-layer trunk objects between forwards, while expert payload caching remains owned by the layer/provider policy. Zero keeps the strict layer-at-a-time residency contract and is the default until real 78-layer RAM pressure is measured.
 - `GLM5XDecoderLayerReference.bundle_layer_loader` opens and identity-checks a cross-shard expert bundle once, shares its tensor-reference map across layer requests, and keeps lazy expert payload reads behind the existing CRC-checked bundle reader. This removes repeated artifact-root scans from the layer provider; it is still CPU/reference-only.
+- `GLM5XDenseMlpReference` covers GLM-5.2's first three `mlp_layer_types=dense` layers with the official SwiGLU order and the existing `GLM5XMoEForward` output schema. `from_bundle(..., mlp_type="dense", indexer_source_layer=...)` makes dense layers and shared-indexer source mapping explicit; empty routing and zero expert loads are intentional. Sparse MoE remains the default path.
 
 ### In progress
 

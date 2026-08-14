@@ -4,7 +4,7 @@
 
 GLM5X is a correctness-first runtime and storage project for running GLM-5.x on a machine with a 16 GB consumer GPU, large system RAM, and NVMe storage. It is designed around the model's sparse MoE routing, DSA/MLA attention, MTP speculative decoding, and expert-major verification rather than treating the workload as a dense model with a generic cache.
 
-> **Status:** GLM-5.2 shape/manifest, exact layer-10 q-residual/MLA/DSA/MoE reference, a multi-layer CPU reference with final logits/greedy incremental parity, an out-of-core layer-loader boundary with opt-in trunk-layer caching, and a learned-router-aware raw-BF16 MoE sublayer CUDA boundary are implemented. The opt-in device-side expert accumulator is parity-tested but remains experimental. No GLM weights are bundled and no end-to-end tok/s number is claimed. The latest local WSL gate is host CTest 15/15, CUDA CTest 27/27, and Python 305 passed/124 skipped.
+> **Status:** GLM-5.2 shape/manifest, exact layer-10 q-residual/MLA/DSA/MoE reference, a multi-layer CPU reference with final logits/greedy incremental parity, an out-of-core layer-loader boundary with opt-in trunk-layer caching, the first-three-layer dense MLP reference path, and a learned-router-aware raw-BF16 MoE sublayer CUDA boundary are implemented. The opt-in device-side expert accumulator is parity-tested but remains experimental. No GLM weights are bundled and no end-to-end tok/s number is claimed. The latest local WSL gate is host CTest 15/15, CUDA CTest 27/27, and Python 306 passed/124 skipped.
 
 ## What is here now
 
@@ -50,6 +50,7 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 - `GLM5XDecoderModelReference.from_layer_loader` requests one decoder layer at a time, preserving only per-layer MLA/DSA recurrent state between calls. This is the reference-side contract for streaming 78 layers without full-model layer residency; real shard admission and async overlap are still pending.
 - The same layer loader has an opt-in bounded LRU for validated trunk layer objects. In the two-layer regression, two forwards made two loader calls with capacity 2 instead of four; capacity 0 retains the strict no-cache behavior.
 - `GLM5XDecoderLayerReference.bundle_layer_loader` reuses one validated cross-shard bundle reader and tensor map across layer requests, while selected expert roles remain lazy and CRC-checked.
+- The reference loader supports GLM-5.2's first three dense MLP layers through an explicit `mlp_type="dense"` path. It applies the official SwiGLU computation, preserves the layer output contract with an empty routing record, and does not admit expert payloads; sparse MoE remains the default.
 - CPU/reference TurboQuant-style KV cache with asymmetric K/V bits and 600k–1M capacity arithmetic. This does not compress model weights and is not yet a CUDA performance path.
 - A `glm5x-convert` entry point that wraps the proven storage converter while model-specific extent roles are completed.
 - Strict separation between implemented code, experiments, proposals, and measurements.

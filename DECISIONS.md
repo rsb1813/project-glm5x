@@ -392,3 +392,11 @@
 - Evidence: the two-layer correctness test produced identical logits. Across two forwards, capacity 2 invoked the loader once per layer (`[0, 1]`) while capacity 0 invoked it on every forward (`[0, 1, 0, 1]`). A single-threaded synthetic timing sample was `1.0073 ms` per forward without cache versus `1.0310 ms` with cache, so no synthetic speedup is claimed.
 - Accepted because: real 78-layer execution must avoid rereading large attention/trunk tensors on every token, but the full trunk footprint and RAM pressure are not yet measured. The explicit capacity makes the tradeoff observable and reversible without changing logits or natural routing.
 - Revisit: after a real all-layer provider exists; measure bytes, construction latency, RAM residency, NVMe traffic, and quality parity before selecting a default capacity or sharing the cache with expert payloads.
+
+## D-0050 -- Model GLM-5.2 dense MLP layers explicitly
+
+- Decision: add `GLM5XDenseMlpReference` and an explicit `mlp_type="dense"` branch to the bundle-backed decoder layer. Compute `silu(gate_proj(x)) * up_proj(x)` followed by `down_proj`, return the existing `GLM5XMoEForward` schema with empty routing, and keep sparse MoE as the default.
+- Alternatives: treat every layer as sparse, special-case dense layers outside the decoder reference, or silently synthesize a zero-expert router record.
+- Evidence: a direct BF16 SwiGLU parity test and a bundle-backed decoder-layer test passed; the full WSL Python suite passed `306 passed, 124 skipped` in `73.57 s`. This is a reference correctness boundary, not a full-checkpoint or throughput result.
+- Accepted because: GLM-5.2 declares the first three layers as dense, so forcing a router/expert bundle there would make an all-layer loader incorrect. The explicit switch keeps the distinction visible and reversible.
+- Revisit: when all 78 real layers are loaded, verify the official shared-indexer mapping and compare full-layer logits before connecting CUDA execution.
