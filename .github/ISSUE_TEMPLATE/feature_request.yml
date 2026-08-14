@@ -1,0 +1,100 @@
+name: Feature Request
+description: Suggest a new GLM5X feature or optimization
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem would this feature solve?
+      placeholder: Describe the problem before describing the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like GLM5X to do?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CUDA / GPU execution
+        - MoE / experts
+        - Routing
+        - AURORA / speculative decoding
+        - L0 / VRAM
+        - L1 / RAM cache
+        - L2 / NVMe
+        - Scheduling / prefetch
+        - Checkpoint format
+        - Converter
+        - Quantization
+        - Benchmark / profiling
+        - API / CLI
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: benefit
+    attributes:
+      label: Expected benefit
+      description: What improvement do you expect?
+      placeholder: |
+        Examples:
+        - lower expert traffic
+        - fewer CUDA launches
+        - lower VRAM usage
+        - better cache hit rate
+        - improved throughput
+        - easier deployment
+    validations:
+      required: true
+
+  - type: dropdown
+    id: correctness
+    attributes:
+      label: Could this change model behavior or quality?
+      options:
+        - "No — intended to be exact"
+        - "Yes — explicitly lossy / quality-performance tradeoff"
+        - "Unknown"
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / references
+      description: Papers, implementations, measurements, traces, or reasoning supporting the proposal.
+
+  - type: textarea
+    id: design
+    attributes:
+      label: Possible implementation
+      description: Optional technical design or implementation idea.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you considered.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and discussions for similar proposals.
+          required: true
+        - label: I have clearly identified estimates or projections as such.
+          required: true

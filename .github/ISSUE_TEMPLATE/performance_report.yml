@@ -1,0 +1,160 @@
+name: Performance Report
+description: Report a performance regression or reproducible performance result
+title: "[Performance]: "
+labels:
+  - performance
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for reproducible GLM5X performance reports.
+
+        Performance claims must clearly distinguish measured values from estimates and synthetic results from full-model results.
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Report type
+      options:
+        - Performance regression
+        - Unexpectedly low performance
+        - Optimization result
+        - CPU / GPU utilization issue
+        - Memory / VRAM issue
+        - Storage / I/O issue
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: GLM5X commit
+      placeholder: "e.g. 7728acd"
+    validations:
+      required: true
+
+  - type: input
+    id: baseline
+    attributes:
+      label: Baseline commit
+      description: Required for regressions when known.
+      placeholder: "e.g. 90b20c8"
+
+  - type: textarea
+    id: result
+    attributes:
+      label: Measured result
+      placeholder: |
+        Before: ...
+        After: ...
+        Difference: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: benchmark
+    attributes:
+      label: Benchmark / workload
+      description: Include the exact benchmark ID or command.
+      placeholder: |
+        Benchmark: B-XXXX
+        Command: ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: model
+    attributes:
+      label: Model / fixture
+      options:
+        - Synthetic K3 fixture
+        - Released-dimension bounded fixture
+        - Full GLM-5.x
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: cpu
+    attributes:
+      label: CPU
+      placeholder: "e.g. AMD Ryzen 7 9800X3D"
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      placeholder: "e.g. NVIDIA GeForce RTX 5080"
+
+  - type: input
+    id: ram
+    attributes:
+      label: RAM
+      placeholder: "e.g. 96 GB DDR5"
+
+  - type: input
+    id: storage
+    attributes:
+      label: Storage
+      placeholder: "e.g. Solidigm P44 Pro 2 TB"
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "e.g. native Ubuntu 24.04 / WSL2"
+    validations:
+      required: true
+
+  - type: input
+    id: cuda
+    attributes:
+      label: CUDA / driver
+      placeholder: "e.g. CUDA 13.3"
+
+  - type: textarea
+    id: config
+    attributes:
+      label: GLM5X configuration
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: metrics
+    attributes:
+      label: Relevant metrics
+      placeholder: |
+        decode tok/s:
+        prefill tok/s:
+        Reader bytes:
+        physical read bytes:
+        H2D:
+        D2H:
+        peak VRAM:
+        RAM:
+        L1 hits/misses:
+        kernel launches:
+        GPU utilization:
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: verification
+    attributes:
+      label: Measurement integrity
+      options:
+        - label: These values were measured, not estimated.
+          required: true
+        - label: I identified whether the workload is synthetic, bounded, or full-model.
+          required: true
+        - label: I identified whether the environment is WSL2 or native Linux.
+          required: true

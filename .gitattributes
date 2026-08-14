@@ -1,0 +1,3 @@
+*.k3xp -text
+results/**/*.json text eol=lf
+results/**/*.csv text eol=lf

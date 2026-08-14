@@ -1,0 +1,29 @@
+name: correctness
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Configure C++ runtime
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build C++ runtime
+        run: cmake --build build
+      - name: Run C++ tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Run Python and cross-language tests
+        run: python -m pytest tests/python -q

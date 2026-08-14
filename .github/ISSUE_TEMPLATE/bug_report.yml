@@ -1,0 +1,154 @@
+name: Bug Report
+description: Report a reproducible problem with GLM5X
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve GLM5X.
+
+        Please provide enough information to reproduce the issue.
+
+        **Security vulnerabilities must not be reported here.** Please use GitHub Private Vulnerability Reporting instead.
+
+  - type: input
+    id: commit
+    attributes:
+      label: GLM5X commit
+      description: Commit SHA or version where the issue occurs.
+      placeholder: "e.g. 7728acd"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Runtime / model execution
+        - CUDA / GPU
+        - MoE / expert execution
+        - Routing
+        - AURORA / speculative decoding
+        - L1 expert cache
+        - L2 / NVMe / I/O
+        - GLM5X checkpoint format
+        - Converter
+        - Benchmark / profiling
+        - Build / CI
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem clearly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Build with ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: Paste the exact command used.
+      render: shell
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "e.g. native Ubuntu 24.04, WSL2 Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: input
+    id: cpu
+    attributes:
+      label: CPU
+      placeholder: "e.g. AMD Ryzen 7 9800X3D"
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      placeholder: "e.g. NVIDIA GeForce RTX 5080"
+
+  - type: input
+    id: cuda
+    attributes:
+      label: CUDA version
+      placeholder: "e.g. CUDA 13.3"
+
+  - type: input
+    id: ram
+    attributes:
+      label: System RAM
+      placeholder: "e.g. 96 GB"
+
+  - type: input
+    id: storage
+    attributes:
+      label: Storage
+      placeholder: "e.g. Solidigm P44 Pro 2 TB"
+
+  - type: textarea
+    id: runtime
+    attributes:
+      label: Relevant GLM5X configuration
+      description: Include backend, routing, cache, transfer, L2, speculative, or CUDA settings when relevant.
+      placeholder: |
+        backend: cuda-custom
+        routing: natural
+        cuda-boundary: ffn-block
+        l1-expert-cache: disabled
+        l2-io: pread
+        l2-cache: buffered
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Paste relevant logs, stack traces, sanitizer output, or errors.
+      render: text
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else that may help reproduce or understand the issue.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+        - label: I have not presented synthetic benchmark results as full GLM-5.x performance.
+          required: true

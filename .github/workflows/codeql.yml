@@ -1,0 +1,52 @@
+name: CodeQL
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["cpp", "python"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Set up Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python package
+        if: matrix.language == 'python'
+        run: python -m pip install -e '.[dev]'
+
+      - name: Configure C++
+        if: matrix.language == 'cpp'
+        run: cmake -S . -B build-codeql -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build C++
+        if: matrix.language == 'cpp'
+        run: cmake --build build-codeql --parallel 2
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3

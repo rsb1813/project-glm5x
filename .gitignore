@@ -1,0 +1,21 @@
+.worktrees/
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+build/
+build-*/
+build-fixtures/
+build-results/
+artifacts/
+*.k3x.partial
+*.k3x.resume.json
+
+# Never commit model data or local GLM artifacts.
+models/
+checkpoints/
+weights/
+*.safetensors
+*.gguf
+*.bin
