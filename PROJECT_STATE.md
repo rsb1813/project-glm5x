@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a multi-layer CPU reference with final logits and greedy incremental parity, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, and an explicit GLM SiLU path are implemented over five bounded real shards. The current verified HEAD is `4f9c3c2`; public correctness `31822433552` and CodeQL `31822433677` are green. Full real-checkpoint execution, MTP, CUDA final logits, and end-to-end tok/s remain unmeasured.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a multi-layer CPU reference with final logits and greedy incremental parity, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, an explicit GLM SiLU path, on-demand model layer loading, shared bundle readers, and opt-in lazy payload validation are implemented over five bounded real shards. The current verified HEAD is `0040791`; public correctness `31824430721` and CodeQL `31824430714` are green. Full real-checkpoint execution, MTP, CUDA final logits, and end-to-end tok/s remain unmeasured.
 
 ## Completed
 
@@ -52,6 +52,9 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Added `GLM5XACT` v1 Python/C++ BF16 activation artifacts with atomic writing, fixed headers, shape/extent/CRC validation, and optional benchmark input/expected-output comparison.
 - Added a narrow pytest boundary for historical K3X evidence files absent from the GLM5X repository; new GLM5X tests remain active. GitHub Actions correctness and CodeQL pass on `f07d78c`.
 - Added an explicit GLM SiLU gated-MoE activation path in CPU and CUDA while retaining the inherited SiTU path for legacy callers. The bounded layer-10 learned-MoE probe now has route parity and a BF16-boundary expected-output comparison.
+- Added `GLM5XDecoderModelReference.from_layer_loader` so full-model reference state can request one validated layer at a time without retaining all layer objects in RAM; eager construction remains available for parity.
+- Added `GLM5XDecoderLayerReference.bundle_layer_loader`, which reuses one root-verified bundle reader and tensor-reference map across layer requests while keeping selected expert payloads lazy.
+- Added opt-in `K3XReader`/`GLM5XExpertBundle` lazy admission. Directory metadata is checked immediately, selected tensor CRCs are verified on first read, and strict eager payload/root verification remains the default correctness mode.
 
 ## In progress
 
@@ -88,7 +91,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 
 ## Latest verified state
 
-- Focused GLM descriptor, manifest, CLI, toy/reference graph, TurboQuant, DSA, official indexer, shard-converter, bundle loader, exact MLA/DSA layer/model reference, and multi-shard tests: `302 passed, 124 skipped` in WSL Python (`69.41 s`). The Windows Python interpreter still lacks pytest; the CUDA Python test remains skipped on Windows because the WSL ELF binary is not a Windows executable.
+- Focused GLM descriptor, manifest, CLI, toy/reference graph, TurboQuant, DSA, official indexer, shard-converter, bundle loader, exact MLA/DSA layer/model reference, lazy layer/bundle admission, and multi-shard tests: `304 passed, 124 skipped` in WSL Python (`71.00 s`). The Windows Python interpreter still lacks pytest; the CUDA Python test remains skipped on Windows because the WSL ELF binary is not a Windows executable.
 - CUDA CMake build: successful in WSL with CUDA 13.3 and RTX 5080 compute capability 12.0.
 - CTest: 27/27 tests passed in WSL, including `glm5x_activation`.
 - CPU WSL CTest: 15/15 tests passed after the expert-major CUDA API change.
@@ -116,6 +119,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Historical K3X evidence checks are explicitly skipped when their absent `results/` artifacts are not shipped; the Linux workflow still builds C++, runs CTest, and runs all new GLM5X tests. The Windows local environment still lacks the Linux-built executable for one cross-language test.
 - Public Linux correctness workflow `31812923197` and CodeQL workflow `31812923191` both passed for implementation commit `f07d78c`. The Linux job completed in about 3 minutes 51 seconds and the CodeQL jobs completed in about 3 minutes 20 seconds. The workflows still emit non-failing Node 20 and CodeQL v3 deprecation annotations.
 - Public Linux correctness workflow `31822433552` and CodeQL workflow `31822433677` both passed for verified HEAD `4f9c3c2`. Linux completed in `3m13s`; CodeQL completed in `4m28s` for C++ and `2m15s` for Python. No failure or timeout occurred on this head.
+- Public Linux correctness workflow `31824430721` and CodeQL workflow `31824430714` both passed for verified HEAD `0040791`. Linux completed in `2m43s`; CodeQL completed in `3m39s` for C++ and `2m29s` for Python. The CodeQL overlay-base message was a non-failing fallback annotation, not a failed check.
 - No end-to-end GLM decode tok/s or quality result exists yet.
 - The 2026-08-15 prepared-bucket cache and one-token shared-dispatch experiment was reverted after paired RTX 5080 medians were approximately 3.4% slower for token-1 and 1.1% slower for token-2 than the `f07d78c` baseline. The next performance experiment is device-side expert-output accumulation; no optimization is accepted from theory alone.
 - The device-side ragged expert accumulation experiment now passes direct, varied-bucket, host, and CUDA parity. It remains runtime-switchable and default-off because the three-run latency spread is material and the full layer, final logits, and quality path are not yet connected.
@@ -129,5 +133,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
 - Last known-good implementation HEAD: `f07d78c` (`feat: align GLM MoE activation with SiLU`). WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the complete WSL Python suite `301 passed, 124 skipped in 71.25 s` are green. Public Linux correctness `31812923197` and CodeQL `31812923191` also passed.
-- Last known-good implementation/docs HEAD: `4f9c3c2` (`docs: record model logits reference boundary`). WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the complete WSL Python suite `302 passed, 124 skipped` are green. Public correctness `31822433552` and CodeQL `31822433677` also passed.
+- Last known-good implementation/docs HEAD: `0040791` (`docs: record lazy shard admission`). WSL host CTest `15/15`, WSL CUDA CTest `27/27`, and the complete WSL Python suite `304 passed, 124 skipped` are green. Public correctness `31824430721` and CodeQL `31824430714` also passed.
 - Next bottleneck: load the real all-layer tensors into the new model reference, export the exact layer-10 q-residual/MLA/DSA hidden state into `GLM5XACT`, verify nonzero full-layer parity, then add pinned/asynchronous raw H2D, direct tensor-core selection, MTP, and VRAM-pressure-aware residency. Full weights remain intentionally absent, so no end-to-end tok/s is claimed.

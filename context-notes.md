@@ -314,3 +314,9 @@
 - Added `K3XReader.open(..., verify_payloads=False, verify_root=False)` and matching `GLM5XExpertBundle.open`/layer-loader flags. Eager verification remains the default; lazy reads verify selected tensor and auxiliary CRCs on first access under a lock.
 - On the real `build-glm5x-hf-probe/first-shard.k3x` (5.34 GB, 35 tensors), lazy directory open took `0.003153 s`; first selected tensor read plus CRC took `8.989272 s`; strict eager open took `49.816001 s`. This is cold-start/traffic evidence, not tok/s.
 - The measured startup reduction is useful for layer-at-a-time runtime admission, but `verify_root=False` is an explicitly weaker integrity mode and remains experimental until full runtime telemetry and recovery policy are added.
+
+## 2026-08-15 -- Latest public verification
+
+- After `0040791`, GitHub Actions correctness run `31824430721` passed in `2m43s`; C++ build/CTest and the full Python/cross-language step passed. CodeQL run `31824430714` also passed, with C++ analysis completing in `3m39s` and Python analysis in `2m29s`.
+- The CodeQL overlay-base warning was a non-failing fallback annotation. No current Linux failure or two-minute timeout is present on `main`.
+- The repository has zero open Dependabot PRs. Dependabot security alerts are disabled by repository configuration, so the API's `403` response confirms unavailable alerting rather than a confirmed vulnerability count.
