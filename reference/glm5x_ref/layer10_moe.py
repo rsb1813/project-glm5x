@@ -690,7 +690,7 @@ def _collect_tensor_refs(
             sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise K3XError("GLM5X_LAYER_SIDECAR_INVALID", str(sidecar_path)) from exc
-        records = {record.tensor_id: record for record in bundle.readers[artifact_key].tensor_records}
+        records = bundle.record_indexes[artifact_key]
         for item in sidecar.get("tensors", []):
             name = item.get("name") if isinstance(item, dict) else None
             tensor_id = item.get("tensor_id") if isinstance(item, dict) else None
