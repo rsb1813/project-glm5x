@@ -65,6 +65,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="bounded exact decoded CUDA expert cache capacity; 0 disables it",
     )
     parser.add_argument(
+        "--expert-precision",
+        choices=("bf16", "fp8"),
+        default="bf16",
+        help="expert projection precision; fp8 is experimental and default-off",
+    )
+    parser.add_argument(
         "--lazy-bundle",
         action="store_true",
         help="skip whole-artifact payload/root scans and CRC-check selected tensors on read",
@@ -103,6 +109,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         expert_load_workers=arguments.expert_load_workers,
         expert_cache_capacity_bytes=arguments.expert_cache_bytes,
         expert_device_cache_capacity_bytes=arguments.expert_device_cache_bytes,
+        expert_precision=arguments.expert_precision,
     )
     prompt = torch.tensor(arguments.prompt, dtype=torch.long, device=device)
     _synchronize(device)
@@ -163,6 +170,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         "expert_load_workers": arguments.expert_load_workers,
         "expert_cache_bytes": arguments.expert_cache_bytes,
         "expert_device_cache_bytes": arguments.expert_device_cache_bytes,
+        "expert_precision": arguments.expert_precision,
         "lazy_bundle": arguments.lazy_bundle,
     }
     cache_stats = model.expert_payload_cache_stats

@@ -742,3 +742,12 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - CodeQL run `31849485259`: success in approximately `3m37s`.
 - Dependabot pip update run `31849582869`: success; GitHub Actions update run `31849582874`: success. No update PR was opened; existing Dependabot PRs `#1`--`#4` remain closed.
 - Repository security-alert enumeration is disabled and returned HTTP `403`, so this confirms workflow/update health only, not a CVE count. Local WSL `python -m pip check` reported `No broken requirements found`.
+
+## 2026-08-15 -- Experimental row-scaled FP8 expert path
+
+- Date: 2026-08-15.
+- Hardware/model: RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.0, official GLM-5.2 five-shard layer-10 probe, exact raw-BF16 source roles.
+- Mode: one token through the real layer-10 MoE, four parallel payload readers, exact router and shared expert, with host-side row-scaled E4M3 conversion before CUDA staging. The exact comparison used the same bundle and hidden input.
+- Timing: exact `2.751867 s` cold and `4.731 ms` warm; FP8 `2.901232 s` cold and `5.713 ms` warm. The current experimental path is slower in this bounded sample because quantization and scaled GEMM overhead exceed the saved device bytes; no on-disk packed FP8 artifact was used.
+- Correctness/quality: Top-K route IDs were identical; output relative L2 drift was `5.603%`, maximum absolute difference `0.265625`. Focused layer/model/reference tests passed `14/14`.
+- Interpretation: retain the switch as default-off research. A persistent packed artifact, mixed-precision residuals, and a full-model quality/traffic gate are required before considering FP8 for BALANCED or QUALITY modes. No end-to-end tok/s was measured.

@@ -205,3 +205,16 @@ def test_glm5x_decoded_expert_cache_tracks_exact_residency() -> None:
     assert stats.hits == 1
     assert stats.misses == 0
     assert stats.evictions == 0
+
+
+def test_glm5x_fp8_expert_mlp_has_bounded_cpu_error() -> None:
+    expert = _weights(0)
+    quantized = GLM5XLayer10MoEReference._quantize_expert_fp8(expert)
+    hidden = torch.randn((3, 3), dtype=torch.bfloat16)
+    expected = GLM5XLayer10MoEReference._mlp(hidden, expert)
+    actual = GLM5XLayer10MoEReference._mlp(hidden, quantized)
+    assert quantized.gate_proj.dtype == torch.float8_e4m3fn
+    assert quantized.gate_scale is not None
+    assert actual.shape == expected.shape
+    assert torch.isfinite(actual).all()
+    assert float((actual.float() - expected.float()).norm() / expected.float().norm()) < 0.25

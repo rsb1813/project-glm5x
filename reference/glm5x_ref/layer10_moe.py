@@ -31,6 +31,9 @@ class GLM5XExpertWeights:
     gate_proj: torch.Tensor
     up_proj: torch.Tensor
     down_proj: torch.Tensor
+    gate_scale: torch.Tensor | None = None
+    up_scale: torch.Tensor | None = None
+    down_scale: torch.Tensor | None = None
 
     def __post_init__(self) -> None:
         gate = torch.as_tensor(self.gate_proj)
@@ -42,6 +45,28 @@ class GLM5XExpertWeights:
             raise ValueError("GLM5X_EXPERT_WEIGHT_SHAPE_MISMATCH")
         if gate.dtype != up.dtype or gate.dtype != down.dtype:
             raise ValueError("GLM5X_EXPERT_WEIGHT_DTYPE_MISMATCH")
+        scales = (self.gate_scale, self.up_scale, self.down_scale)
+        if any(scale is not None for scale in scales):
+            if any(scale is None for scale in scales):
+                raise ValueError("GLM5X_EXPERT_SCALE_SET_INCOMPLETE")
+            for weight, scale in zip((gate, up, down), scales):
+                assert scale is not None
+                value = torch.as_tensor(scale)
+                if value.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+                    raise ValueError("GLM5X_EXPERT_SCALE_DTYPE")
+                if value.shape != (weight.shape[0], 1):
+                    raise ValueError("GLM5X_EXPERT_SCALE_SHAPE")
+
+    @property
+    def is_fp8(self) -> bool:
+        return (
+            self.gate_proj.dtype == torch.float8_e4m3fn
+            and self.up_proj.dtype == torch.float8_e4m3fn
+            and self.down_proj.dtype == torch.float8_e4m3fn
+            and self.gate_scale is not None
+            and self.up_scale is not None
+            and self.down_scale is not None
+        )
 
 
 @dataclass(frozen=True)
@@ -196,6 +221,7 @@ class GLM5XLayer10MoEReference:
         expert_batch_loader: ExpertBatchLoader | None = None,
         expert_load_workers: int = 1,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
+        expert_precision: str = "bf16",
     ) -> None:
         router_weight = torch.as_tensor(router_weight)
         correction_bias = torch.as_tensor(correction_bias)
@@ -222,6 +248,8 @@ class GLM5XLayer10MoEReference:
             raise ValueError("GLM5X_INVALID_EXPERT_CACHE_FLAG")
         if execution_mode not in {"loop", "expert_major"}:
             raise ValueError("GLM5X_INVALID_EXECUTION_MODE")
+        if expert_precision not in {"bf16", "fp8"}:
+            raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
         if expert_batch_loader is not None and not callable(expert_batch_loader):
             raise ValueError("GLM5X_INVALID_EXPERT_BATCH_LOADER")
         if (
@@ -237,7 +265,11 @@ class GLM5XLayer10MoEReference:
         self.router_weight = router_weight
         self.correction_bias = correction_bias.to(torch.float32)
         self.expert_loader = expert_loader
-        self.shared_expert = shared_expert
+        self.shared_expert = (
+            self._quantize_expert_fp8(shared_expert)
+            if expert_precision == "fp8"
+            else shared_expert
+        )
         self.top_k = top_k
         self.routed_scaling_factor = float(routed_scaling_factor)
         self.n_group = n_group
@@ -248,6 +280,7 @@ class GLM5XLayer10MoEReference:
         self.expert_batch_loader = expert_batch_loader
         self.expert_load_workers = expert_load_workers
         self.expert_device_cache = expert_device_cache
+        self.expert_precision = expert_precision
         self._expert_cache: dict[int, GLM5XExpertWeights] = {}
 
     @property
@@ -264,6 +297,8 @@ class GLM5XLayer10MoEReference:
         expert = self.expert_loader(int(expert_id))
         if not isinstance(expert, GLM5XExpertWeights):
             raise ValueError("GLM5X_EXPERT_LOADER_RETURN_TYPE")
+        if self.expert_precision == "fp8":
+            expert = self._quantize_expert_fp8(expert)
         if expert.gate_proj.shape[1] != self.hidden_size:
             raise ValueError("GLM5X_EXPERT_HIDDEN_SIZE_MISMATCH")
         if self.cache_experts:
@@ -297,6 +332,8 @@ class GLM5XLayer10MoEReference:
             expert = batch[expert_id]
             if not isinstance(expert, GLM5XExpertWeights):
                 raise ValueError("GLM5X_EXPERT_LOADER_RETURN_TYPE")
+            if self.expert_precision == "fp8":
+                expert = self._quantize_expert_fp8(expert)
             if expert.gate_proj.shape[1] != self.hidden_size:
                 raise ValueError("GLM5X_EXPERT_HIDDEN_SIZE_MISMATCH")
             experts[expert_id] = expert
@@ -306,7 +343,69 @@ class GLM5XLayer10MoEReference:
         return experts, tuple(loaded)
 
     @staticmethod
+    def _quantize_expert_fp8(expert: GLM5XExpertWeights) -> GLM5XExpertWeights:
+        """Create an experimental row-scaled E4M3 expert copy."""
+        if expert.is_fp8:
+            return expert
+
+        def quantize(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            source = weight.detach().to(dtype=torch.float32)
+            scale = source.abs().amax(dim=1, keepdim=True).div(448.0).clamp_min(1e-12)
+            return (source / scale).to(torch.float8_e4m3fn), scale
+
+        gate, gate_scale = quantize(expert.gate_proj)
+        up, up_scale = quantize(expert.up_proj)
+        down, down_scale = quantize(expert.down_proj)
+        return GLM5XExpertWeights(
+            gate_proj=gate,
+            up_proj=up,
+            down_proj=down,
+            gate_scale=gate_scale,
+            up_scale=up_scale,
+            down_scale=down_scale,
+        )
+
+    @staticmethod
+    def _fp8_linear(
+        hidden: torch.Tensor,
+        weight: torch.Tensor,
+        weight_scale: torch.Tensor,
+    ) -> torch.Tensor:
+        if hidden.ndim != 2 or weight.ndim != 2:
+            raise ValueError("GLM5X_FP8_LINEAR_SHAPE")
+        source = hidden.to(dtype=torch.float32)
+        input_scale = source.abs().amax(dim=1, keepdim=True).div(448.0).clamp_min(1e-12)
+        input_fp8 = (source / input_scale).to(torch.float8_e4m3fn)
+        if hidden.device.type == "cuda":
+            return torch._scaled_mm(
+                input_fp8,
+                weight.transpose(0, 1),
+                scale_a=input_scale,
+                scale_b=weight_scale.transpose(0, 1).contiguous(),
+                out_dtype=torch.bfloat16,
+            )
+        dequantized = weight.to(dtype=torch.float32) * weight_scale.to(
+            device=weight.device, dtype=torch.float32
+        )
+        return torch.nn.functional.linear(
+            hidden.to(dtype=torch.float32), dequantized
+        ).to(dtype=torch.bfloat16)
+
+    @staticmethod
     def _mlp(hidden: torch.Tensor, expert: GLM5XExpertWeights) -> torch.Tensor:
+        if expert.is_fp8:
+            assert expert.gate_scale is not None
+            assert expert.up_scale is not None
+            assert expert.down_scale is not None
+            gate = GLM5XLayer10MoEReference._fp8_linear(
+                hidden, expert.gate_proj, expert.gate_scale
+            )
+            up = GLM5XLayer10MoEReference._fp8_linear(
+                hidden, expert.up_proj, expert.up_scale
+            )
+            return GLM5XLayer10MoEReference._fp8_linear(
+                F.silu(gate) * up, expert.down_proj, expert.down_scale
+            )
         gate_weight = expert.gate_proj.to(device=hidden.device)
         up_weight = expert.up_proj.to(device=hidden.device)
         down_weight = expert.down_proj.to(device=hidden.device)
@@ -479,6 +578,7 @@ class GLM5XLayer10MoEReference:
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
+        expert_precision: str = "bf16",
     ) -> "GLM5XLayer10MoEReference":
         bundle = GLM5XExpertBundle.open(
             bundle_path, expert_cache_capacity_bytes=expert_cache_capacity_bytes
@@ -498,6 +598,7 @@ class GLM5XLayer10MoEReference:
             execution_mode=execution_mode,
             expert_load_workers=expert_load_workers,
             expert_device_cache=expert_device_cache,
+            expert_precision=expert_precision,
         )
 
     @classmethod
@@ -519,10 +620,13 @@ class GLM5XLayer10MoEReference:
         execution_mode: str = "loop",
         expert_load_workers: int = 1,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
+        expert_precision: str = "bf16",
     ) -> "GLM5XLayer10MoEReference":
 
         prefix = f"model.layers.{layer_id}.mlp"
         target = None if device is None else torch.device(device)
+        if expert_precision not in {"bf16", "fp8"}:
+            raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
         router_weight = cls._read_tensor(tensor_refs, f"{prefix}.gate.weight").to(
             device=target, dtype=torch.float32
         )
@@ -535,13 +639,28 @@ class GLM5XLayer10MoEReference:
             f"{prefix}.shared_experts.up_proj.weight",
             f"{prefix}.shared_experts.down_proj.weight",
         )
+        if expert_precision == "fp8":
+            shared = cls._quantize_expert_fp8(shared)
         if target is not None:
             shared = GLM5XExpertWeights(
-                *(tensor.to(device=target) for tensor in (
-                    shared.gate_proj,
-                    shared.up_proj,
-                    shared.down_proj,
-                ))
+                gate_proj=shared.gate_proj.to(device=target),
+                up_proj=shared.up_proj.to(device=target),
+                down_proj=shared.down_proj.to(device=target),
+                gate_scale=(
+                    None
+                    if shared.gate_scale is None
+                    else shared.gate_scale.to(device=target)
+                ),
+                up_scale=(
+                    None
+                    if shared.up_scale is None
+                    else shared.up_scale.to(device=target)
+                ),
+                down_scale=(
+                    None
+                    if shared.down_scale is None
+                    else shared.down_scale.to(device=target)
+                ),
             )
 
         def load_expert(expert_id: int) -> GLM5XExpertWeights:
@@ -559,6 +678,7 @@ class GLM5XLayer10MoEReference:
                 (expert_intermediate_size, hidden_size),
                 (hidden_size, expert_intermediate_size),
                 device=target,
+                precision=expert_precision,
             )
             if expert_device_cache is not None:
                 expert_device_cache.put(cache_key, expert)
@@ -600,6 +720,7 @@ class GLM5XLayer10MoEReference:
                     (expert_intermediate_size, hidden_size),
                     (hidden_size, expert_intermediate_size),
                     device=target,
+                    precision=expert_precision,
                 )
                 if expert_device_cache is not None:
                     expert_device_cache.put((layer_id, expert_id), expert)
@@ -621,6 +742,7 @@ class GLM5XLayer10MoEReference:
             expert_batch_loader=load_experts if expert_load_workers > 1 else None,
             expert_load_workers=expert_load_workers,
             expert_device_cache=expert_device_cache,
+            expert_precision=expert_precision,
         )
 
     @staticmethod
@@ -669,20 +791,40 @@ class GLM5XLayer10MoEReference:
         down_shape: tuple[int, int],
         *,
         device: torch.device | str | None = None,
+        precision: str = "bf16",
     ) -> GLM5XExpertWeights:
         target = None if device is None else torch.device(device)
+        if precision not in {"bf16", "fp8"}:
+            raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
 
         def decode(role: str, shape: tuple[int, int]) -> torch.Tensor:
             data = payload.get(role)
             if data is None or len(data) != shape[0] * shape[1] * 2:
                 raise K3XError("GLM5X_LAYER_EXPERT_PAYLOAD", role)
-            value = _tensor_from_readonly_buffer(data, torch.int16).view(torch.bfloat16).reshape(shape)
-            return value if target is None else value.to(device=target)
+            return _tensor_from_readonly_buffer(data, torch.int16).view(torch.bfloat16).reshape(shape)
 
-        return GLM5XExpertWeights(
+        expert = GLM5XExpertWeights(
             gate_proj=decode("gate_proj", intermediate_hidden),
             up_proj=decode("up_proj", intermediate_hidden),
             down_proj=decode("down_proj", down_shape),
+        )
+        if precision == "fp8":
+            expert = cls._quantize_expert_fp8(expert)
+        if target is None:
+            return expert
+        return GLM5XExpertWeights(
+            gate_proj=expert.gate_proj.to(device=target),
+            up_proj=expert.up_proj.to(device=target),
+            down_proj=expert.down_proj.to(device=target),
+            gate_scale=(
+                None if expert.gate_scale is None else expert.gate_scale.to(device=target)
+            ),
+            up_scale=(
+                None if expert.up_scale is None else expert.up_scale.to(device=target)
+            ),
+            down_scale=(
+                None if expert.down_scale is None else expert.down_scale.to(device=target)
+            ),
         )
 
 

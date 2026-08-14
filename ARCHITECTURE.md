@@ -64,6 +64,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - `GLM5XExpertBundle` also has an opt-in bounded exact host payload cache keyed by `(layer, expert)`. It caches raw role bytes across layer objects and token forwards, reports hits/misses/evictions, and leaves capacity `0` as the default.
 - The bundle-backed reference can additionally share an opt-in bounded decoded expert tensor cache on the target device. It is keyed by `(layer, expert)`, reports its own residency/hit/eviction counters, and is disabled by default to protect the 16 GB GPU.
 - Large raw-BF16/FP32 role payloads are decoded through a read-only `memoryview` so the CPU tensor view does not create a second host copy; tiny synthetic buffers use a writable fallback only to avoid PyTorch's non-writable-buffer warning. This is a storage-decode optimization and does not change the exact bytes, routing, or final H2D copy.
+- The reference MoE exposes an experimental `expert_precision="fp8"` / `--expert-precision fp8` path. It uses row-scaled E4M3 weights and CUDA `torch._scaled_mm`, while `bf16` remains the exact default. The path is a quality/performance experiment only; it does not alter router scores or Top-K selection.
 - `tools/monitor_glm5x_full_gate.sh` is an optional local coordinator. It waits for all 282 atomic source-deletion markers, invokes the stream's lazy final assembly without a payload copy, and then runs separate cold and cached CUDA reference gates. It does not provision cloud resources or alter the conversion workers.
 
 ### In progress

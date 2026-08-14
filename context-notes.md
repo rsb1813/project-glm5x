@@ -456,3 +456,9 @@
 - `1ff787b` is the current public HEAD. Linux correctness `31849485242` and CodeQL `31849485259` both passed; the earlier `214590b` correctness and CodeQL runs also passed.
 - The two Dependabot update jobs for the current push completed successfully without opening a new PR. All visible Dependabot PRs (`#1`--`#4`) are closed.
 - The repository's Dependabot security-alert API is disabled (`403`), so the UI alarm list cannot be interpreted as a verified vulnerability count. Local WSL dependency consistency passed with `python -m pip check`.
+
+## 2026-08-15 -- Experimental FP8 expert precision
+
+- Added `expert_precision="fp8"` through the layer/model reference and `--expert-precision fp8` to the benchmark CLI. It quantizes each expert projection row to E4M3 with a float scale and uses CUDA `torch._scaled_mm`; exact BF16 remains the default.
+- The real layer-10 probe showed identical route IDs but `5.603%` output relative L2 drift. Host-quantized FP8 was `2.901 s` cold and `5.713 ms` warm versus exact `2.752 s` and `4.731 ms`, so it is not a speed promotion yet.
+- The next useful step is a persistent packed FP8/MXFP4 sidecar so H2D savings are measured without quantizing after the raw BF16 transfer. Do not infer full-model TPS from this sublayer result.

@@ -88,6 +88,7 @@ class GLM5XDecoderLayerReference:
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
+        expert_precision: str = "bf16",
     ) -> "GLM5XDecoderLayerReference":
         bundle = GLM5XExpertBundle.open(
             bundle_path,
@@ -118,6 +119,7 @@ class GLM5XDecoderLayerReference:
             use_sparse_topk=use_sparse_topk,
             expert_load_workers=expert_load_workers,
             expert_device_cache=expert_device_cache,
+            expert_precision=expert_precision,
         )
 
     @classmethod
@@ -147,6 +149,7 @@ class GLM5XDecoderLayerReference:
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
+        expert_precision: str = "bf16",
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
         """Open and validate one bundle once, then provide individual layers."""
         bundle = GLM5XExpertBundle.open(
@@ -181,6 +184,7 @@ class GLM5XDecoderLayerReference:
                 use_sparse_topk=use_sparse_topk,
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
+                expert_precision=expert_precision,
             )
 
         return load
@@ -211,6 +215,7 @@ class GLM5XDecoderLayerReference:
         use_sparse_topk: bool = False,
         expert_load_workers: int = 1,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
+        expert_precision: str = "bf16",
     ) -> "GLM5XDecoderLayerReference":
         if mlp_type not in {"dense", "sparse"}:
             raise ValueError("GLM5X_LAYER_MLP_TYPE")
@@ -273,6 +278,7 @@ class GLM5XDecoderLayerReference:
                 execution_mode=execution_mode,
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
+                expert_precision=expert_precision,
             )
         return cls(
             input_layernorm=read(f"{prefix}.input_layernorm.weight"),

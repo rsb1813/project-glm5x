@@ -220,6 +220,7 @@ class GLM5XDecoderModelReference:
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache_capacity_bytes: int = 0,
+        expert_precision: str = "bf16",
     ) -> "GLM5XDecoderModelReference":
         """Build an out-of-core model factory from one validated GLM bundle.
 
@@ -321,6 +322,7 @@ class GLM5XDecoderModelReference:
                 use_sparse_topk=use_sparse_topk,
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
+                expert_precision=expert_precision,
             )
 
         instance = cls.from_layer_loader(

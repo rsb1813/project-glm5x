@@ -521,3 +521,11 @@
 - Evidence: the focused expert-bundle/MLA/layer/model/MoE suite passed `16/16` with no warnings after the fallback was added. The large-payload path remains a view over the reader bytes; no payload, route, or output-parity test changed. No full-model timing or host-memory measurement has been run yet.
 - Accepted because: it removes one avoidable CPU copy on the real multi-megabyte expert/trunk payload path while keeping the synthetic reference suite warning-free and preserving the existing exact validation boundary.
 - Revisit: after the 282-shard full-bundle gate records decode latency, host RSS, and H2D traffic. Replace the threshold or move the path to the native reader if Python view lifetime or allocator behavior becomes material.
+
+## D-0066 -- Keep row-scaled FP8 expert execution experimental
+
+- Decision: expose row-scaled E4M3 expert weights behind `expert_precision="fp8"` and `--expert-precision fp8`; keep raw BF16 exact execution as the default and correctness reference.
+- Alternatives: promote FP8 globally, quantize only the router/trunk, use native MXFP4 immediately, or remove low-precision experiments until a CUDA full-model runtime exists.
+- Evidence: the focused layer/model/reference suite passed `14/14`. On the real five-shard layer-10 RTX 5080 probe with one token, host-quantized FP8 measured `2.901 s` cold versus exact `2.752 s`, and `5.713 ms` warm versus exact `4.731 ms`; route IDs were identical but output relative L2 drift was `5.603%`. The path currently quantizes before device staging but has no packed on-disk FP8 artifact yet.
+- Accepted because: it creates a reproducible Blackwell FP8 experiment without weakening exact mode or silently changing quality. The measured bounded result does not justify default promotion.
+- Revisit: after a persistent packed FP8/MXFP4 artifact and full-model quality/traffic gate exist. Promote only if measured H2D/NVMe savings outweigh dequantization and the coding-quality suite accepts the divergence.
