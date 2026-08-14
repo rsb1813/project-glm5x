@@ -438,3 +438,9 @@
 
 - Commit `2a1eafc` adds `use_sparse_topk` through the layer/model factories and `--sparse-topk-attention` to the full-bundle benchmark. The dense masked MLA path remains default.
 - Focused synthetic/model tests passed `19/19`. On a real layer-10 compressed-state probe with context `16,385` and 128 selected positions, attention fell from `12.154 ms` to `2.040 ms` (`83.2%`), with relative L2 drift `0.0278%`. This is experimental until the full model quality/TPS gate.
+
+## 2026-08-15 -- O(1) bundle tensor-record lookup
+
+- Added a per-artifact tensor-ID dictionary during `GLM5XExpertBundle.open()` and switched exact expert role reads from a linear record scan to dictionary lookup. Artifact identity, shape, dtype, extent, and CRC validation are unchanged.
+- TDD evidence: the new index assertion failed before implementation with `AttributeError: ... record_indexes`; after implementation the focused expert-bundle/MLA/layer/model/MoE suite passed `22/22` in `7.32 s`.
+- This is a bounded metadata-path optimization only. Full-model bundle-open, NVMe, H2D, and tok/s measurements remain pending the 282-shard assembly.

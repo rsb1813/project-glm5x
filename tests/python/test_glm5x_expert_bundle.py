@@ -80,7 +80,13 @@ def test_expert_bundle_joins_roles_from_independent_artifacts(tmp_path) -> None:
     assert expert["roles"]["gate_proj"]["ref"]["artifact"] == "a.k3x"
     assert expert["roles"]["down_proj"]["ref"]["artifact"] == "b.k3x"
     assert not (artifact_dir / "experts.json.partial").exists()
-    payload = GLM5XExpertBundle.open(artifact_dir / "experts.json").read_expert(0, 0)
+    opened_bundle = GLM5XExpertBundle.open(artifact_dir / "experts.json")
+    assert all(
+        record.tensor_id in opened_bundle.record_indexes[artifact]
+        for artifact, reader in opened_bundle.readers.items()
+        for record in reader.tensor_records
+    )
+    payload = opened_bundle.read_expert(0, 0)
     assert set(payload) == {"gate_proj", "up_proj", "down_proj"}
     assert all(len(value) == 16 for value in payload.values())
     lazy_bundle = GLM5XExpertBundle.open(

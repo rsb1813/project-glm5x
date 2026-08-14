@@ -108,6 +108,7 @@ class GLM5XExpertBundle:
     metadata: Mapping[str, object]
     artifact_paths: Mapping[str, Path]
     readers: Mapping[str, K3XReader]
+    record_indexes: Mapping[str, Mapping[int, TensorRecord]]
     experts: Mapping[tuple[int, int], Mapping[str, Mapping[str, object]]]
     payload_cache: GLM5XExpertPayloadCache | None = None
 
@@ -138,6 +139,7 @@ class GLM5XExpertBundle:
             raise K3XError("EXPERT_BUNDLE_ARTIFACTS", str(path))
         artifact_paths: dict[str, Path] = {}
         readers: dict[str, K3XReader] = {}
+        record_indexes: dict[str, dict[int, TensorRecord]] = {}
         for item in artifacts:
             if not isinstance(item, dict) or not isinstance(item.get("path"), str):
                 raise K3XError("EXPERT_BUNDLE_ARTIFACT_METADATA", str(path))
@@ -161,6 +163,9 @@ class GLM5XExpertBundle:
                 raise K3XError("EXPERT_BUNDLE_ARTIFACT_MISMATCH", relative)
             artifact_paths[relative] = artifact
             readers[relative] = reader
+            record_indexes[relative] = {
+                record.tensor_id: record for record in reader.tensor_records
+            }
         raw_experts = metadata.get("experts")
         if not isinstance(raw_experts, list):
             raise K3XError("EXPERT_BUNDLE_EXPERTS", str(path))
@@ -183,7 +188,15 @@ class GLM5XExpertBundle:
             if expert_cache_capacity_bytes
             else None
         )
-        return cls(path, metadata, artifact_paths, readers, experts, payload_cache)
+        return cls(
+            path,
+            metadata,
+            artifact_paths,
+            readers,
+            record_indexes,
+            experts,
+            payload_cache,
+        )
 
     def read_expert(self, layer_id: int, expert_id: int) -> dict[str, bytes]:
         roles = self.experts.get((layer_id, expert_id))
@@ -203,10 +216,7 @@ class GLM5XExpertBundle:
             reader = self.readers.get(artifact_key)
             if reader is None or not isinstance(ref.get("tensor_id"), int):
                 raise K3XError("EXPERT_BUNDLE_REFERENCE_ARTIFACT", artifact_key)
-            record = next(
-                (record for record in reader.tensor_records if record.tensor_id == ref["tensor_id"]),
-                None,
-            )
+            record = self.record_indexes[artifact_key].get(ref["tensor_id"])
             if record is None:
                 raise K3XError("EXPERT_BUNDLE_REFERENCE_TENSOR", role)
             expected = {

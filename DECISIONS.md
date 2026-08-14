@@ -505,3 +505,11 @@
 - Evidence: synthetic prefill and incremental dense-vs-sparse parity tests pass, and the model-factory propagation test passes. On the real five-shard RTX 5080 layer-10 probe at context `16,385` with 128 selected positions, the attention boundary fell from `12.154 ms` to `2.040 ms` (`83.2%` lower); output maximum absolute difference was `0.000244140625` and relative L2 difference was `0.0278%`. A short context sample was slower, so no unconditional promotion is justified.
 - Accepted because: it preserves natural DSA indices and exact dense fallback while removing full-context KV projection and attention work for long contexts. The measured BF16 drift is explicitly recorded and the quality mode remains controlled by the switch.
 - Revisit: after the full 78-layer gate measures long-context quality, prefill/decode tok/s, and VRAM traffic. Promote only if the quality suite accepts the BF16 numerical drift and the full-model speedup is stable.
+
+## D-0064 -- Index bundle tensor records at open time
+
+- Decision: build one immutable `(artifact, tensor_id)` record index when `GLM5XExpertBundle` opens, then use O(1) lookup for each expert role read. Keep the existing artifact identity, shape, dtype, extent, and CRC checks unchanged.
+- Alternatives: retain the per-read linear scan, add a separate index file to the bundle format, or skip record lookup validation after assembly.
+- Evidence: the bundle reader previously scanned every shard's `tensor_records` for each of three expert roles. The new focused regression verifies an index entry for every opened record and the expert-bundle/MLA/layer/model/MoE suite passes `22/22`; no full-model timing is claimed before the 282-shard gate.
+- Accepted because: the change is format-compatible, keeps strict validation, and removes repeated metadata scans from the cold exact-expert path without changing payload bytes or routing.
+- Revisit: after the full-bundle gate records bundle-open time and per-token expert-read latency. If open-time memory is material, replace the Python dictionary with a compact sorted index while retaining the same validation contract.

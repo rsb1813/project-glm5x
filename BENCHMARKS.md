@@ -716,3 +716,12 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Timing: dense `12.154 ms`, sparse `2.040 ms`, approximately `83.2%` lower in this sample.
 - Correctness/quality: output maximum absolute difference `0.000244140625`; relative L2 difference `0.0278%`. Synthetic prefill and incremental parity tests were exact within the test tolerance. The sparse switch is experimental and default-off.
 - Full-model decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, speculative acceptance, and task quality were not measured. This is a long-context attention boundary result, not a full-model throughput result.
+
+## 2026-08-15 -- Indexed exact expert-bundle metadata lookup
+
+- Date: 2026-08-15.
+- Commit: pending local implementation (focused verification before commit).
+- Hardware/model: WSL2 Ubuntu-24.04 Python reference bundle fixture; no full checkpoint or CUDA execution.
+- Change: `GLM5XExpertBundle.open()` now constructs one record dictionary per artifact, and `read_expert()` resolves each role by tensor ID without a linear scan through `reader.tensor_records`.
+- Correctness: the expert-bundle, MLA, layer-reference, model-reference, and MoE focused suite passed `22/22`; payload equality and existing metadata/CRC checks remain covered.
+- Performance: no end-to-end decode tok/s, prefill tok/s, TTFT, NVMe GB/token, H2D GB/token, or full-model timing was measured. The optimization is a metadata-path reduction only until the complete bundle gate runs.
