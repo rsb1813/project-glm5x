@@ -168,6 +168,7 @@ public:
           ffn_up_scratch_(&memory_stats_, &runtime_stats_),
           ffn_activation_scratch_(&memory_stats_, &runtime_stats_),
           ffn_output_scratch_(&memory_stats_, &runtime_stats_),
+          ffn_pointer_scratch_(&memory_stats_, &runtime_stats_),
           mxfp4_input_scratch_(&memory_stats_, &runtime_stats_),
           mxfp4_packed_scratch_(&memory_stats_, &runtime_stats_),
           mxfp4_scales_scratch_(&memory_stats_, &runtime_stats_),
@@ -3304,7 +3305,6 @@ private:
         members.reserve(experts.size() * 3);
         std::uint64_t total_weight_transfer = 0;
         std::array<std::uint64_t, 3> projection_bytes{};
-        std::size_t maximum_weight_bytes = 0;
         for (std::size_t expert_index = 0; expert_index < experts.size();
              ++expert_index) {
             const auto& expert = experts[expert_index];
@@ -3313,8 +3313,6 @@ private:
                     ? expert.gate : (projection == 1 ? expert.up : expert.down);
                 WeightMember member{
                     view, nullptr, view.values.size()};
-                maximum_weight_bytes =
-                    std::max(maximum_weight_bytes, member.bytes);
                 projection_bytes[projection] += member.bytes;
                 const auto acquisition = resident_weights_->acquire(
                     {view.tensor_id, cuda::WeightRepresentation::dense_bf16,
@@ -3348,7 +3346,6 @@ private:
             host_input[index] = __float2bfloat16_rn(inputs[index]);
         }
         if (ffn_input_scratch_.reserve(input_bytes) != cudaSuccess ||
-            ffn_weight_scratch_.reserve(maximum_weight_bytes) != cudaSuccess ||
             ffn_gate_scratch_.reserve(intermediate_bytes) != cudaSuccess ||
             ffn_up_scratch_.reserve(intermediate_bytes) != cudaSuccess ||
             ffn_activation_scratch_.reserve(activation_bytes) != cudaSuccess ||
@@ -3363,14 +3360,37 @@ private:
         auto* device_activation = static_cast<__nv_bfloat16*>(
             ffn_activation_scratch_.get());
         auto* device_output = static_cast<float*>(ffn_output_scratch_.get());
-        auto* gate_plan = resolve_dense_batch_plan(
-            intermediate_width, input_width, token_count);
-        auto* down_plan = resolve_dense_batch_plan(
-            output_width, intermediate_width, token_count);
+        auto* gate_plan = experts.size() > 1
+            ? resolve_dense_grid_plan(
+                  intermediate_width, input_width, token_count, experts.size())
+            : nullptr;
+        auto* down_plan = experts.size() > 1
+            ? resolve_dense_grid_plan(
+                  output_width, intermediate_width, token_count, experts.size())
+            : nullptr;
+        const auto use_pointer_batch = experts.size() > 1 &&
+            gate_plan != nullptr && down_plan != nullptr;
+        if (!use_pointer_batch) {
+            gate_plan = resolve_dense_batch_plan(
+                intermediate_width, input_width, token_count);
+            down_plan = resolve_dense_batch_plan(
+                output_width, intermediate_width, token_count);
+        }
         if (!gate_plan || !down_plan) {
             return Result<std::vector<std::vector<float>>>::failure(
                 ErrorCode::backend_unavailable,
                 "CUDA BF16 dense grid plan creation failed");
+        }
+        std::byte* pointer_base = nullptr;
+        const auto pointer_set_bytes = experts.size() * 3 * sizeof(void*);
+        const auto pointer_bytes = pointer_set_bytes * 3;
+        if (use_pointer_batch) {
+            if (ffn_pointer_scratch_.reserve(pointer_bytes) != cudaSuccess) {
+                return Result<std::vector<std::vector<float>>>::failure(
+                    ErrorCode::backend_unavailable,
+                    "CUDA BF16 dense grid pointer allocation failed");
+            }
+            pointer_base = static_cast<std::byte*>(ffn_pointer_scratch_.get());
         }
         for (auto& event : resident_grid_events_) {
             if (event.ensure() != cudaSuccess) {
@@ -3387,6 +3407,9 @@ private:
         }
         constexpr float alpha = 1.0F;
         constexpr float beta = 0.0F;
+        std::vector<const void*> host_a(experts.size());
+        std::vector<const void*> host_b(experts.size());
+        std::vector<void*> host_c(experts.size());
         const auto launch_projection =
             [&](std::size_t event_pair, std::size_t projection,
                 DensePlan* plan, std::size_t rows, std::size_t source_stride,
@@ -3395,6 +3418,51 @@ private:
                 auto& end = resident_grid_events_[event_pair * 2 + 1];
                 if (cudaEventRecord(start.get(), stream_) != cudaSuccess) {
                     return false;
+                }
+                if (use_pointer_batch) {
+                    for (std::size_t expert_index = 0;
+                         expert_index < experts.size(); ++expert_index) {
+                        auto& member =
+                            members[expert_index * 3 + projection];
+                        host_a[expert_index] = member.device;
+                        host_b[expert_index] = projection == 2
+                            ? static_cast<const void*>(
+                                  static_cast<const std::byte*>(source) +
+                                  expert_index * token_count * source_stride *
+                                      sizeof(__nv_bfloat16))
+                            : static_cast<const void*>(device_input);
+                        host_c[expert_index] = static_cast<std::byte*>(output) +
+                            expert_index * token_count * rows * sizeof(float);
+                    }
+                    auto* device_a = reinterpret_cast<void*>(
+                        pointer_base + projection * pointer_set_bytes);
+                    auto* device_b = reinterpret_cast<void*>(
+                        pointer_base + projection * pointer_set_bytes +
+                        experts.size() * sizeof(void*));
+                    auto* device_c = reinterpret_cast<void*>(
+                        pointer_base + projection * pointer_set_bytes +
+                        experts.size() * sizeof(void*) * 2);
+                    const auto pointer_array_bytes =
+                        experts.size() * sizeof(void*);
+                    if (cudaMemcpyAsync(
+                            device_a, host_a.data(), pointer_array_bytes,
+                            cudaMemcpyHostToDevice, stream_) != cudaSuccess ||
+                        cudaMemcpyAsync(
+                            device_b, host_b.data(), pointer_array_bytes,
+                            cudaMemcpyHostToDevice, stream_) != cudaSuccess ||
+                        cudaMemcpyAsync(
+                            device_c, host_c.data(), pointer_array_bytes,
+                            cudaMemcpyHostToDevice, stream_) != cudaSuccess ||
+                        cublasLtMatmul(
+                            handle_, plan->operation.get(), &alpha, device_a,
+                            plan->weight_layout.get(), device_b,
+                            plan->input_layout.get(), &beta, device_c,
+                            plan->output_layout.get(), device_c,
+                            plan->output_layout.get(), &plan->heuristic.algo,
+                            nullptr, 0, stream_) != CUBLAS_STATUS_SUCCESS) {
+                        return false;
+                    }
+                    return cudaEventRecord(end.get(), stream_) == cudaSuccess;
                 }
                 for (std::size_t expert_index = 0;
                      expert_index < experts.size(); ++expert_index) {
@@ -3481,7 +3549,9 @@ private:
         runtime_stats_.resident_grid_tokens += token_count;
         runtime_stats_.resident_grid_expert_tokens += expert_tokens;
         runtime_stats_.resident_grid_kernel_launches +=
-            3 * experts.size() + 1;
+            use_pointer_batch ? 4 : 3 * experts.size() + 1;
+        runtime_stats_.resident_grid_descriptor_h2d_bytes +=
+            use_pointer_batch ? pointer_bytes : 0;
         record(phase, ProfileOperation::activation_host_to_device, precision,
                layer, operation_start, 0, input_bytes, 0, true);
         record(phase, ProfileOperation::weight_host_to_device, precision,
@@ -4116,6 +4186,8 @@ private:
         std::tuple<std::size_t, std::size_t, int, int>;
     using DenseBatchPlanKey =
         std::tuple<std::size_t, std::size_t, std::size_t, int, int>;
+    using DenseGridPlanKey =
+        std::tuple<std::size_t, std::size_t, std::size_t, std::size_t>;
 
     static bool create_column_major_layout(MatrixLayoutOwner& owner,
                                            cudaDataType_t type,
@@ -4186,6 +4258,51 @@ private:
                plan.heuristic.state == CUBLAS_STATUS_SUCCESS;
     }
 
+    bool initialize_dense_grid_plan(DensePlan& plan, std::size_t rows,
+                                    std::size_t cols, std::size_t batch,
+                                    std::size_t experts) {
+        if (experts > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+            return false;
+        }
+        if (cublasLtMatmulDescCreate(plan.operation.out(), CUBLAS_COMPUTE_32F,
+                                     CUDA_R_32F) != CUBLAS_STATUS_SUCCESS ||
+            !create_row_major_layout(plan.weight_layout, CUDA_R_16BF, rows,
+                                     cols, cols) ||
+            !create_column_major_layout(plan.input_layout, CUDA_R_16BF, cols,
+                                        batch, cols) ||
+            !create_column_major_layout(plan.output_layout, CUDA_R_32F, rows,
+                                        batch, rows)) {
+            return false;
+        }
+        const auto batch_count = static_cast<int>(experts);
+        const auto batch_mode = static_cast<std::uint32_t>(
+            CUBLASLT_BATCH_MODE_POINTER_ARRAY);
+        for (const auto layout : {plan.weight_layout.get(),
+                                  plan.input_layout.get(),
+                                  plan.output_layout.get()}) {
+            if (cublasLtMatrixLayoutSetAttribute(
+                    layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
+                    &batch_count, sizeof(batch_count)) != CUBLAS_STATUS_SUCCESS ||
+                cublasLtMatrixLayoutSetAttribute(
+                    layout, CUBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batch_mode,
+                    sizeof(batch_mode)) != CUBLAS_STATUS_SUCCESS) {
+                return false;
+            }
+        }
+        if (cublasLtMatmulPreferenceCreate(plan.preference.out()) !=
+            CUBLAS_STATUS_SUCCESS) {
+            return false;
+        }
+        int returned_results = 0;
+        return cublasLtMatmulAlgoGetHeuristic(
+                   handle_, plan.operation.get(), plan.weight_layout.get(),
+                   plan.input_layout.get(), plan.output_layout.get(),
+                   plan.output_layout.get(), plan.preference.get(), 1,
+                   &plan.heuristic, &returned_results) == CUBLAS_STATUS_SUCCESS &&
+               returned_results == 1 &&
+               plan.heuristic.state == CUBLAS_STATUS_SUCCESS;
+    }
+
     DensePlan* resolve_dense_batch_plan(std::size_t rows, std::size_t cols,
                                         std::size_t batch) {
         const DenseBatchPlanKey key{
@@ -4200,6 +4317,22 @@ private:
         }
         auto* result = candidate.get();
         dense_batch_plans_.emplace(key, std::move(candidate));
+        return result;
+    }
+
+    DensePlan* resolve_dense_grid_plan(std::size_t rows, std::size_t cols,
+                                       std::size_t batch,
+                                       std::size_t experts) {
+        const DenseGridPlanKey key{rows, cols, batch, experts};
+        const auto found = dense_grid_plans_.find(key);
+        if (found != dense_grid_plans_.end()) return found->second.get();
+        auto candidate = std::make_unique<DensePlan>();
+        if (!initialize_dense_grid_plan(*candidate, rows, cols, batch,
+                                        experts)) {
+            return nullptr;
+        }
+        auto* result = candidate.get();
+        dense_grid_plans_.emplace(key, std::move(candidate));
         return result;
     }
 
@@ -4389,6 +4522,7 @@ private:
     cuda::ScratchBuffer ffn_up_scratch_;
     cuda::ScratchBuffer ffn_activation_scratch_;
     cuda::ScratchBuffer ffn_output_scratch_;
+    cuda::ScratchBuffer ffn_pointer_scratch_;
     cuda::ScratchBuffer mxfp4_input_scratch_;
     cuda::ScratchBuffer mxfp4_packed_scratch_;
     cuda::ScratchBuffer mxfp4_scales_scratch_;
@@ -4424,6 +4558,8 @@ private:
     std::map<DensePlanKey, std::unique_ptr<DensePlan>> dense_plans_;
     std::map<DenseBatchPlanKey, std::unique_ptr<DensePlan>>
         dense_batch_plans_;
+    std::map<DenseGridPlanKey, std::unique_ptr<DensePlan>>
+        dense_grid_plans_;
     std::unordered_map<std::uint64_t, DequantizedMxfp4Host>
         dequantized_mxfp4_hosts_;
     std::unordered_map<std::uint64_t, RoundedDenseBf16Host>

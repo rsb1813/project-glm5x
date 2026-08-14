@@ -369,7 +369,8 @@ int test_bf16_resident_grid() {
         stats.resident_grid_experts != experts.size() ||
         stats.resident_grid_tokens != 2 ||
         stats.resident_grid_expert_tokens != experts.size() * 2 ||
-        stats.resident_grid_kernel_launches != 7 ||
+        stats.resident_grid_kernel_launches != 4 ||
+        stats.resident_grid_descriptor_h2d_bytes != 144 ||
         stats.weight_h2d_bytes != 64 ||
         stats.activation_h2d_bytes != 12 ||
         stats.device_to_host_bytes != 32) {
