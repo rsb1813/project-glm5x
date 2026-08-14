@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a multi-layer CPU reference with final logits and greedy incremental parity, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, an explicit GLM SiLU path, on-demand model layer loading, shared bundle readers, opt-in lazy payload validation, opt-in bounded trunk-layer caching, an explicit dense-MLP path for the first three GLM-5.2 layers, a configuration-driven all-layer bundle factory, CUDA device staging/parity, and resumable local full-checkpoint streaming are implemented. The current verified source baseline is `a6f0cb0`; the new working tree changes are awaiting commit and public verification. Two of 282 real shards have been converted to verified `.k3x` artifacts with their source files deleted. Full real-checkpoint execution, MTP, CUDA final logits, and end-to-end tok/s remain unmeasured.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-residual/MLA/DSA/MoE layer-10 reference, a multi-layer CPU reference with final logits and greedy incremental parity, a learned-router-aware raw-BF16 CUDA MoE sublayer boundary, the portable `GLM5XACT` activation handoff, an explicit GLM SiLU path, on-demand model layer loading, shared bundle readers, opt-in lazy payload validation, opt-in bounded trunk-layer caching, an explicit dense-MLP path for the first three GLM-5.2 layers, a configuration-driven all-layer bundle factory, CUDA device staging/parity, and resumable local full-checkpoint streaming are implemented. The current verified implementation commit is `6fb2da1`; public correctness `31831711520` and CodeQL `31831711580` are green. Four of 282 real shards have been converted to verified `.k3x` artifacts with their source files deleted. Full real-checkpoint execution, MTP, CUDA final logits, and end-to-end tok/s remain unmeasured.
 
 ## Completed
 
@@ -149,4 +149,11 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, an exact q-
 - Added `convert-shards --delete-source` with an atomic source-deleted marker. A finalized artifact is strict-reader verified before its source shard is removed, and a retry can recover from the marker without redownloading the shard.
 - Added `tools/stream_glm5x_checkpoint.py` with public repository metadata discovery, HTTP Range `.part` resume, one-shard conversion, source deletion, and final bundle assembly.
 - The local stream has finalized `model-00001-of-00282.k3x` (`5,342,863,616` bytes) and `model-00002-of-00282.k3x` (`5,351,993,600` bytes); the third source shard is downloading. No quality, final-token, or tok/s result exists yet.
-- WSL verification after the changes: Python `311 passed, 124 skipped` in `79.98 s`, host CTest `15/15`, and CUDA-only layer/model parity tests passed. The working tree is pending commit and public CI verification.
+- WSL verification after the changes: Python `311 passed, 124 skipped` in `79.98 s`, host CTest `15/15`, and CUDA-only layer/model parity tests passed. Public correctness and CodeQL are green for `6fb2da1`.
+
+## 2026-08-15 -- Public verification of streaming/device boundary
+
+- Commit `6fb2da1` was pushed to public `main`.
+- Linux correctness `31831711520` passed in `2m38s`; its C++ build/CTest and Python/cross-language step are green.
+- CodeQL `31831711580` passed for both Python and C++ analysis.
+- The local stream reached four finalized shards of 282 while CI ran. The stream remains active; no full-model logits or tok/s result exists.

@@ -358,3 +358,8 @@
 - `convert-shards --delete-source` writes a source-deleted marker only after strict artifact verification and before unlinking the source shard. The marker lets a retry trust the completed artifact without redownloading a shard.
 - `tools/stream_glm5x_checkpoint.py` uses public HF metadata and resumable HTTP Range downloads. The first two official GLM-5.2 shards converted successfully to `.k3x` and their source files were deleted; the third shard is currently downloading. No full model has been assembled and no TPS claim is permitted yet.
 - Current local gates after the change are Python `311 passed, 124 skipped` in `79.98 s`, host CTest `15/15`, and CUDA-only layer/model parity. The next bottleneck is completing the 282-shard bundle and then proving full-layer hidden-state/final-logit parity before optimizing CUDA scheduling.
+
+## 2026-08-15 -- Public verification of `6fb2da1`
+
+- Pushed `6fb2da1` to `main`. Linux correctness run `31831711520` passed in `2m38s`; CodeQL run `31831711580` passed for both Python and C++.
+- The local materializer reached 4/282 finalized `.k3x` shards while the hosted checks ran. The historical Linux failure notification remains tied to stale commit `b94c8b8`, not this push.
