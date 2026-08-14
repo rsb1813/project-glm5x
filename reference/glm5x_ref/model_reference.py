@@ -11,7 +11,12 @@ import torch
 from glm5x_converter.bundle import GLM5XExpertBundle, GLM5XExpertPayloadCacheStats
 
 from .layer_reference import GLM5XDecoderLayerForward, GLM5XDecoderLayerReference
-from .layer10_moe import GLM5XLayer10MoEReference, _collect_tensor_refs
+from .layer10_moe import (
+    GLM5XExpertTensorCache,
+    GLM5XExpertTensorCacheStats,
+    GLM5XLayer10MoEReference,
+    _collect_tensor_refs,
+)
 from .model import GLM5XModelDescriptor
 from .mla_dsa import GLM5XMLAState
 from .official_dsa import GLM5XOfficialDSAState
@@ -190,6 +195,7 @@ class GLM5XDecoderModelReference:
         instance._layer_cache_capacity = min(layer_cache_capacity, layer_count)
         instance._layer_cache = OrderedDict()
         instance._expert_bundle = None
+        instance._expert_device_cache = None
         instance.final_norm = final_norm
         instance.lm_head = lm_head
         instance.rope_theta = float(rope_theta)
@@ -212,6 +218,7 @@ class GLM5XDecoderModelReference:
         execution_mode: str = "loop",
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
+        expert_device_cache_capacity_bytes: int = 0,
     ) -> "GLM5XDecoderModelReference":
         """Build an out-of-core model factory from one validated GLM bundle.
 
@@ -223,6 +230,12 @@ class GLM5XDecoderModelReference:
         from the official configuration.
         """
         descriptor = GLM5XModelDescriptor.from_config(config)
+        if (
+            not isinstance(expert_device_cache_capacity_bytes, int)
+            or isinstance(expert_device_cache_capacity_bytes, bool)
+            or expert_device_cache_capacity_bytes < 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_CAPACITY")
         layer_count = descriptor.hidden_layers
         hidden_size = descriptor.hidden_size
         num_heads = _positive_config_int(config, "num_attention_heads")
@@ -261,6 +274,11 @@ class GLM5XDecoderModelReference:
             expert_cache_capacity_bytes=expert_cache_capacity_bytes,
         )
         tensor_refs = _collect_tensor_refs(bundle)
+        expert_device_cache = (
+            GLM5XExpertTensorCache(expert_device_cache_capacity_bytes)
+            if expert_device_cache_capacity_bytes
+            else None
+        )
         read = lambda name: GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)  # noqa: E731
         target = None if device is None else torch.device(device)
         if embedding is None:
@@ -300,6 +318,7 @@ class GLM5XDecoderModelReference:
                 device=target,
                 execution_mode=execution_mode,
                 expert_load_workers=expert_load_workers,
+                expert_device_cache=expert_device_cache,
             )
 
         instance = cls.from_layer_loader(
@@ -313,6 +332,7 @@ class GLM5XDecoderModelReference:
             layer_cache_capacity=layer_cache_capacity,
         )
         instance._expert_bundle = bundle
+        instance._expert_device_cache = expert_device_cache
         return instance
 
     @property
@@ -341,6 +361,13 @@ class GLM5XDecoderModelReference:
         if bundle is None:
             return GLM5XExpertPayloadCacheStats(0, 0, 0, 0, 0, 0)
         return bundle.expert_payload_cache_stats
+
+    @property
+    def expert_device_cache_stats(self) -> GLM5XExpertTensorCacheStats:
+        cache = getattr(self, "_expert_device_cache", None)
+        if cache is None:
+            return GLM5XExpertTensorCacheStats(0, 0, 0, 0, 0, 0)
+        return cache.stats
 
     @property
     def cached_layer_count(self) -> int:

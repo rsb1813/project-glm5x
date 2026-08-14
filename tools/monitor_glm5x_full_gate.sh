@@ -45,6 +45,7 @@ python tools/benchmark_glm5x_reference.py \
   --device cuda \
   --expert-load-workers 4 \
   --expert-cache-bytes 0 \
+  --expert-device-cache-bytes 0 \
   --lazy-bundle \
   > "$cuda_partial"
 mv -f "$cuda_partial" "$cold_cuda_report"
@@ -58,6 +59,7 @@ python tools/benchmark_glm5x_reference.py \
   --device cuda \
   --expert-load-workers 4 \
   --expert-cache-bytes 8589934592 \
+  --expert-device-cache-bytes 4294967296 \
   --lazy-bundle \
   > "$cuda_partial"
 mv -f "$cuda_partial" "$cached_cuda_report"

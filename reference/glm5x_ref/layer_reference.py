@@ -14,6 +14,7 @@ from .layer10_moe import (
     GLM5XExpertWeights,
     GLM5XLayer10MoEReference,
     GLM5XMoEForward,
+    GLM5XExpertTensorCache,
     _collect_tensor_refs,
 )
 from .mla_dsa import GLM5XMLAForward, GLM5XMLAReference, GLM5XMLAState, GLM5XMLAWeights, _rms_norm
@@ -85,6 +86,7 @@ class GLM5XDecoderLayerReference:
         execution_mode: str = "loop",
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
+        expert_device_cache: GLM5XExpertTensorCache | None = None,
     ) -> "GLM5XDecoderLayerReference":
         bundle = GLM5XExpertBundle.open(
             bundle_path,
@@ -113,6 +115,7 @@ class GLM5XDecoderLayerReference:
             device=device,
             execution_mode=execution_mode,
             expert_load_workers=expert_load_workers,
+            expert_device_cache=expert_device_cache,
         )
 
     @classmethod
@@ -140,6 +143,7 @@ class GLM5XDecoderLayerReference:
         execution_mode: str = "loop",
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
+        expert_device_cache: GLM5XExpertTensorCache | None = None,
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
         """Open and validate one bundle once, then provide individual layers."""
         bundle = GLM5XExpertBundle.open(
@@ -172,6 +176,7 @@ class GLM5XDecoderLayerReference:
                 device=device,
                 execution_mode=execution_mode,
                 expert_load_workers=expert_load_workers,
+                expert_device_cache=expert_device_cache,
             )
 
         return load
@@ -200,6 +205,7 @@ class GLM5XDecoderLayerReference:
         device: torch.device | str | None = None,
         execution_mode: str = "loop",
         expert_load_workers: int = 1,
+        expert_device_cache: GLM5XExpertTensorCache | None = None,
     ) -> "GLM5XDecoderLayerReference":
         if mlp_type not in {"dense", "sparse"}:
             raise ValueError("GLM5X_LAYER_MLP_TYPE")
@@ -260,6 +266,7 @@ class GLM5XDecoderLayerReference:
                 device=target,
                 execution_mode=execution_mode,
                 expert_load_workers=expert_load_workers,
+                expert_device_cache=expert_device_cache,
             )
         return cls(
             input_layernorm=read(f"{prefix}.input_layernorm.weight"),

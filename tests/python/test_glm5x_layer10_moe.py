@@ -5,7 +5,11 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
-from glm5x_ref.layer10_moe import GLM5XExpertWeights, GLM5XLayer10MoEReference
+from glm5x_ref.layer10_moe import (
+    GLM5XExpertTensorCache,
+    GLM5XExpertWeights,
+    GLM5XLayer10MoEReference,
+)
 
 
 def _weights(expert_id: int, *, hidden: int = 3, intermediate: int = 2) -> GLM5XExpertWeights:
@@ -187,3 +191,17 @@ def test_glm5x_batched_expert_loader_preserves_serial_output() -> None:
     torch.testing.assert_close(actual.topk_weights, expected.topk_weights)
     assert actual.loaded_experts == expected.loaded_experts
     assert batch_calls == [tuple(sorted(set(expected.topk_indices.flatten().tolist())))]
+
+
+def test_glm5x_decoded_expert_cache_tracks_exact_residency() -> None:
+    cache = GLM5XExpertTensorCache(128)
+    expert = _weights(0)
+
+    cache.put((3, 4), expert)
+    assert cache.get((3, 4)) is expert
+    stats = cache.stats
+    assert stats.entries == 1
+    assert stats.resident_bytes == 72
+    assert stats.hits == 1
+    assert stats.misses == 0
+    assert stats.evictions == 0

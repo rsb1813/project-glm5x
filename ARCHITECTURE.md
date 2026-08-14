@@ -62,6 +62,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - `tools/benchmark_glm5x_reference.py` is the measured full-bundle gate. It accepts explicit token IDs and records prefill tok/s, TTFT, decode tok/s, generated tokens, device, cache policy, execution mode, and CUDA memory without turning projections or estimates into throughput claims.
 - The reference MoE now has an opt-in `expert_load_workers` path. It reads the selected exact raw-BF16 expert payloads concurrently, decodes them serially, and keeps `1` as the byte-for-byte serial reference default. It is an I/O overlap experiment, not yet a production residency policy.
 - `GLM5XExpertBundle` also has an opt-in bounded exact host payload cache keyed by `(layer, expert)`. It caches raw role bytes across layer objects and token forwards, reports hits/misses/evictions, and leaves capacity `0` as the default.
+- The bundle-backed reference can additionally share an opt-in bounded decoded expert tensor cache on the target device. It is keyed by `(layer, expert)`, reports its own residency/hit/eviction counters, and is disabled by default to protect the 16 GB GPU.
 - `tools/monitor_glm5x_full_gate.sh` is an optional local coordinator. It waits for all 282 atomic source-deletion markers, invokes the stream's lazy final assembly without a payload copy, and then runs the one-token CUDA reference gate. It does not provision cloud resources or alter the conversion workers.
 
 ### In progress

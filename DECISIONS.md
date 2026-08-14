@@ -481,3 +481,11 @@
 - Evidence: on the five-shard real layer-10 probe, the same eight experts fell from `3.070666336 s` cold to `0.094567934 s` on the second call with a 1,000,000,000-byte cache. Output maximum absolute difference was `0.0`; resident payload was `603,979,776` bytes and the cache reported 8 hits, 8 misses, and 0 evictions.
 - Accepted because: it removes repeat NVMe reads without changing exact weights, routing, or GPU residency policy, while making memory cost explicit and observable.
 - Revisit: after the 78-layer full-bundle cold/cached benchmark records decode tok/s, cache hit rate, host RAM, and NVMe GB/token. Increase, decrease, or disable the cache based on measured session locality and RAM pressure.
+
+## D-0061 -- Keep decoded expert GPU residency bounded and opt-in
+
+- Decision: add a shared exact decoded expert tensor cache keyed by `(layer_id, expert_id)` with an explicit byte capacity. It is passed through the bundle-backed reference layer loader, reports hit/miss/eviction statistics, and defaults to disabled.
+- Alternatives: retain all decoded experts, cache only host bytes, or let every layer own an unbounded CUDA tensor cache.
+- Evidence: on the five-shard real layer-10 probe with four parallel readers, the same eight experts took `3.124653389 s` cold and `0.003793419 s` on the second call with a 1,000,000,000-byte device cache. Output maximum absolute difference was `0.0`; peak CUDA allocation was `719,427,584` bytes and the device cache reported 8 hits, 8 misses, and 0 evictions.
+- Accepted because: it removes repeat H2D and decode work without altering exact weights or routing, while capacity makes the 16 GB VRAM trade-off explicit.
+- Revisit: after the full 78-layer cold/cached gate records VRAM peak, H2D GB/token, cache hit rate, and decode tok/s. The cached quality path must remain exact before any default promotion.

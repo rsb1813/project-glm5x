@@ -54,6 +54,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="bounded exact host payload cache capacity; 0 disables it",
     )
     parser.add_argument(
+        "--expert-device-cache-bytes",
+        type=int,
+        default=0,
+        help="bounded exact decoded CUDA expert cache capacity; 0 disables it",
+    )
+    parser.add_argument(
         "--lazy-bundle",
         action="store_true",
         help="skip whole-artifact payload/root scans and CRC-check selected tensors on read",
@@ -70,6 +76,8 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         raise ValueError("expert-load-workers must be positive")
     if arguments.expert_cache_bytes < 0:
         raise ValueError("expert-cache-bytes must be non-negative")
+    if arguments.expert_device_cache_bytes < 0:
+        raise ValueError("expert-device-cache-bytes must be non-negative")
     if arguments.device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA device requested but torch.cuda.is_available() is false")
     device = torch.device(arguments.device)
@@ -88,6 +96,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         execution_mode=arguments.execution_mode,
         expert_load_workers=arguments.expert_load_workers,
         expert_cache_capacity_bytes=arguments.expert_cache_bytes,
+        expert_device_cache_capacity_bytes=arguments.expert_device_cache_bytes,
     )
     prompt = torch.tensor(arguments.prompt, dtype=torch.long, device=device)
     _synchronize(device)
@@ -136,9 +145,11 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         "execution_mode": arguments.execution_mode,
         "expert_load_workers": arguments.expert_load_workers,
         "expert_cache_bytes": arguments.expert_cache_bytes,
+        "expert_device_cache_bytes": arguments.expert_device_cache_bytes,
         "lazy_bundle": arguments.lazy_bundle,
     }
     cache_stats = model.expert_payload_cache_stats
+    device_cache_stats = model.expert_device_cache_stats
     payload.update(
         {
             "expert_cache_resident_bytes": cache_stats.resident_bytes,
@@ -146,6 +157,11 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             "expert_cache_hits": cache_stats.hits,
             "expert_cache_misses": cache_stats.misses,
             "expert_cache_evictions": cache_stats.evictions,
+            "expert_device_cache_resident_bytes": device_cache_stats.resident_bytes,
+            "expert_device_cache_entries": device_cache_stats.entries,
+            "expert_device_cache_hits": device_cache_stats.hits,
+            "expert_device_cache_misses": device_cache_stats.misses,
+            "expert_device_cache_evictions": device_cache_stats.evictions,
         }
     )
     if device.type == "cuda":
