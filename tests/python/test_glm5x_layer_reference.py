@@ -100,6 +100,7 @@ def test_decoder_layer_incremental_matches_prefill_with_dsa_state() -> None:
         dsa_state=first.dsa_state,
     )
     torch.testing.assert_close(last.output, full.output[:, 3:], rtol=1e-5, atol=1e-5)
+    torch.testing.assert_close(last.moe_input, full.moe_input[:, 3:], rtol=1e-5, atol=1e-5)
     torch.testing.assert_close(last.topk_indices, full.topk_indices[:, 3:])
     assert last.attention_state.length == 4
     assert last.dsa_state is not None and last.dsa_state.length == 4

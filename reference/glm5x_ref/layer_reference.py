@@ -20,6 +20,7 @@ from .official_dsa import GLM5XOfficialDSAIndexer, GLM5XOfficialDSAState
 @dataclass(frozen=True)
 class GLM5XDecoderLayerForward:
     output: torch.Tensor
+    moe_input: torch.Tensor
     attention: GLM5XMLAForward
     moe: GLM5XMoEForward
     attention_state: GLM5XMLAState
@@ -175,6 +176,7 @@ class GLM5XDecoderLayerReference:
         output = post_attention + moe.output
         return GLM5XDecoderLayerForward(
             output=output,
+            moe_input=moe_input,
             attention=attention,
             moe=moe,
             attention_state=attention.state,
