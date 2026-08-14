@@ -60,6 +60,6 @@
 
 - Decision: add an opt-in `CudaMxfp4Execution::dequantized_bf16` path that dequantizes each exact MXFP4 expert once into resident BF16 storage and executes the expert grid through cublasLt. Keep native MXFP4 as the default and retain a capacity-bypass fallback to the native group path.
 - Alternatives: replace native MXFP4 globally, keep only the per-expert BF16 batch path, or pre-store every expert in BF16.
-- Evidence: on the RTX 5080 GLM-shaped 8-expert/4-token fixture, BF16 grid median was 2,582,527 ns/block versus 5,394,131 ns for native grid, with zero error on the zero-weight contract fixture. Resident weight bytes increased from 160,432,128 to 603,979,776.
+- Evidence: on the RTX 5080 GLM-shaped 8-expert/4-token fixture, BF16 grid median was 2,582,527 ns/block versus 5,394,131 ns for native grid, with zero error on the zero-weight contract fixture. A nonzero deterministic packed pattern measured 0.95% maximum relative difference against a native GPU reference. Resident weight bytes increased from 160,432,128 to 603,979,776.
 - Accepted because: the measured speedup is material and the exact native path remains available; the memory multiplier and missing quality benchmark make a default switch unjustified.
 - Revisit: after nonzero GLM shard parity, VRAM-bank pressure measurements, and end-to-end DSA/MoE quality tests.

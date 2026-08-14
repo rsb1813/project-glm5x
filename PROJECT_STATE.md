@@ -56,5 +56,5 @@ GLM-5.2 shape/manifest boundary plus RTX 5080 resident native/BF16 expert-grid b
 - Bounded GLM-5.2-shaped CUDA result: 8 experts/1 token median 2,662,772 ns; 8 experts/4 tokens 1,344,816 ns per candidate token; maximum absolute error 0.
 - Resident expert-major batch result: 8 groups x 4 candidates, 1,641,591 ns/candidate token, cold weight H2D 160,432,128 bytes and warm weight H2D 0 bytes.
 - Resident BF16 grid result: 8 experts x 4 candidates, 2,582,527 ns/block versus native 5,394,131 ns/block; BF16 resident weight bytes 603,979,776 versus native 160,432,128; maximum absolute error 0 on the zero-weight fixture.
-- Last known-good code HEAD: `5d1c636` (`feat: add resident BF16 expert grid path`).
+- Last known-good code HEAD: `bc5bb4c` (`test: compare BF16 grid against native reference`).
 - Next bottleneck: nonzero GLM shard parity, exact DSA/indexer graph, variable-union expert grouping, and VRAM-pressure-aware choice between native MXFP4 and BF16 resident execution; full weights remain intentionally absent.

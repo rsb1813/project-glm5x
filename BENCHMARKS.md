@@ -79,3 +79,14 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 1
 - Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, average Top-K, speculative acceptance, and quality score: not measured.
 - Reference switch: `CudaMxfp4Execution::native` remains the default; `dequantized_bf16` is opt-in and requires sufficient VRAM residency.
 - Caveat: the benchmark still uses zero weights, so the reported absolute error is a kernel contract check rather than a model-quality result. Full GLM-5.2 weights and DSA/routing are absent.
+
+## 2026-08-14 -- Nonzero synthetic native-reference comparison
+
+- Commit: `bc5bb4c`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: no checkpoint; deterministic nonzero synthetic GLM-5.2-shaped MXFP4 tensors with the same packed E2M1/E8M0 representation used by both paths.
+- Mode: resident BF16 dequantized expert grid compared against a separate native resident MXFP4 GPU reference; 8 experts, 4 tokens, 10 warmups, 30 measured iterations.
+- BF16 median warm block latency: 2,563,496 ns; cold BF16 weight H2D 603,979,776 bytes; resident BF16 weight bytes 603,979,776; peak VRAM 630,636,544 bytes.
+- Native-reference maximum absolute difference: 1,732.3086; maximum relative difference to the native reference maximum magnitude: 0.00950465 (0.95%).
+- Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, average Top-K, speculative acceptance, and task quality: not measured.
+- Interpretation: this is a numerical dequantization/accumulation check, not a GLM quality benchmark. The deterministic pattern is not a calibrated GLM shard.
