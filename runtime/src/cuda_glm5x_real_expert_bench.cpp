@@ -400,6 +400,12 @@ int main(int argc, char** argv) {
               << ",\"warm_weight_h2d_bytes\":"
               << (stats_after.weight_h2d_bytes - stats_before.weight_h2d_bytes)
               << ",\"resident_weight_bytes\":" << stats_after.resident_weight_bytes
+              << ",\"resident_grid_calls\":"
+              << stats_after.resident_grid_calls
+              << ",\"resident_grid_kernel_launches\":"
+              << stats_after.resident_grid_kernel_launches
+              << ",\"resident_grid_descriptor_h2d_bytes\":"
+              << stats_after.resident_grid_descriptor_h2d_bytes
               << ",\"warmup\":" << arguments->warmup
               << ",\"iterations\":" << arguments->iterations << "}\n";
     return 0;
