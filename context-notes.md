@@ -368,3 +368,9 @@
 
 - The stream previously used strict `K3XReader.open` for every artifact again during final bundle assembly. Since each artifact is strict-verified before its deletion marker, the stream now indexes the final bundle with lazy payload/root admission while the public CLI remains strict.
 - Focused bundle and stream tests passed `4/4`. The active process was started from the prior code, so it must be resumed/restarted before the new final-assembly path is used.
+
+## 2026-08-15 -- Resume guard and final public verification
+
+- `db2cf37` adds a completed-artifact/marker check before download. A restarted process now retains the incomplete shard `.part` and avoids redownloading finalized source-deleted shards.
+- Focused tests passed `7/7`; Linux correctness `31833153961` passed in `2m45s`; CodeQL `31833154040` passed for Python and C++.
+- A redundant shard-1 partial created by the pre-fix process remains as an isolated `.part` file; it is not used by the marker-aware path. Shard 9's large `.part` is the valid resumable input.

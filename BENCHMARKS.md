@@ -600,3 +600,11 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Linux correctness run `31831711520`: success in `2m38s`; C++ configure/build/CTest and Python/cross-language tests passed.
 - CodeQL run `31831711580`: success for both Python and C++ analysis.
 - These are CI wall times and static/correctness gates, not model throughput measurements.
+
+## 2026-08-15 -- Resume-path regression and public verification
+
+- Commit: `db2cf37`.
+- Focused bundle/stream/converter tests: `7 passed` in `1.53 s` under WSL.
+- Linux correctness run `31833153961`: success in `2m45s`.
+- CodeQL run `31833154040`: success; Python analysis `2m24s`, C++ analysis `3m40s`.
+- These results cover restart semantics only. Decode tok/s, prefill tok/s, TTFT, memory traffic, and quality remain unmeasured.

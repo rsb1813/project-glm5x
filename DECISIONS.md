@@ -424,3 +424,11 @@
 - Evidence: the focused bundle/stream regression passed `4/4`; strict verification still runs in `convert_glm5x_shards` before source deletion. A partial real assembly was observed to spend several minutes rereading seven multi-gigabyte artifacts, so the duplicate scan is a clear operational bottleneck, but no full-checkpoint assembly timing has been measured yet.
 - Accepted because: the conversion marker is written only after the finalized artifact opens under strict checks, while the lazy final index still validates directory metadata, file UUID, source SHA, root SHA field, tensor IDs, and sidecar identity. The strict public bundle path remains available for independent revalidation.
 - Revisit: after the 282-shard stream completes; compare lazy-index time and a separate strict post-build audit before enabling any runtime policy that trusts the assembled bundle without selected-tensor CRC checks.
+
+## D-0054 -- Skip finalized source-deleted shards during stream resume
+
+- Decision: before downloading a manifest shard, the local stream checks for its finalized `.k3x` artifact and source-deleted marker. If both exist, it invokes the existing converter resume path instead of issuing another HTTP request; incomplete `.part` files continue through Range resume.
+- Alternatives: always redownload missing source files, trust the artifact without converter resume validation, or delete all partials on restart.
+- Evidence: the regression test covers verified-artifact detection; focused bundle/stream/converter tests passed `7/7`. A live restart showed that the prior implementation began a redundant 2.8 GB shard-1 download, which was stopped before completion; the fixed process retained the partial only for the incomplete shard and did not redownload completed shard payloads.
+- Accepted because: restart correctness remains anchored in the existing marker-aware converter validation, while avoiding needless network and disk traffic after interruption. Public Linux correctness and CodeQL for `db2cf37` passed.
+- Revisit: after a full preemption/resume drill across a completed and an incomplete shard, add a measured restart-latency benchmark and consider lazy marker validation only if the strict restart scan becomes material.
