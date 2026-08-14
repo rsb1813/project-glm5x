@@ -1,8 +1,10 @@
 # GLM-5.2 checkpoint manifest 검증 경계를 테스트합니다.
 
 import pytest
+import torch
+from safetensors.torch import save_file
 
-from glm5x_ref.manifest import GLM5XTensorManifest
+from glm5x_ref.manifest import GLM5XTensorManifest, inspect_safetensors_shard
 
 
 def _config() -> dict[str, object]:
@@ -65,6 +67,35 @@ def test_manifest_resolves_shared_indexer_tensor_to_nearest_full_layer() -> None
         "model.layers.0.self_attn.indexer.wk.weight",
         "model-00001-of-00001.safetensors",
     )
+
+
+def test_safetensors_header_inspection_does_not_materialize_tensor_payloads(tmp_path) -> None:
+    path = tmp_path / "model-00001-of-00001.safetensors"
+    save_file(
+        {
+            "model.layers.0.self_attn.indexer.wk.weight": torch.zeros((4, 6), dtype=torch.bfloat16),
+            "model.layers.0.self_attn.indexer.k_norm.weight": torch.ones((4,), dtype=torch.bfloat16),
+        },
+        str(path),
+    )
+
+    headers = inspect_safetensors_shard(path)
+
+    assert headers[0].name == "model.layers.0.self_attn.indexer.k_norm.weight"
+    assert headers[0].shape == (4,)
+    assert headers[0].dtype == "BF16"
+    assert headers[1].shape == (4, 6)
+
+    manifest = GLM5XTensorManifest.from_json(
+        _config(),
+        {
+            "metadata": {"total_size": path.stat().st_size},
+            "weight_map": {
+                header.name: "model-00001-of-00001.safetensors" for header in headers
+            },
+        },
+    )
+    assert manifest.validate_safetensors_shard(path, "model-00001-of-00001.safetensors") == headers
 
 
 @pytest.mark.parametrize(

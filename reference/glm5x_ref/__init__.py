@@ -1,7 +1,11 @@
 # GLM5X reference graph와 모델 metadata를 노출합니다.
 
 from .model import GLM5XModelDescriptor
-from .manifest import GLM5XTensorManifest
+from .manifest import (
+    GLM5XTensorHeader,
+    GLM5XTensorManifest,
+    inspect_safetensors_shard,
+)
 from .dsa import (
     GLM5XDSAConfig,
     GLM5XDSAIndexer,
@@ -20,6 +24,8 @@ from .turboquant import (
 __all__ = [
     "GLM5XModelDescriptor",
     "GLM5XTensorManifest",
+    "GLM5XTensorHeader",
+    "inspect_safetensors_shard",
     "GLM5XDSAConfig",
     "GLM5XDSAIndexer",
     "GLM5XDSAState",

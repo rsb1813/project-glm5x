@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping
+
+from safetensors import safe_open
 
 from .model import GLM5XModelDescriptor
 
@@ -11,6 +14,38 @@ from .model import GLM5XModelDescriptor
 _INDEXER_COMPONENTS = frozenset(
     {"k_norm.bias", "k_norm.weight", "weights_proj.weight", "wk.weight", "wq_b.weight"}
 )
+
+
+@dataclass(frozen=True)
+class GLM5XTensorHeader:
+    """Header-only safetensors metadata; tensor payloads are never materialized."""
+
+    name: str
+    shape: tuple[int, ...]
+    dtype: str
+
+
+def inspect_safetensors_shard(path: str | Path) -> tuple[GLM5XTensorHeader, ...]:
+    """Read tensor names, shapes, and dtypes through the safetensors header."""
+
+    source = Path(path)
+    if not source.is_file():
+        raise ValueError("SAFETENSORS_SHARD_NOT_FOUND")
+    try:
+        with safe_open(str(source), framework="pt", device="cpu") as handle:
+            headers = []
+            for name in sorted(handle.keys()):
+                tensor_slice = handle.get_slice(name)
+                headers.append(
+                    GLM5XTensorHeader(
+                        name=name,
+                        shape=tuple(int(value) for value in tensor_slice.get_shape()),
+                        dtype=str(tensor_slice.get_dtype()),
+                    )
+                )
+            return tuple(headers)
+    except Exception as exc:
+        raise ValueError("INVALID_SAFETENSORS_HEADER") from exc
 
 
 def _shard_name(value: object) -> str:
@@ -66,6 +101,20 @@ class GLM5XTensorManifest:
         if shard is None:
             raise ValueError("INDEXER_TENSOR_MISSING")
         return tensor_name, shard
+
+    def validate_safetensors_shard(
+        self, path: str | Path, shard_name: str
+    ) -> tuple[GLM5XTensorHeader, ...]:
+        expected = sorted(
+            tensor_name
+            for tensor_name, expected_shard in self.tensor_shards
+            if expected_shard == shard_name
+        )
+        actual = inspect_safetensors_shard(path)
+        actual_names = [header.name for header in actual]
+        if actual_names != expected:
+            raise ValueError("SAFETENSORS_MANIFEST_NAME_MISMATCH")
+        return actual
 
     @classmethod
     def from_json(
