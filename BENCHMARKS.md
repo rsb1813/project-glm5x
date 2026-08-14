@@ -674,3 +674,14 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Peak CUDA allocated bytes: `719,413,248` for both modes. The same input produced output maximum absolute difference `0.0`; route and loaded-expert counts matched.
 - Decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, H2D GB/token, cache hit rate, speculative acceptance, and quality benchmark were not measured. This is an exact one-layer I/O boundary result, not a full-model throughput result.
 - Interpretation: retain the serial default and expose four workers only for the full-bundle gate. Re-measure on all 78 layers with real cold/warm traffic before promoting the policy; concurrent reads may contend with compute or filesystem cache.
+
+## 2026-08-15 -- Opt-in exact host payload cache
+
+- Date: 2026-08-15.
+- Commit: `c2e5980`.
+- Hardware/model: RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.3, five-shard official GLM-5.2 probe bundle, layer 10, exact raw-BF16 expert roles.
+- Mode: one BF16 hidden-state token, `expert_load_workers=4`, `cache_experts=false`, a shared `1,000,000,000`-byte exact host payload cache, same layer and same input for two calls.
+- Cold/warm MoE sublayer wall time: `3.070666336 s` on the first call and `0.094567934 s` on the second call. The cache held `603,979,776` bytes for 8 experts and reported `8` misses, `8` hits, and `0` evictions.
+- Correctness: output maximum absolute difference between the cold and cached calls was `0.0`; selected expert count and route were unchanged.
+- Decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, NVMe GB/token, H2D GB/token, speculative acceptance, and quality benchmark were not measured. This is a bounded exact sublayer cache result, not a full-model throughput result.
+- Interpretation: the cache can remove repeat NVMe reads across layer-object lifetimes, but its useful capacity and hit rate are unknown until the 78-layer full bundle runs. Capacity `0` remains the default.
