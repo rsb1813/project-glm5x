@@ -61,3 +61,4 @@
 - [ ] Feed the exact layer-10 MLA/DSA hidden state into the learned router benchmark and compare complete layer output against Python reference.
 - [x] Evaluate prepared expert-major packed-bucket reuse; paired RTX 5080 medians showed no stable speedup, so it is not enabled by default.
 - [x] Add an opt-in parity-tested device-side expert-major accumulation path and measure it against the `f07d78c` baseline; keep default-off pending full-layer quality evidence.
+- [x] Add opt-in shared-expert device accumulation for the learned MoE path and benchmark it on the exact GLM5XACT handoff; keep default-off pending full-layer quality evidence.

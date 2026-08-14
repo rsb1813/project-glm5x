@@ -494,3 +494,17 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Correctness: both paths reported GPU/CPU maximum relative error `0.000571510172449` and absolute error `0.0000379583798349`; route IDs and contributions were unchanged. CUDA ragged primitive and varied-bucket parity tests pass.
 - Traffic/quality: the experimental path reduces per-bucket output D2H and CPU scatter, but no full-layer quality, decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, speculative acceptance, or final-token result was measured.
 - Status: experimental and runtime-switchable only. The default remains the host-scatter path until exact full-layer GLM parity and quality results exist.
+
+## 2026-08-15 -- Shared-expert device accumulation on exact GLM5XACT handoff
+
+- Commit: `8090b90`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL2 Ubuntu-24.04. The target CPU/RAM/NVMe were not independently sampled by this benchmark.
+- Model/checkpoint: five bounded `zai-org/GLM-5.2` `.k3x` probe artifacts, complete layer 10 only; exact `layer10-moe-input.gmlxact` and `layer10-moe-output.gmlxact` produced by the Python layer reference; no full checkpoint.
+- Mode: learned natural Top-8, routed scale 2.5, 16 routed experts plus one shared expert, raw-BF16 resident grid, BF16-rounded input, FP32 output, 10 warmups and 100 measured iterations. The baseline uses separate routed/shared output handling; the fused mode uses `--device-accumulate 1 --fuse-shared 1` and adds the shared device output before one final D2H.
+- Route/residency: 16 routed assignments across 16 unique experts, average Top-K `8.0`, resident expert bytes `1,283,457,024`, cold weight H2D `1,283,457,024` bytes, warm weight H2D `0`, router payload `3,146,752` bytes, shared payload `75,497,472` bytes. Host payload load was approximately `10.0–11.0 s` per fresh process.
+- Baseline warm medians: `2,180,810`, `2,194,670`, and `2,371,374 ns`; median-of-runs `2,194,670 ns`.
+- Device accumulation without shared fusion: `2,326,186`, `2,590,515`, and `2,098,680 ns`; median-of-runs `2,326,186 ns`, approximately `5.99%` slower than this longer baseline sweep. This does not reproduce the earlier standalone `20.1%` sample and shows material run-to-run variance.
+- Fused shared accumulation: `1,984,222`, `1,986,460`, and `2,090,547 ns`; median-of-runs `1,986,460 ns`, approximately `9.49%` lower than baseline and `14.60%` lower than device accumulation without fusion in this sweep.
+- Correctness: CUDA synthetic fused routed-plus-shared parity passed. On the exact GLM5XACT handoff, GPU/CPU maximum relative error was `0.00045266628149`, expected BF16-artifact relative error was `0.00152439018711`, and route IDs/contributions matched Python. The fused path reported one final output D2H per call.
+- Tests: WSL host CTest `15/15`, CUDA CTest `27/27`, and Python `301 passed, 124 skipped`.
+- Status: experimental and default-off. This is still one real MoE sublayer, not a complete decoder layer or end-to-end tok/s result. No TPS, TTFT, NVMe GB/token, full-layer quality, or final-token result was measured.

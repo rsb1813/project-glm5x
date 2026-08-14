@@ -280,6 +280,9 @@
 
 - Added a CUDA ragged mix primitive that consumes per-assignment output offsets, token indices, and router contributions. The accumulator is zeroed once per expert-major forward and each bucket kernel adds into the token-major device buffer, so later assignment-count buckets cannot erase earlier token results.
 - The backend exposes the path only when FP32 output and `cuda_expert_major_device_accumulate` are selected. It retains the existing host scatter path as the default and falls back automatically for BF16 output.
+- Added `raw_bf16_situ_mlp_expert_major_with_shared` and `--fuse-shared 1`. The experimental path adds the shared expert's device output into the routed accumulator before one final D2H, and is restricted to learned-MoE, device accumulation, and FP32 output.
+- CUDA synthetic routed-plus-shared parity passed. On the exact two-token layer-10 GLM5XACT handoff, 100-iteration median-of-runs were `2,194,670 ns` baseline, `2,326,186 ns` device accumulation without fusion, and `1,986,460 ns` fused shared accumulation. Fused was approximately `9.49%` lower than baseline in this sweep, while the standalone device path was approximately `5.99%` slower; the spread means neither path is promoted by default.
+- WSL host CTest `15/15`, CUDA CTest `27/27`, and Python `301 passed, 124 skipped` passed after the change. The next bottleneck remains full-layer MLA/DSA-to-CUDA state and final-logit/incremental generation, not this bounded MoE handoff.
 - A CUDA regression now covers both one-bucket and varied one-/two-assignment bucket plans. WSL host CTest 15/15, CUDA CTest 27/27, and Python 301 passed/124 skipped are green.
 - Three paired RTX 5080 layer-10 learned-MoE runs measured median-of-runs `2.492351 ms` baseline versus `1.991721 ms` device accumulation, about `20.1%` lower block latency. Relative GPU/CPU error stayed `0.000571510172449`; this is still only the bounded MoE sublayer, not end-to-end token generation.
 
