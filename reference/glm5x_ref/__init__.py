@@ -12,6 +12,7 @@ from .dsa import (
     GLM5XDSAState,
     estimate_dsa_state_bytes,
 )
+from .official_dsa import GLM5XOfficialDSAIndexer, build_glm_indexer_rope
 from .toy import GLM5XSyntheticConfig, GLM5XSyntheticModel
 from .turboquant import (
     QuantizedVector,
@@ -30,6 +31,8 @@ __all__ = [
     "GLM5XDSAIndexer",
     "GLM5XDSAState",
     "estimate_dsa_state_bytes",
+    "GLM5XOfficialDSAIndexer",
+    "build_glm_indexer_rope",
     "GLM5XSyntheticConfig",
     "GLM5XSyntheticModel",
     "QuantizedVector",
