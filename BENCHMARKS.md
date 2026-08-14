@@ -360,3 +360,13 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Result: the C++ gate verified separate one- and two-assignment batches, repeated-shape concatenation, exact packed input order, and malformed payload rejection. WSL CTest passed 26/26 and the focused GLM Python suite passed 35/35.
 - Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D traffic, cache hit rate, natural Top-K, speculative acceptance, and task quality: not measured.
 - Caveat: this is a scheduler-shape correctness boundary. No GLM router, CUDA dispatch, output scatter, full layer, or end-to-end throughput is connected yet.
+
+## 2026-08-14 -- Expert-major contribution-scatter correctness gate
+
+- Commit: `b777b1b`.
+- Hardware: host C++ reference path; no CUDA execution and no checkpoint.
+- Model/checkpoint: tiny synthetic hidden-state slab, route contributions, and group output slabs only.
+- Mode: `scatter_expert_major_outputs`, explicit group-order output validation and contribution-weighted token-major accumulation.
+- Result: the C++ gate reconstructed token 0 as `[6.4, 12.8]` and token 1 as `[3.0, 4.0]` from two routed expert groups, and rejected a short output slab. WSL CTest passed 26/26 and the focused GLM Python suite passed 35/35.
+- Decode tok/s, prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D traffic, cache hit rate, natural Top-K, speculative acceptance, and task quality: not measured.
+- Caveat: this validates contribution semantics only. It is not a CUDA launch, real GLM layer, learned routing, or end-to-end throughput result.

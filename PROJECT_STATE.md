@@ -34,6 +34,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - Added `raw_bf16_situ_mlp_grid_packed` so expert-major callers can provide per-expert candidate slabs without broadcasting one input block to every expert; common-input behavior remains unchanged.
 - Added model-neutral `ExpertMajorPackedPlan` preparation from token hidden states and route assignments, retaining explicit token/router-slot/contribution metadata for future GLM scheduler integration.
 - Added stable ragged `ExpertMajorPackedBatch` bucketing by assignment count, retaining source group indices and rejecting malformed slab lengths before CUDA dispatch.
+- Added exact `scatter_expert_major_outputs` contribution accumulation from group-order expert slabs back to token-major outputs with shape validation.
 - Added `--input-mode sparse-packed` to the real-shard probe so the packed raw grid can be measured on real BF16 payloads with an explicitly deterministic two-token assignment pattern.
 - Added and measured `k3x_cuda_glm5x_moe_bench` on the real RTX 5080 at GLM-5.2 expert dimensions.
 - Added an expert-major candidate-token benchmark mode for 1/2/4/8 tokens.
@@ -89,6 +90,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - Packed-grid gate: `cuda_dense` now verifies two experts receiving different one-token slabs, CPU parity, and packed activation/output byte accounting. This is a correctness boundary only; no ragged real-router throughput has been measured.
 - Packed-plan gate: `test_expert_major` verifies stable per-expert slab order for one-token and two-token assignment groups. No GLM router or end-to-end throughput is connected yet.
 - Ragged packed-batch gate: `test_expert_major` verifies stable one-/two-assignment buckets, repeated-shape slab concatenation, source group indices, and malformed payload rejection. No GLM router, CUDA bucket loop, or output scatter is connected yet.
+- Contribution-scatter gate: `test_expert_major` verifies weighted group-output accumulation in token order and short-output rejection. The helper is CPU/reference only; no GLM router or CUDA bucket loop is connected yet.
 - Sparse-packed probe: deterministic 8-expert/2-token pattern measured 965,550 ns/block versus 1,040,559 ns for the common-input rerun; this is not learned routing or end-to-end throughput.
 - Full inherited Python suite was not green because historical `results/` artifacts and a Windows `build/` executable path were intentionally not migrated; the focused GLM suite remains green.
 - No end-to-end GLM decode tok/s or quality result exists yet.
@@ -101,5 +103,5 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, and a bound
 - First official shard header probe: 35/35 names matched `model-00001-of-00282.safetensors`; representative indexer tensors are BF16 with `wk=(128,6144)`, `wq_b=(4096,2048)`, and `weights_proj=(32,6144)`.
 - First bounded artifact: 35 BF16 tensors, 78 layer records, Python reader checks green, and WSL C++ `test_reader` exit 0; no full model loaded.
 - Real indexer payload gate: loaded only five layer-0 indexer tensors from the 5.3 GB first shard (`wq_b=(4096,2048)`, `wk=(128,6144)`, `weights_proj=(32,6144)`, and two 128-element LayerNorm vectors) and ran causal Top-K on zero activations. This is payload/shape evidence, not model quality or throughput.
-- Last known-good code HEAD: `46f2e8e` (`feat: bucket ragged expert-major packed groups`). Focused Python and WSL CTest gates are green.
+- Last known-good code HEAD: `b777b1b` (`feat: preserve expert-major contribution scatter`). Focused Python and WSL CTest gates are green.
 - Next bottleneck: pinned/asynchronous raw H2D, direct tensor-core algorithm selection, q-residual production projection, exact MLA/DSA state, natural Top-8 routing, nonzero full-layer parity, and VRAM-pressure-aware multi-expert residency; full weights remain intentionally absent.

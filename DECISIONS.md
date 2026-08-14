@@ -248,3 +248,11 @@
 - Evidence: `test_expert_major` covers separate assignment-count buckets, repeated-shape grouping, exact slab concatenation, and malformed payload rejection. The WSL CTest suite passed 26/26 and the focused GLM Python suite passed 35/35 at commit `46f2e8e`.
 - Accepted because: the existing packed CUDA API is rectangular by construction, while real MoE routes are ragged. Keeping bucketing and scatter explicit avoids hidden padding cost and preserves exact routing/audit metadata.
 - Revisit: when exact GLM router scores are connected and a real ragged assignment distribution can be executed through the bucket list with output scatter and full-layer parity.
+
+## D-0032 -- Keep expert-major contribution scatter outside CUDA
+
+- Decision: add `scatter_expert_major_outputs` as a CPU/reference helper that consumes group-order output slabs, validates their exact shape, multiplies each assignment by its retained router contribution, and accumulates into token-major output order.
+- Alternatives: fuse contribution weighting and scatter into the CUDA grid, return only the last expert's output, or let callers rely on implicit group ordering without a validator.
+- Evidence: `test_expert_major` verifies two groups with one- and two-assignment slabs, expected weighted token outputs, and short-output rejection. The WSL CTest suite passed 26/26 and the focused GLM Python suite passed 35/35 at commit `b777b1b`.
+- Accepted because: explicit scatter preserves exact Top-K semantics and makes CPU/GPU parity inspectable. It also allows future ragged buckets to run independently without coupling router metadata to a kernel output layout.
+- Revisit: after a real GLM router and CUDA bucket loop exist; a fused scatter can be evaluated only against the explicit reference result and its measured H2D/launch cost.
