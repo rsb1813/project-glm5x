@@ -65,3 +65,17 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 1
 - Batch telemetry: 800 batched expert calls and 3,200 batched expert tokens over the 100-iteration sample; activation H2D 78,643,200 bytes and device-to-host 78,643,200 bytes.
 - Decode tok/s, prefill tok/s, TTFT, NVMe GB/token, quality score, and speculative acceptance: not measured; this is a per-expert-group layer record.
 - Decision: resident exact batching is enabled for the expert-major path, but it is not claimed faster than the all-expert resident grid. Its immediate value is eliminating repeated weight movement; variable-union grouping and tensor-core execution remain open bottlenecks.
+
+## 2026-08-14 -- Resident BF16 dequantized expert grid experiment
+
+- Commit: `5d1c636`.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, CUDA 13.3 in WSL.
+- Model/checkpoint: no checkpoint; deterministic zero-weight synthetic GLM-5.2-shaped expert tensors.
+- Mode: resident expert grid with one-time host MXFP4 E2M1/E8M0 to BF16 dequantization, cublasLt BF16-input/FP32-output projections, synchronous transfer, no proxy, no pruning, no CUDA graph.
+- Shape: hidden size 6144, expert intermediate size 2048, group size 32, 8 selected experts, 4 candidate tokens.
+- Native reference: median wall latency 5,394,131 ns/block; kernel time 354,917,120 ns over 100 measured calls; resident weight bytes 160,432,128; peak VRAM 162,103,680 bytes; maximum absolute error 0.
+- BF16 grid: median wall latency 2,582,527 ns/block; kernel time 67,868,032 ns over 100 measured calls; cold BF16 weight H2D 603,979,776 bytes; resident weight bytes 603,979,776; warm weight H2D 0; activation H2D 4,915,200 bytes; device-to-host 78,643,200 bytes; peak VRAM 630,636,544 bytes; maximum absolute error 0 for the zero-weight fixture.
+- Relative result: BF16 resident grid was 2.09x faster in this bounded layer record, at 3.77x resident-weight memory. This is not an end-to-end tok/s measurement and does not establish GLM quality parity.
+- Decode tok/s, prefill tok/s, TTFT, system RAM, NVMe GB/token, average Top-K, speculative acceptance, and quality score: not measured.
+- Reference switch: `CudaMxfp4Execution::native` remains the default; `dequantized_bf16` is opt-in and requires sufficient VRAM residency.
+- Caveat: the benchmark still uses zero weights, so the reported absolute error is a kernel contract check rather than a model-quality result. Full GLM-5.2 weights and DSA/routing are absent.

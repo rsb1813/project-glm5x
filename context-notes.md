@@ -33,3 +33,9 @@
 - The CUDA FFN test is a red-green regression: before the patch, the second resident batch re-uploaded weights; after the patch, CPU parity is exact, cache hits increase by three, and warm weight H2D remains unchanged.
 - The CLI expert-major contract no longer rejects resident weights. This is a storage/transfer optimization only; natural routing, exact candidate verification, and quality semantics are unchanged.
 - GLM-shaped `expert-batch` is not faster than the all-expert grid for the synthetic 8-expert case, but it proves the important invariant that cold weight upload is one-time and warm upload is zero. The next performance work should target variable-union scheduling and tensor-core/dequantized GEMM, not proxy weights.
+
+## 2026-08-14 BF16 resident grid
+
+- Added `CudaMxfp4Execution::dequantized_bf16` as an opt-in path. It caches host BF16 dequantizations by tensor identity, admits them through the same resident table, and uses cublasLt batched projections across all selected experts with one activation upload and one output download.
+- Added red-green CUDA parity coverage for BF16 expert-batch and BF16 expert-grid execution. Native MXFP4 remains the default; capacity bypass returns to the exact native group path.
+- On the RTX 5080 shaped fixture, 8 experts/4 tokens measured 5,394,131 ns native grid versus 2,582,527 ns BF16 grid. BF16 resident bytes were 603,979,776 versus 160,432,128 native. Both report maximum absolute error 0 only because the fixture uses deterministic zero weights.

@@ -12,6 +12,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - GLM-5.2 tensor-manifest validation for `config.json`, safetensors `weight_map`, shard names, tensor count, and source byte total without opening a weight shard.
 - A bounded RTX 5080 CUDA benchmark for GLM-5.2 expert dimensions (`hidden=6144`, `expert_intermediate=2048`, `group=32`) using the resident expert-grid backend.
 - Resident expert-major batch execution now admits packed/scales through the shared `ResidentWeightTable`; repeated candidate batches can reuse exact MXFP4 weights without another weight H2D upload.
+- Experimental resident BF16 expert-grid execution dequantizes exact MXFP4 values once per tensor and uses cublasLt BF16-input/FP32-output projections; native MXFP4 remains the default and the BF16 path is capacity-gated.
 - GLM5X converter CLI wrapper.
 - CPU/reference TurboQuant-inspired KV cache with Hadamard rotation, integer and half-bit schedules, asymmetric K/V policy, incremental attention, and capacity estimation.
 
@@ -34,6 +35,7 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 
 - GLM-5.3 checkpoint descriptor and calibration swap.
 - Full RTX 5080 native CUDA kernels beyond the current scalar MXFP4 grid path.
+- Making dequantized BF16 the default, or storing all GLM experts in BF16, is rejected until VRAM pressure and quality are measured with real shards.
 - Cloud-side shard conversion through the existing SKYFORGE concept.
 
 ## Runtime data flow
@@ -48,7 +50,7 @@ For long context, the planned path is paged DSA state with a recent high-precisi
 
 `GLM5XModelDescriptor` is the first model boundary. It owns model family, attention kind, layer count, hidden size, routed expert count, Top-K, shared experts, vocabulary size, MTP layer count, MoE intermediate width, DSA index Top-K/frequency/head shape, MTP sharing policy, and maximum position length. Tensor file names and source byte totals belong to `GLM5XTensorManifest` and must not be embedded in runtime kernels.
 
-The current CUDA evidence is deliberately bounded. The shaped benchmark runs the resident MXFP4 expert grid with deterministic zero weights, so maximum absolute error is checked against a zero reference. It is a kernel/layer measurement, not a full 78-layer GLM decode result and not a quality benchmark.
+The current CUDA evidence is deliberately bounded. The shaped benchmark runs the resident MXFP4 grid and the opt-in BF16 resident grid with deterministic zero weights, so maximum absolute error is checked against a zero reference. It is a kernel/layer measurement, not a full 78-layer GLM decode result and not a quality benchmark. The BF16 path trades approximately 3.77x resident-weight bytes for the measured 2.09x grid latency improvement in the 8-expert/4-token sample.
 
 K3-specific KDA, Attention Residual, Stable LatentMoE, 896-way Top-16 assumptions, and native Kimi MXFP4 naming are not part of the GLM5X default graph. They remain historical source context in the old K3X repository only.
 
