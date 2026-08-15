@@ -566,3 +566,9 @@
 - This is the first native Blackwell FP4 contract, not a full-model performance result. Calibration, residual/outlier storage, multi-layer residency, and final-logit quality remain the next gates.
 
 - Verification after the NVFP4 integration completed with `340 passed, 124 skipped` in `196.52 s`; no full-model quality or 10--20 tok/s claim changed.
+
+## 2026-08-15 -- Full NVFP4 gate result
+
+- The first detached full 78-layer gate reused `1,200` `.pgu` sidecars and a 40 GiB trunk cache. It measured prefill `0.002230757197422688 tok/s`, TTFT `631.1266474290169 s`, decode `0.005469012467235659 tok/s`, `33,396,272,640` prefill K3X bytes/token, and `0` decode K3X bytes/token.
+- The paired resident-trunk BF16 control measured prefill `0.003236382626324253 tok/s`, TTFT `412.11868096899707 s`, and decode `0.00969633691172072 tok/s`. NVFP4 generated `[154820]` versus BF16 `[565]` for the same prompt, so the mode is rejected as a quality/default path.
+- The logical K3X counters exclude `.pgu` sidecar file reads. The next bottleneck is therefore sidecar-to-VRAM traffic and native FP4 execution overhead in addition to calibration/residual quality.

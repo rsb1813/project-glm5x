@@ -682,3 +682,11 @@
 - Accepted because: it exercises the official Blackwell hardware primitive directly and removes the CPU decode bottleneck from the FP4 experiment while preserving an exact BF16 fallback and source-bound sidecars.
 - Rejected as a default because: current uncalibrated layer drift is too high for the project quality target, and the bounded layer result is not an end-to-end throughput result.
 - Revisit: after calibrated outlier/residual storage, final-logit/coding tests, multi-layer residency, and a full-model bytes/quality/TPS gate.
+
+## D-0086 -- Keep current NVFP4 gate-up mode experimental after full-model divergence
+
+- Decision: do not promote `expert_precision=nvfp4_gate_up` to a quality mode or default. Keep exact BF16 as the production reference until calibrated FP4 residuals and final-logit parity are demonstrated.
+- Alternatives: promote the measured mixed NVFP4 mode because it removes bundle expert reads, promote all-NVFP4, or trade token divergence for the nominal FP4 bandwidth reduction.
+- Evidence: the full 78-layer RTX 5080 gate with a 40 GiB trunk cache measured NVFP4 prefill `0.002230757197422688 tok/s`, TTFT `631.1266474290169 s`, and decode `0.005469012467235659 tok/s`; the paired BF16 control measured `0.003236382626324253` prefill tok/s, TTFT `412.11868096899707 s`, and `0.00969633691172072` decode tok/s. NVFP4 generated `[154820]` while BF16 generated `[565]`. K3X bundle reads fell to `0` during decode and `33,396,272,640` bytes during prefill, but sidecar I/O was not included in those counters.
+- Accepted because: it preserves the exact correctness contract and records the real result instead of mistaking lower logical reads for higher end-to-end speed or quality.
+- Revisit: after outlier/residual calibration, sidecar-to-VRAM prefetch/device residency, multi-token reuse, and full-logit/coding-quality parity.

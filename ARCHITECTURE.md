@@ -134,6 +134,7 @@ The fingerprinted expert sidecar supports CUDA TinyGEMM INT4 (`.pi4`), compariso
 - Focused NVFP4/layer/cache/model tests pass (`21 passed` in the latest selected group). A synthetic CUDA scaled-GEMM parity probe matched the dequantized reference exactly for the tested shapes. This validates the storage/layout/kernel contract, not full-model quality or throughput.
 - Real layer-10 one-token paired measurements on the RTX 5080: all-NVFP4 measured `5.2946 s` versus BF16 `4.5003 s` with `0.18142111599445343` relative L2 error; routed gate/up NVFP4 with shared/down BF16 measured `4.3504 s` versus BF16 `4.4513 s` with `0.12603828310966492` relative L2 error and unchanged routes. These are bounded layer measurements, not tok/s.
 - NVFP4 remains experimental and default-off. Promotion requires calibrated outlier/residual handling, final-logit and coding-quality parity, and a fresh full-model traffic/throughput gate. FP8 remains comparison-only and is not a reason to maintain a competing local final format.
+- The completed 78-layer gate with a 40 GiB trunk cache and `.pgu` sidecars reduced measured K3X reads to `33,396,272,640` prefill bytes and `0` decode bytes, with `1,200` packed-sidecar hits. It nevertheless measured `0.002230757197422688` prefill tok/s, `0.005469012467235659` decode tok/s, and token `[154820]` versus exact BF16 token `[565]`; sidecar file traffic was outside the K3X counters. This rejects the current mixed NVFP4 mode as a default and identifies sidecar I/O/native FP4 overhead plus calibration as the next bottleneck.
 
 ## Quality modes
 

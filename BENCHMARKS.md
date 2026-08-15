@@ -2,13 +2,24 @@
 
 ## 2026-08-15 -- RTX 5080 NVFP4 native scaled-GEMM and mixed-precision gate
 
-- Commit: working tree after public `d530d46`; NVFP4 implementation and documentation uncommitted at measurement time.
+- Commit: `1db2e0a` (the implementation and documentation were committed after the layer gate; the full gate below was rerun from this commit).
 - Hardware: RTX 5080 16 GB, WSL2 CUDA 13.0/PyTorch 2.13.0; model/checkpoint: official GLM-5.2 real layer-10 activation and full expert bundle; context: one candidate token, natural Top-8.
 - Kernel/storage: E2M1 FP4 payloads, per-16-value FP8 E4M3 blocked scales, FP32 global scale, CUDA `torch._scaled_mm`; `.pn4` all-projection and `.pgu` routed gate/up sidecars. The native CUDA contract matched a dequantized reference on the synthetic shape probe.
 - All-NVFP4 paired layer gate: BF16 `4.5003 s`; NVFP4 `5.2946 s`; relative L2 `0.18142111599445343`; maximum absolute error `0.00251007080078125`; route IDs equal.
 - Routed gate/up-only NVFP4 paired layer gate: BF16 `4.451283303991659 s`; NVFP4 gate/up plus BF16 shared/down `4.350357135001104 s`; relative L2 `0.12603828310966492`; maximum absolute error `0.0014079809188842773`; route IDs equal.
 - Decode tok/s, prefill tok/s, TTFT, peak VRAM, system RAM, physical NVMe GB/token, H2D GB/token, cache hit rate, speculative acceptance, and full-model quality: not applicable to this bounded one-layer gate.
 - Decision: keep both modes experimental/default-off. The measured native path is a storage/kernel correctness result, not evidence for 10--20 tok/s. Calibrated residual/outlier handling and a full-model final-logit gate remain required.
+
+## 2026-08-15 -- Full 78-layer NVFP4 gate with resident trunk
+
+- Commit: `1db2e0a` (`feat: add native nvfp4 expert path`). Hardware: RTX 5080 16 GB, WSL2 CUDA 13.0/PyTorch 2.13.0; model/checkpoint: full official GLM-5.2 `.k3x` bundle; context: prompt `[0]`, one generated token, 78 layers, natural Top-8.
+- Mode: `expert_precision=nvfp4_gate_up`, exact BF16 shared/down path, `.pgu` fingerprinted sidecars, `trunk_cache_bytes=42,949,672,960`, `expert_load_workers=16`, no expert host/device cache, no proxy, no sparse attention.
+- Measured prefill: `448.2782801980211 s` (`0.002230757197422688 tok/s`), TTFT `631.1266474290169 s`; decode: `182.8483672309958 s` (`0.005469012467235659 tok/s`). Peak allocated VRAM `8,083,474,944` bytes; reserved peak `9,281,994,752` bytes. System RAM and physical NVMe traffic were not instrumented.
+- Logical K3X reads: prefill `33,396,272,640` bytes (`161` calls, `33,396,272,640` bytes/token); decode `0` bundle bytes (`0` calls). These counters do not include the `.pgu` sidecar file reads or physical NVMe traffic.
+- Residency: trunk cache `1,191` entries, `33,396,272,640` resident bytes, `1,761` hits, `1,191` misses, `0` evictions; packed sidecar `1,200` hits, `0` misses, `0` writes. Expert host/device caches were disabled.
+- Quality: generated token `[154820]` differs from the exact BF16 resident-trunk gate token `[565]` for the same prompt. This is a direct final-token divergence, not an acceptable quality result.
+- Paired resident-trunk BF16 control: prefill `308.986951007013 s` (`0.003236382626324253 tok/s`), TTFT `412.11868096899707 s`; decode `103.13172996198409 s` (`0.00969633691172072 tok/s`), with `78,694,755,840` prefill and `45,298,483,200` decode logical bytes/token. NVFP4 reduced measured K3X reads but was slower and changed the token; sidecar I/O and native FP4 execution overhead are the next bottlenecks.
+- Decision: reject `nvfp4_gate_up` as a quality/default mode for now. Keep the implementation opt-in while calibration, residual/outlier preservation, sidecar prefetch/device residency, and final-logit parity are developed. This gate does not support a 10--20 tok/s claim.
 
 ## 2026-08-15 -- Experimental MXFP4 sidecar quality/bytes gate
 
