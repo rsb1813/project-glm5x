@@ -994,3 +994,18 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 
 - A new regression first failed because the count-only `layer_balanced` policy evicted `(layer=0, expert=0)` even though it was the layer's protected entry. The implementation now tracks protected keys explicitly and excludes them from eviction candidates.
 - Verification: the focused layer/cache/NVFP4/model suite passed `38` tests, including the grouped-runtime parity test and `5` grouped-NVFP4 primitive tests. The complete WSL2 regression then passed `352 passed, 124 skipped` in `75.19 s`.
+
+## 2026-08-15 -- Protected C++ resident-cache boundary
+
+- Commit: `49c386b`; hardware: RTX 5080 16 GB, WSL2 CUDA 13.0; model/checkpoint: synthetic K3X fixture; context: four prompt IDs and two generated tokens, CUDA custom backend, grouped FFN boundary.
+- A 4 KiB resident budget produced exact token IDs `[43, 32]` in three runs with decode medians `17.018/15.932/19.230 ms`, `350` misses, `240` bypasses, `2,767,680` weight-H2D bytes, `3,264` resident bytes, and `4,096` peak resident bytes.
+- A 1 MiB budget produced the same exact token IDs with decode medians `17.116/14.849/19.032 ms`, `253` hits, `97` misses, `568,224` weight-H2D bytes, and `568,224` resident bytes. The larger budget was not faster in this compute-dominated synthetic fixture; the result validates eviction safety, not end-to-end GLM throughput.
+- The CUDA residency suite passed `27/27`. Full-model decode tok/s, prefill tok/s, TTFT, physical NVMe GB/token, H2D GB/token, and coding-quality metrics are not applicable to this synthetic boundary.
+
+## 2026-08-15 -- Pinned packed-sidecar staging boundary
+
+- Commit: `49c386b`; hardware: RTX 5080 16 GB, WSL2 CUDA 13.0/PyTorch 2.13.0; model/checkpoint: real GLM-5.2 layer-10 `.pgu` sidecars; context: two-token bounded forwards, one expert reader, 1 GiB pinned staging capacity.
+- Synchronous reference samples were approximately `4.130233 s` first forward and `3.469007 s` repeated forward. The pinned/non-blocking path measured `5.606441 s` first forward and `3.370938 s` repeated forward, with `629,145,728` pinned bytes resident and `16` pinned-staging hits on the repeated call.
+- The repeated-call difference is a bounded cache/transport observation, not a layer or model throughput result. The first-use staging cost is material, and no full-model quality or final-token parity gate was rerun with this option.
+- Separate RTX 5080 transport samples for a 21,233,672-byte sidecar measured pageable `1.358 ms` GPU-event/`1.701 ms` wall versus pinned non-blocking `0.588 ms` GPU-event/`16.138 ms` wall when each sample allocated its own staging buffer. This demonstrates why pooled staging is required; it does not prove end-to-end overlap.
+- Python verification for the commit: focused `26 passed, 6 skipped`; full `356 passed, 124 skipped` in `77.29 s`; changed-module `py_compile` and `git diff --check` passed. No 10--20 tok/s claim is made.

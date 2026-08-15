@@ -98,3 +98,7 @@
 - [x] Repair `benchmark_synthetic.py` forwarding for the existing `l2_expert_workers` option and run synchronous/prefetch smoke comparisons.
 - [ ] Replace plain full-model LRU expert residency with layer-aware protected/hot-bank scheduling and explicit sidecar-I/O telemetry.
 - [ ] Add calibrated FP4 residual metadata and promote only after native RTX 5080 FP4 full-model quality/traffic gates; do not promote the current uncalibrated path.
+- [x] Add explicit C++ resident access-set protection and byte-bounded eviction safety for selected expert keys.
+- [x] Add opt-in pooled pinned sidecar staging with non-blocking CUDA copies and event-safe eviction.
+- [x] Run the full WSL verification after the residency/staging change (`356 passed, 124 skipped`; CTest `27/27`).
+- [ ] Measure pooled next-layer prefetch with sidecar/H2D/physical-NVMe telemetry and final-logit parity.

@@ -303,3 +303,26 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 
 - GitHub correctness run `31884496150` exposed a CPU-only CI mismatch: the INT4 helper returned `RuntimeError(GLM5X_INT4_CUDA_UNAVAILABLE)` before the public CPU-target `ValueError(GLM5X_INT4_CUDA_REQUIRED)` contract. The explicit target/availability guard is fixed in `0d5621d`.
 - Local focused INT4/packed-cache/benchmark tests passed `9`, and the complete WSL Python suite passed `354 passed, 124 skipped` in `78.52 s`. Public correctness and C++/Python CodeQL all pass on the current PR head.
+
+## 2026-08-15 -- Protected residency and pinned staging milestone
+
+- Current implementation commit: `49c386b` (`perf: add protected residency and pinned staging`). The C++ runtime now has a byte-bounded resident-weight LRU with explicit per-layer protected access sets. The Python packed-sidecar cache has an opt-in page-locked staging pool and non-blocking CUDA transfer mode.
+- Defaults and correctness boundary are unchanged. Natural routing, exact BF16, synchronous sidecar loading, and zero-capacity caches remain the reference path. Pinned staging requires a packed expert precision, a positive capacity, and one expert reader; BF16 misuse is rejected.
+- Verification: WSL CUDA build succeeded; CTest `27/27` passed; focused Python `26 passed, 6 skipped`; full WSL Python `356 passed, 124 skipped` in `77.29 s`; changed-module `py_compile` and `git diff --check` passed.
+- Bounded measurements: the synthetic C++ residency fixture kept exact token IDs `[43, 32]` under 4 KiB and 1 MiB budgets, but the larger budget did not improve median latency. Real layer-10 pinned sidecar staging was slower on first use (`5.606441 s`) and slightly faster on the repeated bounded call (`3.370938 s` versus `3.469007 s` synchronous). No full-model rerun or quality promotion was made.
+- Latest full-model truth remains exact BF16 `0.010559 tok/s` in the best measured resident-trunk/host configuration and NVFP4 `0.014484 tok/s` in the latest quality-rejected gate. The 10--20 tok/s target is not achieved, and no projected number is recorded as measured.
+
+## In progress
+
+- Replace the current per-layer residency boundary with route-stable multi-layer lookahead and a pooled asynchronous sidecar/H2D scheduler. Add separate sidecar bytes, H2D bytes/time, physical NVMe sampling, eviction counts, and deadline misses before another 78-layer gate.
+- Connect the exact GLM MLA/DSA hidden-state path to the C++ expert-major backend and final logits, then run a quality gate before enabling any FP4 or adaptive Top-K mode.
+
+## Known blockers
+
+- Pinned staging currently improves the CUDA event component in an isolated transport probe but can worsen wall time when staging buffers are allocated per sample. It is a boundary for future reuse, not a proven full-model optimization.
+- The C++ resident table still owns one active access context per backend/table. Concurrent forwards sharing one `RuntimeSession` are not a supported contract until the context is made per-forward or the session is serialized.
+- The full-model bottleneck remains expert sidecar admission/H2D and trunk residency. Existing logical expert traffic is tens of GB per token, so isolated sub-millisecond projection results cannot reach 10 tok/s without a residency/traffic change.
+
+## Last known-good test state
+
+- Commit `49c386b`; WSL CUDA CMake build and CTest `27/27` green; full WSL Python `356 passed, 124 skipped`; no cloud or paid resources used.

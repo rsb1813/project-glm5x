@@ -746,3 +746,19 @@
 - Evidence: GitHub Linux run `31884496150` reproduced the mismatch as `RuntimeError: GLM5X_INT4_CUDA_UNAVAILABLE` for a test that requires the stable CPU-target `ValueError`. The focused regression passed after the guard, and the full local WSL suite remained `354 passed, 124 skipped`.
 - Accepted because: callers receive one stable API error independent of whether the host has CUDA, while CUDA-enabled packing behavior is unchanged.
 - Revisit: only if the public quantization API later adopts a distinct environment-error type across all precision paths.
+
+## D-0094 -- Protect the current layer's resident expert set
+
+- Decision: use an explicit per-layer access set in the C++ resident-weight table. Selected expert keys are protected before grouped execution, cache hits are touched, and only non-protected entries are eligible for byte-budget eviction. If every candidate is protected, admission bypasses rather than invalidating a live pointer.
+- Alternatives: keep the previous capacity-only bypass, evict by plain LRU during a grouped launch, or pin the whole resident table. The first two either thrash or can invalidate pointers collected before a launch; the last one violates the VRAM budget.
+- Evidence: the new CUDA unit test passes protected-first/second admission, all-protected bypass, explicit access protection, resident-byte accounting, and route/token parity. The synthetic 4 KiB and 1 MiB runs both produced exact token IDs; latency was statistically neutral (`17.018 ms` versus `17.116 ms` medians), so this is a safety/policy result rather than a speed claim.
+- Accepted because: it preserves correctness under constrained residency without changing natural routing or default capacity behavior.
+- Revisit: when a route-stable multi-layer trace supplies eviction counts, transition probabilities, and full-model H2D/quality measurements. A shared table still needs a per-forward context or session serialization before concurrent forwards are supported.
+
+## D-0095 -- Keep pinned sidecar staging explicit and default-off
+
+- Decision: add a bounded page-locked staging pool and non-blocking CUDA copy path to the packed sidecar cache, but require an explicit positive capacity and one expert reader. Reject pinned staging with BF16 precision or without a packed sidecar path.
+- Alternatives: always allocate pinned buffers, use non-blocking copies from pageable memory, or enable multiple reader threads immediately. The first increases RAM pressure for every run; the second cannot provide asynchronous H2D; the third risks stream/event lifetime races in the current cache implementation.
+- Evidence: the focused Python suite and full suite passed (`356 passed, 124 skipped`). On a real layer-10 bounded probe, the pinned path was slower on first use (`5.606441 s` versus `4.130233 s`) and slightly faster on the repeated forward (`3.370938 s` versus `3.469007 s`). A standalone RTX 5080 transport probe reduced GPU event time (`1.358 ms` to `0.588 ms`) but increased wall time when staging allocation was not pooled.
+- Accepted because: the feature creates a measurable, correctness-preserving boundary for future overlap while keeping the exact synchronous reference path unchanged.
+- Revisit: after pooled reuse across a layer window reports physical sidecar bytes, H2D bytes/time, host RSS, cache hits, and final-logit parity. It is not evidence for 10--20 tok/s by itself.

@@ -10,6 +10,8 @@ The current precision decision is explicit: official FP8, if supplied, is consum
 
 The latest exact storage optimization is an opt-in verified packed-sidecar RAM cache. It avoids repeating sidecar file reads, JSON parsing, and CRC checks across token forwards; it is bounded by `--expert-packed-host-cache-bytes` and must be budgeted together with the trunk cache. It is a storage warm-path optimization, not a full-model 10--20 tok/s result.
 
+The latest residency follow-up is also opt-in. C++ now protects the expert keys selected for the current layer from byte-bounded resident-cache eviction, while the Python packed-sidecar cache can use a bounded page-locked staging pool and non-blocking CUDA copies when `--expert-packed-pinned-staging-bytes N` is selected with one expert reader. The default path is unchanged. On the real layer-10 probe, pinned staging improved the second bounded forward from `3.469007 s` to `3.370938 s` but made the first forward slower (`5.606441 s`); this is not a full-model speedup claim. The current full-model truth remains `0.010559 tok/s` for the best exact BF16 configuration and `0.014484 tok/s` for the latest quality-rejected NVFP4 gate, so the 10--20 tok/s target is still unachieved.
+
 ## What is here now
 
 - K3X-compatible aligned checkpoint extents, checksums, and resumable streaming conversion core.

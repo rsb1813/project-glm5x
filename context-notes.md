@@ -586,3 +586,9 @@
 ## 2026-08-15 -- Linux CUDA-less guard repair
 
 - GitHub Linux correctly exposed a pre-existing contract mismatch: `_quantize_expert_int4(..., device="cpu")` reached the lower-level CUDA availability error on a CPU-only runner, while the test/API contract requires `ValueError(GLM5X_INT4_CUDA_REQUIRED)`. A target/environment guard fixed this without changing CUDA packing.
+
+## 2026-08-15 -- Protected residency and pinned sidecar staging
+
+- Commit `49c386b` adds two bounded, default-off boundaries. C++ protects the current layer's selected resident expert keys before grouped CUDA admission; Python keeps validated packed sidecar sections in a bounded pinned pool and can enqueue non-blocking H2D with one reader.
+- The implementation was deliberately not promoted from isolated timing. Real layer-10 pinned staging cost more on first use and only slightly less on the repeated call; standalone transport event time improved while wall time worsened without pooled reuse. The next experiment must reuse pinned sections across a layer window rather than allocate them per request.
+- Verification is complete: CTest `27/27`, focused Python `26 passed/6 skipped`, full Python `356 passed/124 skipped`, `py_compile`, and `git diff --check`. The exact BF16 reference and default synchronous path remain unchanged.
