@@ -271,8 +271,12 @@ Result<Glm5xRuntimeIndex> Glm5xRuntimeIndex::open(
     for (const auto& artifact : artifacts) {
         auto reader = Reader::open(artifact.path, options);
         if (!reader) {
+            auto message = artifact.path.string();
+            if (!reader.message().empty()) {
+                message += ": " + reader.message();
+            }
             return Result<Glm5xRuntimeIndex>::failure(
-                reader.error(), reader.message());
+                reader.error(), std::move(message));
         }
         if (reader.value().superblock().root_sha256 != artifact.root_sha256 ||
             reader.value().tensors().size() != artifact.tensor_count) {

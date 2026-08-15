@@ -39,7 +39,7 @@ def _config() -> dict[str, object]:
     }
 
 
-def _make_bundle(tmp_path):
+def _make_bundle(tmp_path, *, include_mtp: bool = False):
     source_dir = tmp_path / "source"
     source_dir.mkdir()
     names = [
@@ -48,14 +48,23 @@ def _make_bundle(tmp_path):
         "model.layers.0.mlp.experts.0.down_proj.weight",
     ]
     shard_names = ["a.safetensors", "a.safetensors", "b.safetensors"]
+    if include_mtp:
+        names.extend(
+            [
+                "model.layers.1.eh_proj.weight",
+                "model.layers.1.mlp.experts.1.gate_proj.weight",
+            ]
+        )
+        shard_names.extend(["b.safetensors", "b.safetensors"])
     save_file(
         {name: torch.ones((2, 4), dtype=torch.bfloat16) for name in names[:2]},
         str(source_dir / shard_names[0]),
     )
-    save_file(
-        {names[2]: torch.ones((4, 2), dtype=torch.bfloat16)},
-        str(source_dir / shard_names[2]),
-    )
+    second_shard = {names[2]: torch.ones((4, 2), dtype=torch.bfloat16)}
+    if include_mtp:
+        second_shard[names[3]] = torch.ones((4, 8), dtype=torch.bfloat16)
+        second_shard[names[4]] = torch.ones((2, 4), dtype=torch.bfloat16)
+    save_file(second_shard, str(source_dir / shard_names[2]))
     total_size = sum(path.stat().st_size for path in source_dir.glob("*.safetensors"))
     manifest = GLM5XTensorManifest.from_json(
         _config(),
@@ -197,6 +206,24 @@ def test_cpp_runtime_index_reads_exact_cross_shard_expert(tmp_path) -> None:
     ]
     assert measured["reader_read_calls"] == 3
     assert measured["reader_completed_bytes"] == 48
+
+
+def test_cpp_runtime_index_accepts_mtp_tensor_layer(tmp_path) -> None:
+    artifact_dir, bundle_path = _make_bundle(tmp_path, include_mtp=True)
+    output = artifact_dir / "model.gxi"
+    build_glm5x_runtime_index(bundle_path, output)
+    runner = cpp_binary("test_glm5x_runtime_index")
+
+    result = subprocess.run(
+        [str(runner), str(output), "0", "0", "4", "2"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    measured = json.loads(result.stdout)
+    assert measured["artifact_count"] == 2
+    assert measured["tensor_count"] == 5
 
 
 def test_cpp_runtime_index_rejects_index_and_payload_corruption(tmp_path) -> None:
