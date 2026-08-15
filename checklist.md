@@ -90,6 +90,7 @@
 - [x] Extend fingerprint-bound expert sidecars to row-scaled FP8 and measure warm reuse/quality; keep FP8 default-off.
 - [x] Add explicit reduced-routing and shared cold-expert proxy controls with a real-layer quality gate; keep the measured high-drift proxy default-off.
 - [ ] Add exact route-stable multi-layer residency policy that materially lowers full-model logical expert bytes/token.
+- [ ] Add a validated C++ `.gxi` runtime index for constant-time official 282-shard tensor ownership and exact payload reads.
 - [x] Re-run a fresh full-model quality/throughput gate after packed sidecar/residency work; record the mixed-NVFP4 token divergence and keep it default-off.
 - [x] Add an experimental fingerprinted MXFP4 `.pm4` sidecar and reference-only pack/decode path; keep FP4 default-off pending calibration/native CUDA execution.
 - [x] Add the experimental RTX 5080 NVFP4 blocked-scale CUDA path and `.pn4`/`.pgu` sidecars; keep both modes default-off pending calibration and final-logit quality.

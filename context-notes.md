@@ -654,3 +654,10 @@
 - The 78-layer gate generated `[154820,474]`, recorded 27 device hits and 34 adaptive promotions, and measured `0.013392177383 tok/s`. The ancestor stable control recorded 21 hits and `0.013321270279 tok/s`; the `0.532%` directional difference is too small and cross-run to treat as a promotion result.
 - Adaptive remains default-off and mixed NVFP4 remains quality-rejected. Stop extending Python cache heuristics. The next performance boundary is official full-model C++ execution with pooled pinned asynchronous sidecar/H2D scheduling and exact final-token/logit parity.
 - GitHub CLI access was rechecked outside the sandbox. Account `rsb1813`, HTTPS remote `https://github.com/rsb1813/project-glm5x.git`, and `repo`/`workflow` scopes are valid; the earlier failure was the sandbox network boundary rather than account authentication.
+
+## 2026-08-16 -- C++ official-bundle runtime index start
+
+- Work continues directly without subagents on `codex/cpp-runtime-index`, stacked above adaptive state commit `1631b0e`.
+- The existing C++ expert loader accepts an already-opened shard list and scans every shard for each role. It cannot consume the 282-shard bundle index directly and is unsuitable as the full-model tensor lookup path.
+- The accepted minimum bridge is a deterministic fixed-record `.gxi` generated from the verified JSON bundle. It maps every tensor ID to one artifact and record position, binds artifacts by root SHA-256 and tensor count, and leaves all model payloads out-of-core.
+- A general C++ JSON dependency and per-lookup 282-shard scanning are rejected. The new index must preserve exact BF16 bytes, natural routing, and existing Python bundle behavior.
