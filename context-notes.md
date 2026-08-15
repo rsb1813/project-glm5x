@@ -687,3 +687,10 @@
 - Runtime-index host payload load measured `15.602 s` versus `16.467 s` for the five-artifact control, but its warm CUDA median measured `2.069 ms` versus `1.980 ms`. One opposite-direction pair is not a throughput result; only the exact source integration is accepted.
 - The index path still reads `1,286,603,776` bytes for one two-token layer-10 MoE union before residency. This confirms that the next performance work must reuse/overlap weights across actual decoder execution rather than optimize tensor lookup alone.
 - Verification completed with CUDA CTest `27/27`, focused Python `5 passed`, CPU CTest `15/15`, full Python `374 passed, 125 skipped` in `97.24 s`, and B-0006 raw/summary parity.
+
+## 2026-08-16 -- Index-backed decoder-layer start
+
+- Work continues directly without subagents on `codex/index-backed-cuda-moe`; GitHub access is verified outside the sandbox and the branch is synchronized with origin.
+- The minimum accepted next boundary is official layer 10 from full-layer BF16 input through its full DSA indexer, MLA, both residuals, natural Top-8 learned MoE, and full-layer BF16 output.
+- The first implementation reuses the existing validated `.gxi`, `GLM5XACT`, and resident raw-BF16 CUDA MoE path. A new general device-resident attention API is deferred until this complete correctness gate passes.
+- The first oracle uses two tokens and empty recurrent state. Incremental MLA/DSA state serialization remains the immediate follow-up, not an unverified claim in this milestone.

@@ -93,6 +93,9 @@
 - [x] Add a validated C++ `.gxi` runtime index for constant-time official 282-shard tensor ownership and exact payload reads.
 - [ ] Connect exact decoder-layer trunk/expert construction and bounded final-logit parity to the official `.gxi` index.
 - [x] Run the existing learned layer-10 CUDA MoE/GLM5XACT parity gate directly through `.gxi` before full decoder integration.
+- [ ] Export one official layer-10 full-layer GLM5XACT input/output oracle without changing the existing MoE oracle.
+- [ ] Run the complete C++ layer-10 DSA/MLA/residual/MoE path from the official `.gxi` and close BF16 output parity.
+- [ ] Record bounded layer traffic/latency and keep it separate from full-model TPS.
 - [x] Re-run a fresh full-model quality/throughput gate after packed sidecar/residency work; record the mixed-NVFP4 token divergence and keep it default-off.
 - [x] Add an experimental fingerprinted MXFP4 `.pm4` sidecar and reference-only pack/decode path; keep FP4 default-off pending calibration/native CUDA execution.
 - [x] Add the experimental RTX 5080 NVFP4 blocked-scale CUDA path and `.pn4`/`.pgu` sidecars; keep both modes default-off pending calibration and final-logit quality.
