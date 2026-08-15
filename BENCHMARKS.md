@@ -789,3 +789,9 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Change: `DeadlineExpertLoader(max_pending, worker_count)` now supports a bounded worker pool. `RuntimeSession` defaults to eight deadline workers, while `HostExpertStore` performs payload I/O outside its mutex and deduplicates concurrent loads for the same `(layer, expert)` key.
 - Verification: C++ build succeeded; CTest passed `15/15`; Python regression passed `325` with `124` capability skips; `py_compile tools/benchmark_synthetic.py` passed. The scheduler overlap test observed at least two concurrent loads, and the store test confirmed different keys overlap while the existing same-key single-loader test remains green.
 - Synthetic timing: the tiny CPU fixture did not show a stable decode improvement across `1/2/4/8` workers, so no tok/s or speedup is reported. The real full-model C++ gate remains pending completion of the 282-shard bundle.
+
+## 2026-08-15 -- Logical storage-read telemetry
+
+- Change: `K3XReader` now counts payload read calls and data-plus-auxiliary bytes; `GLM5XExpertBundle` aggregates those counters and `benchmark_glm5x_reference.py` records separate prefill/decode `storage_read_*` fields.
+- Verification: the focused K3X format, expert-bundle, and benchmark-schema suite passed `29` with `6` capability skips; the complete Python suite passed `326` with `124` skips.
+- Measurement boundary: these are logical artifact-file reads. They are not physical NVMe GB/token because the OS page cache may serve the read. Full-model values remain pending bundle completion.

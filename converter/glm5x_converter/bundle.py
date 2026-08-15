@@ -12,7 +12,7 @@ from threading import Lock
 from typing import Mapping
 
 from k3x_converter.format import K3XError, TensorRecord
-from k3x_converter.reader import K3XReader
+from k3x_converter.reader import K3XReader, K3XReaderReadStats
 
 
 _EXPERT_RE = re.compile(
@@ -258,6 +258,13 @@ class GLM5XExpertBundle:
         if self.payload_cache is None:
             return GLM5XExpertPayloadCacheStats(0, 0, 0, 0, 0, 0)
         return self.payload_cache.stats
+
+    @property
+    def read_stats(self) -> K3XReaderReadStats:
+        return K3XReaderReadStats(
+            calls=sum(reader.read_stats.calls for reader in self.readers.values()),
+            bytes=sum(reader.read_stats.bytes for reader in self.readers.values()),
+        )
 
 
 def _relative_artifact(path: Path, output: Path) -> str:

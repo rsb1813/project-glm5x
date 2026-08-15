@@ -569,3 +569,11 @@
 - Evidence: the pre-change scheduler test failed to compile for the new two-argument constructor, then the focused scheduler/store tests passed after implementation. The C++ full suite passed `15/15`, and the Python suite passed `325` with `124` capability skips. A tiny synthetic runtime sweep was compute-dominated and showed no meaningful throughput gain, so it is not a performance claim. The real layer-10 Python probe had already shown expert-read overlap improving from `7.635803 s` at one reader to `3.159413 s` at sixteen readers, but the full C++ model gate remains pending.
 - Accepted because: the worker count is explicit and bounded, same-key loads still execute once, different experts can overlap, and serial correctness remains selectable. No quantization, routing, or payload semantics change.
 - Revisit: after the complete bundle gate records end-to-end latency, NVMe/RAM/H2D traffic, host memory, and quality. Reduce or raise the default only from those measurements.
+
+## D-0072 -- Record logical artifact reads before claiming NVMe traffic
+
+- Decision: expose per-phase K3X artifact read calls and payload bytes in the Python full-bundle benchmark, but name them `storage_read_*` and explicitly avoid calling them physical NVMe traffic.
+- Alternatives: infer NVMe bytes from payload sizes, omit storage telemetry until a kernel-level counter exists, or report OS file reads as NVMe unconditionally.
+- Evidence: `K3XReader` owns every selected payload extent read and can count data plus auxiliary bytes without changing bytes, routing, or validation. The host page cache can satisfy those reads, so the counter is a logical storage request rather than a device-level measurement.
+- Accepted because: it gives the first full-model gate an auditable traffic baseline while preserving the distinction needed for later `iostat`/ETW/NVML or direct-I/O measurements.
+- Revisit: when the full gate runs, pair these counters with physical device counters and H2D telemetry before publishing NVMe GB/token.

@@ -111,6 +111,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         expert_device_cache_capacity_bytes=arguments.expert_device_cache_bytes,
         expert_precision=arguments.expert_precision,
     )
+    storage_before = model.bundle_read_stats
     prompt = torch.tensor(arguments.prompt, dtype=torch.long, device=device)
     _synchronize(device)
     prefill_start = time.perf_counter()
@@ -118,6 +119,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         prefill = model.forward_tokens(prompt)
     _synchronize(device)
     prefill_seconds = time.perf_counter() - prefill_start
+    storage_after_prefill = model.bundle_read_stats
 
     state = prefill.state
     generated: list[int] = []
@@ -142,6 +144,18 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             generated.append(token)
             state = step.state
             prefill = step
+    storage_after_decode = model.bundle_read_stats
+
+    def storage_delta(after, before) -> dict[str, int]:
+        if after is None or before is None:
+            return {"calls": 0, "bytes": 0}
+        return {
+            "calls": after.calls - before.calls,
+            "bytes": after.bytes - before.bytes,
+        }
+
+    prefill_storage = storage_delta(storage_after_prefill, storage_before)
+    decode_storage = storage_delta(storage_after_decode, storage_after_prefill)
 
     payload: dict[str, object] = {
         "measured": True,
@@ -154,9 +168,15 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         "decode_tokens": arguments.new_tokens,
         "prefill_seconds": prefill_seconds,
         "prefill_tok_s": len(arguments.prompt) / prefill_seconds,
+        "prefill_storage_read_calls": prefill_storage["calls"],
+        "prefill_storage_read_bytes": prefill_storage["bytes"],
+        "prefill_storage_read_bytes_per_token": prefill_storage["bytes"] / len(arguments.prompt),
         "ttft_seconds": prefill_seconds + (first_decode_seconds or 0.0),
         "decode_seconds": decode_seconds,
         "decode_tok_s": arguments.new_tokens / decode_seconds,
+        "decode_storage_read_calls": decode_storage["calls"],
+        "decode_storage_read_bytes": decode_storage["bytes"],
+        "decode_storage_read_bytes_per_token": decode_storage["bytes"] / arguments.new_tokens,
         "decode_step_seconds": decode_step_seconds,
         "decode_step_tok_s": [1.0 / value for value in decode_step_seconds],
         "decode_step_expert_cache_hits": decode_step_cache_hits,

@@ -374,6 +374,13 @@ class GLM5XDecoderModelReference:
         return cache.stats
 
     @property
+    def bundle_read_stats(self):
+        bundle = getattr(self, "_expert_bundle", None)
+        if bundle is None:
+            return None
+        return bundle.read_stats
+
+    @property
     def cached_layer_count(self) -> int:
         return len(self._layer_cache)
 

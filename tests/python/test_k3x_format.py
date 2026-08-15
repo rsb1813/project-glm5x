@@ -206,6 +206,31 @@ def test_full_dimension_storage_fixture_round_trips_with_optional_identity(
     assert physical_offsets == sorted(physical_offsets)
 
 
+def test_reader_reports_payload_read_bytes(tmp_path: Path) -> None:
+    source = tmp_path / "bounded-source"
+    write_bounded_expert_source(source, chunk_bytes=257 * 1024)
+    artifact = tmp_path / "bounded.k3x"
+    convert(source, artifact, chunk_bytes=193 * 1024)
+    reader = K3XReader.open(artifact, verify_payloads=False, verify_root=False)
+
+    assert reader.read_stats.calls == 0
+    assert reader.read_stats.bytes == 0
+    reader.read_tensor_extents(reader.tensor_records[0])
+    first = reader.read_stats
+    assert first.calls == 1
+    assert first.bytes == (
+        reader.tensor_records[0].data_length
+        + reader.tensor_records[0].auxiliary_length
+    )
+    reader.read_tensor_extents_many(reader.tensor_records[1:3])
+    second = reader.read_stats
+    assert second.calls == 2
+    assert second.bytes == sum(
+        record.data_length + record.auxiliary_length
+        for record in reader.tensor_records[:3]
+    )
+
+
 @pytest.mark.parametrize(
     ("mutation", "error_code"),
     (

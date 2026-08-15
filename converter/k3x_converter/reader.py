@@ -38,6 +38,12 @@ def _read_exact(stream, offset: int, length: int, file_length: int) -> bytes:
 
 
 @dataclass(frozen=True)
+class K3XReaderReadStats:
+    calls: int
+    bytes: int
+
+
+@dataclass(frozen=True)
 class K3XReader:
     path: Path
     superblock: Superblock
@@ -48,6 +54,11 @@ class K3XReader:
     payloads_verified: bool = True
     _verified_tensor_ids: set[int] = field(default_factory=set, repr=False, compare=False)
     _validation_lock: Lock = field(default_factory=Lock, repr=False, compare=False)
+    _read_stats: dict[str, int] = field(
+        default_factory=lambda: {"calls": 0, "bytes": 0},
+        repr=False,
+        compare=False,
+    )
 
     @classmethod
     def open(
@@ -118,8 +129,10 @@ class K3XReader:
                             self.superblock.file_length)
                 if record.auxiliary_length else b""
             )
-        if not self.payloads_verified:
-            with self._validation_lock:
+        with self._validation_lock:
+            self._read_stats["calls"] += 1
+            self._read_stats["bytes"] += len(data) + len(auxiliary)
+            if not self.payloads_verified:
                 if record.tensor_id not in self._verified_tensor_ids:
                     if google_crc32c.value(data) != record.data_crc32c:
                         raise K3XError("DATA_CRC_MISMATCH")
@@ -156,8 +169,12 @@ class K3XReader:
                     else b""
                 )
                 values[record.tensor_id] = (data, auxiliary)
-        if not self.payloads_verified:
-            with self._validation_lock:
+        with self._validation_lock:
+            self._read_stats["calls"] += 1
+            self._read_stats["bytes"] += sum(
+                len(data) + len(auxiliary) for data, auxiliary in values.values()
+            )
+            if not self.payloads_verified:
                 for record in records:
                     if record.tensor_id in self._verified_tensor_ids:
                         continue
@@ -168,3 +185,11 @@ class K3XReader:
                         raise K3XError("AUXILIARY_CRC_MISMATCH")
                     self._verified_tensor_ids.add(record.tensor_id)
         return values
+
+    @property
+    def read_stats(self) -> K3XReaderReadStats:
+        with self._validation_lock:
+            return K3XReaderReadStats(
+                calls=self._read_stats["calls"],
+                bytes=self._read_stats["bytes"],
+            )

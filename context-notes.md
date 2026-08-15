@@ -489,3 +489,9 @@
 - Split `HostExpertStore` cache lookup/admission from the blocking payload loader. A per-key in-flight set and condition variable preserve one loader for a duplicate key, while different expert keys can overlap without changing cache policy or returned bytes.
 - TDD evidence: the new scheduler API first failed to compile before implementation. After the implementation, C++ CTest passed `15/15`, the full Python suite passed `325 passed, 124 skipped`, and the benchmark tool compiled successfully.
 - The synthetic runtime sweep was compute-dominated and is intentionally not promoted as a speed result. The live three-worker full-checkpoint conversion was not restarted; the complete bundle and native full-model gate remain the next evidence boundary.
+
+## 2026-08-15 -- Logical artifact-read telemetry
+
+- Added thread-safe payload read counters to `K3XReader` and aggregate counters to `GLM5XExpertBundle`.
+- The full-bundle benchmark now reports separate prefill/decode storage read calls and bytes. The field name deliberately avoids `NVMe` because warm OS page cache reads are not physical-device evidence.
+- TDD evidence: the new reader counter test initially exposed that MXFP4 records include an auxiliary scale extent; the expectation was corrected to count data plus auxiliary bytes. Focused tests passed `29` with `6` capability skips and the complete Python suite passed `326` with `124` skips.
