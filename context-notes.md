@@ -631,5 +631,12 @@
 - The next-layer CUDA overlap proposal crosses ticket ownership, stream/event lifetime, model/session route state, and exact fallback boundaries. It is deferred until a natural-routing full gate proves that stable residency yields useful hits under the official 78-layer access sequence.
 - The comparison changes only `expert_device_cache_policy` from the prior 4 GiB `layer_balanced` run to `stable_hot_bank`. It retains 40 GiB trunk cache, mixed `.pgu` gate/up NVFP4 plus BF16 down, natural Top-8, two decode tokens, and the same bundle/config/prompt.
 - Work continues directly without subagents on `codex/full-stable-hot-bank-gate`.
+
+## 2026-08-16 -- Full stable hot-bank gate result
+
+- The first run rejected and rebuilt four stale sidecars, so it was excluded from the warm A/B. Clean stable and layer-balanced rows were then measured on the same HEAD and generated identical mixed-NVFP4 tokens `[154820,474]`.
+- Stable measured `0.013321270279236509` decode tok/s and `21/1800` device hits. Layer-balanced measured `0.013164422849939591` and `18/1800`. The `1.19%` stable advantage is directional but not large enough to promote the policy.
+- Stable occupied only `2,949,120,600` of the 4 GiB cache, leaving `1,345,846,696` bytes unused while bypassing 1,650 admissions. This is the strongest next optimization signal.
+- Next bounded design: one exact base entry per layer plus a global extra tier that admits only candidates observed at least twice. Defer asynchronous route replay until this lower-risk use of measured spare capacity is tested.
 - The first target is exact device residency, not route prediction: keep a bounded set of repeatedly used experts per layer and bypass low-value transient admissions so sequential layer traversal cannot erase the bank.
 - Existing LRU and layer-balanced policies remain controls. The policy must preserve natural routes and outputs and will stay default-off unless a real RTX 5080 repeated-route benchmark improves wall time or H2D bytes.

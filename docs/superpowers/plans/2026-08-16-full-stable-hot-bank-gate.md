@@ -20,9 +20,9 @@
 
 ## Checklist
 
-- [ ] Verify branch cleanliness, bundle/config identity, host RAM, and RTX 5080 headroom.
-- [ ] Run one prefill plus two decode tokens with the stable hot bank.
-- [ ] Extract token IDs, per-step seconds/TPS, cache hits/misses/bypasses/promotions, resident bytes, and VRAM.
-- [ ] Compare only like-for-like fields against the prior layer-balanced gate.
-- [ ] Update benchmarks, decisions, architecture if warranted, and project state last.
+- [x] Verify branch cleanliness, bundle/config identity, host RAM, and RTX 5080 headroom.
+- [x] Run one prefill plus two decode tokens with the stable hot bank.
+- [x] Extract token IDs, per-step seconds/TPS, cache hits/misses/bypasses/promotions, resident bytes, and VRAM.
+- [x] Compare only like-for-like fields against a current-HEAD layer-balanced gate.
+- [x] Update benchmarks, decisions, architecture if warranted, and project state last.
 - [ ] Commit and publish the evidence before selecting the next code boundary.
