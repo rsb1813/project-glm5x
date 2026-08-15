@@ -802,3 +802,12 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Fresh conversion: `0.061629 s` median over three synchronized conversions; FP32 resident bytes `3,806,330,880` and temporary peak allocation for BF16 plus FP32 `5,710,544,896` bytes in the isolated probe. The steady-state model head replaces the BF16 source after preparation.
 - Reuse: prepared transpose-view access `3.13 us` median over ten synchronized accesses. This is a bounded component measurement, not end-to-end tok/s.
 - Correctness: model-reference focused suite `9 passed`; full-model logits and quality remain pending the 282-shard bundle.
+
+## 2026-08-15 -- Grouped decoder-layer trunk tensor reads
+
+- Commit: `5fc8d07`.
+- Hardware/model: WSL2 Ubuntu-24.04 Python reference fixture; no full checkpoint or end-to-end CUDA execution.
+- Mode: `GLM5XDecoderLayerReference.from_bundle()` with one synthetic layer and all attention/indexer/norm/router/shared-MoE tensors in one `.k3x` artifact. The regression counted reader calls during layer construction.
+- Result: the pre-change RED test observed `19` individual `read_tensor_extents()` calls. The grouped path observed `0` individual calls and at least one `read_tensor_extents_many()` call, while the layer output and expert route assertions remained green.
+- Verification: focused bundle/layer/MoE/model suite `18 passed`; complete Python suite `327 passed, 124 skipped`; `py_compile` passed for the changed modules.
+- Boundary: no decode tok/s, prefill tok/s, TTFT, physical NVMe GB/token, H2D GB/token, VRAM, or task-quality result was measured. This is an exact metadata/open-path optimization pending the full 282-shard gate.

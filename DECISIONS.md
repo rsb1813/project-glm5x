@@ -593,3 +593,11 @@
 - Evidence: official dimensions imply `34,228,302,336` bytes (`31.88 GiB`) of non-routed BF16 trunk and `79,526,785,536` bytes (`74.07 GiB`) of one-token trunk plus Top-8 routed expert fetch if weights are reloaded each layer. No physical bandwidth or end-to-end latency has been measured yet.
 - Accepted because: the bound rules out an unquantized reload-everything design for the 10 tok/s objective without fabricating a result, while leaving exact routing and quality gates intact.
 - Revisit: after the complete bundle records actual H2D/NVMe traffic, cache residency, and quality for at least one exact and one mixed-precision mode.
+
+## D-0075 -- Group decoder-layer trunk tensor reads by artifact
+
+- Decision: when constructing one decoder layer from a validated bundle, collect its attention, indexer, norm, router, shared-expert, or dense-MLP records and read them through one `read_tensor_extents_many()` call per backing artifact. Keep the individual-read helper for one-off/global tensors and preserve the serial/exact reference semantics.
+- Alternatives: keep one file open/read per tensor, group all selected expert payloads into artifact-wide tasks, or add mmap/direct-I/O before the full-model gate establishes the dominant cost.
+- Evidence: the new regression test failed before the change with `19` single tensor reads during one synthetic layer construction. After the change, the same test observed `0` single reads and at least one grouped read; the focused layer/bundle/model suite passed `18/18`, and the complete Python suite passed `327 passed, 124 skipped`. No end-to-end throughput or quality number was inferred from this metadata/open-path result.
+- Accepted because: grouped reads preserve record order, payload bytes, dtype/shape checks, and lazy CRC validation while removing repeated artifact-file opens. It is an exact, disable-free reference-path optimization with no routing or precision change.
+- Revisit: after the 282-shard full bundle records construction latency, logical/physical storage traffic, host memory, and full-layer output parity. A full-model regression or storage contention can justify reverting or narrowing the grouping.

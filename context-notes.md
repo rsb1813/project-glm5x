@@ -505,3 +505,9 @@
 
 - Derived from the official GLM-5.2 dimensions without loading payloads: non-routed BF16 trunk `34,228,302,336` bytes (`31.88 GiB`) and one-token Top-8 routed fetch including that trunk `79,526,785,536` bytes (`74.07 GiB`). These are bounds, not measurements.
 - This makes resident mixed-precision trunk execution a required performance direction for the 10 tok/s objective. The full bundle gate must still measure actual H2D, physical NVMe, quality, and VRAM before accepting a design.
+
+## 2026-08-15 -- Group decoder-layer trunk reads
+
+- Commit `5fc8d07` groups the non-expert tensors needed to construct one decoder layer by backing K3X reader and uses one grouped extent read per artifact.
+- The RED regression showed `19` single reads before the change. The GREEN path showed zero single reads during construction and retained exact layer/route behavior.
+- This is an exact open/read reduction only. Full-model storage and tok/s evidence remains pending the live 282-shard bundle.
