@@ -113,6 +113,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="opt-in pinned sidecar staging capacity; requires expert-load-workers=1",
     )
     parser.add_argument(
+        "--expert-packed-telemetry",
+        action="store_true",
+        help=(
+            "opt-in diagnostic packed-sidecar file/decode/H2D telemetry; "
+            "CUDA event synchronization adds overhead"
+        ),
+    )
+    parser.add_argument(
         "--trunk-cache-bytes",
         type=int,
         default=0,
@@ -162,6 +170,13 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         raise ValueError("expert-packed-host-cache-bytes must be non-negative")
     if arguments.expert_packed_pinned_staging_bytes < 0:
         raise ValueError("expert-packed-pinned-staging-bytes must be non-negative")
+    if (
+        arguments.expert_packed_telemetry
+        and arguments.expert_packed_cache_dir is None
+    ):
+        raise ValueError("expert-packed-telemetry requires expert-packed-cache-dir")
+    if arguments.expert_packed_telemetry and arguments.expert_precision == "bf16":
+        raise ValueError("expert-packed-telemetry requires a packed expert precision")
     if (
         arguments.expert_packed_pinned_staging_bytes > 0
         and arguments.expert_precision == "bf16"
@@ -220,6 +235,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         packed_expert_non_blocking=(
             arguments.expert_packed_pinned_staging_bytes > 0
         ),
+        packed_expert_telemetry_enabled=arguments.expert_packed_telemetry,
         routing_top_k=arguments.routing_top_k,
         proxy_mode=arguments.proxy_mode,
         proxy_top_k=arguments.proxy_top_k,
@@ -228,6 +244,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         grouped_nvfp4=arguments.nvfp4_grouped,
     )
     storage_before = model.bundle_read_stats
+    packed_before = model.packed_expert_cache_stats
     prompt = torch.tensor(arguments.prompt, dtype=torch.long, device=device)
     _synchronize(device)
     prefill_start = time.perf_counter()
@@ -236,6 +253,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
     _synchronize(device)
     prefill_seconds = time.perf_counter() - prefill_start
     storage_after_prefill = model.bundle_read_stats
+    packed_after_prefill = model.packed_expert_cache_stats
 
     state = prefill.state
     generated: list[int] = []
@@ -261,6 +279,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             state = step.state
             prefill = step
     storage_after_decode = model.bundle_read_stats
+    packed_after_decode = model.packed_expert_cache_stats
 
     def storage_delta(after, before) -> dict[str, int]:
         if after is None or before is None:
@@ -270,8 +289,26 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             "bytes": after.bytes - before.bytes,
         }
 
+    def packed_delta(after, before) -> dict[str, int]:
+        fields = (
+            "sidecar_read_calls",
+            "sidecar_read_bytes",
+            "decoded_payload_bytes",
+            "h2d_bytes",
+            "h2d_submission_nanoseconds",
+            "h2d_event_nanoseconds",
+        )
+        if after is None or before is None:
+            return {field: 0 for field in fields}
+        return {
+            field: max(0, int(getattr(after, field)) - int(getattr(before, field)))
+            for field in fields
+        }
+
     prefill_storage = storage_delta(storage_after_prefill, storage_before)
     decode_storage = storage_delta(storage_after_decode, storage_after_prefill)
+    prefill_packed = packed_delta(packed_after_prefill, packed_before)
+    decode_packed = packed_delta(packed_after_decode, packed_after_prefill)
 
     payload: dict[str, object] = {
         "measured": True,
@@ -353,6 +390,44 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             ),
         }
     )
+    if arguments.expert_packed_telemetry:
+        payload.update(
+            {
+                "expert_packed_telemetry": True,
+                "prefill_packed_expert_sidecar_read_calls": prefill_packed[
+                    "sidecar_read_calls"
+                ],
+                "prefill_packed_expert_sidecar_read_bytes": prefill_packed[
+                    "sidecar_read_bytes"
+                ],
+                "prefill_packed_expert_decoded_payload_bytes": prefill_packed[
+                    "decoded_payload_bytes"
+                ],
+                "prefill_packed_expert_h2d_bytes": prefill_packed["h2d_bytes"],
+                "prefill_packed_expert_h2d_submission_nanoseconds": prefill_packed[
+                    "h2d_submission_nanoseconds"
+                ],
+                "prefill_packed_expert_h2d_event_nanoseconds": prefill_packed[
+                    "h2d_event_nanoseconds"
+                ],
+                "decode_packed_expert_sidecar_read_calls": decode_packed[
+                    "sidecar_read_calls"
+                ],
+                "decode_packed_expert_sidecar_read_bytes": decode_packed[
+                    "sidecar_read_bytes"
+                ],
+                "decode_packed_expert_decoded_payload_bytes": decode_packed[
+                    "decoded_payload_bytes"
+                ],
+                "decode_packed_expert_h2d_bytes": decode_packed["h2d_bytes"],
+                "decode_packed_expert_h2d_submission_nanoseconds": decode_packed[
+                    "h2d_submission_nanoseconds"
+                ],
+                "decode_packed_expert_h2d_event_nanoseconds": decode_packed[
+                    "h2d_event_nanoseconds"
+                ],
+            }
+        )
     trunk_stats = model.trunk_tensor_cache_stats
     trunk_lookups = trunk_stats.hits + trunk_stats.misses
     payload.update(

@@ -1009,3 +1009,17 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - The repeated-call difference is a bounded cache/transport observation, not a layer or model throughput result. The first-use staging cost is material, and no full-model quality or final-token parity gate was rerun with this option.
 - Separate RTX 5080 transport samples for a 21,233,672-byte sidecar measured pageable `1.358 ms` GPU-event/`1.701 ms` wall versus pinned non-blocking `0.588 ms` GPU-event/`16.138 ms` wall when each sample allocated its own staging buffer. This demonstrates why pooled staging is required; it does not prove end-to-end overlap.
 - Python verification for the commit: focused `26 passed, 6 skipped`; full `356 passed, 124 skipped` in `77.29 s`; changed-module `py_compile` and `git diff --check` passed. No 10--20 tok/s claim is made.
+
+## 2026-08-15 -- Packed-sidecar telemetry and pooled warm-H2D probe
+
+- Date: 2026-08-15.
+- Commit: working tree based on `5fa1fe8`; telemetry code was not yet committed at measurement time.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.0, PyTorch `2.13.0+cu130`.
+- Model/checkpoint: official GLM-5.2 full K3X bundle identity with real layer-10 expert `48`; mixed `.pgu` gate/up NVFP4 plus BF16 down sidecar, `39,322,783` file bytes and `39,321,608` validated payload bytes.
+- Mode/context: one expert-cache admission per sample, 64 MiB validated host-payload cache, five paired warm iterations. Pinned mode additionally used a 64 MiB pooled page-locked staging cache and non-blocking CUDA copies. This is a transport boundary, not a token or decoder-layer benchmark.
+- Measured synchronous rows: H2D CUDA-event nanoseconds `4,431,066 / 4,749,629 / 2,860,859 / 3,060,958 / 2,925,692`; wall nanoseconds `20,534,039 / 20,316,311 / 17,895,936 / 17,723,008 / 17,610,523`. Medians were `3,060,958 ns` event and `17,895,936 ns` wall.
+- Measured pooled-pinned rows: H2D CUDA-event nanoseconds `2,627,900 / 854,493 / 1,033,468 / 914,811 / 1,116,155`; wall nanoseconds `13,089,945 / 11,281,621 / 11,424,774 / 11,230,818 / 11,973,923`. Medians were `1,033,468 ns` event and `11,424,774 ns` wall.
+- Traffic/cache: every warm call decoded and transferred `39,321,608` bytes; both modes read `0` sidecar file bytes after host-cache admission. Pinned mode recorded one staging hit per warm call. Physical NVMe GB/token, decode tok/s, prefill tok/s, TTFT, VRAM, system-RAM peak, average Top-K, and speculative acceptance are not applicable or were not sampled.
+- Quality: synchronous and pooled-pinned gate/up packed values, blocked scales, global scales, and BF16 down tensor were bit-exact. No logits, generated token, coding benchmark, or full-model quality score was produced.
+- Enabled optimization/result: pooled pinned staging reduced this warm expert's event median by `66.24%` and wall median by `36.16%`. It remains default-off; the measurement does not change the latest full-model truth or establish 10 tok/s.
+- Verification after implementation: focused `25 passed, 6 skipped`; complete WSL Python suite `360 passed, 124 skipped` in `78.30 s`; changed-module `py_compile` and `git diff --check` passed.

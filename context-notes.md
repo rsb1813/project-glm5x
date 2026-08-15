@@ -592,3 +592,11 @@
 - Commit `49c386b` adds two bounded, default-off boundaries. C++ protects the current layer's selected resident expert keys before grouped CUDA admission; Python keeps validated packed sidecar sections in a bounded pinned pool and can enqueue non-blocking H2D with one reader.
 - The implementation was deliberately not promoted from isolated timing. Real layer-10 pinned staging cost more on first use and only slightly less on the repeated call; standalone transport event time improved while wall time worsened without pooled reuse. The next experiment must reuse pinned sections across a layer window rather than allocate them per request.
 - Verification is complete: CTest `27/27`, focused Python `26 passed/6 skipped`, full Python `356 passed/124 skipped`, `py_compile`, and `git diff --check`. The exact BF16 reference and default synchronous path remain unchanged.
+
+## 2026-08-15 -- Direct sidecar telemetry takeover
+
+- All subagent work was stopped at the user's request. The primary agent owns the remaining implementation and verification directly.
+- The telemetry boundary remains opt-in and diagnostic. It must count sidecar file reads, validated payload bytes, CPU-to-CUDA bytes, submission time, and CUDA-event transfer time without changing routing, cache admission, precision, or default output fields.
+- A next-layer route predictor is a separate architecture decision and is not part of this telemetry change.
+- The first direct probe failed because `build-glm5x-hf-probe/glm5x-experts-full.json` did not match the `.pgu` source fingerprint. `build-glm5x-full-k3x/glm5x-experts-full.json` matched exactly and was used for the accepted measurements.
+- Five warm paired expert-48 samples measured `3.061 ms` pageable versus `1.033 ms` pooled-pinned CUDA-event medians and `17.896 ms` versus `11.425 ms` wall medians for the same `39,321,608` H2D bytes. Tensor parity was exact; no token throughput claim follows from this boundary.

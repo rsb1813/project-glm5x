@@ -5,9 +5,10 @@ import json
 import math
 import os
 import struct
+import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import Lock
@@ -39,6 +40,25 @@ class GLM5XPackedExpertCacheStats:
     pinned_staging_bytes: int = 0
     pinned_staging_capacity_bytes: int = 0
     pinned_staging_hits: int = 0
+    sidecar_read_calls: int = 0
+    sidecar_read_bytes: int = 0
+    decoded_payload_bytes: int = 0
+    h2d_bytes: int = 0
+    h2d_submission_nanoseconds: int = 0
+    h2d_event_nanoseconds: int = 0
+
+
+@dataclass
+class _PackedExpertTelemetrySample:
+    sidecar_read_calls: int = 0
+    sidecar_read_bytes: int = 0
+    decoded_payload_bytes: int = 0
+    h2d_bytes: int = 0
+    h2d_submission_nanoseconds: int = 0
+    h2d_event_nanoseconds: int = 0
+    h2d_events: list[tuple[torch.cuda.Event, torch.cuda.Event]] = field(
+        default_factory=list
+    )
 
 
 @dataclass(frozen=True)
@@ -64,6 +84,7 @@ class GLM5XPackedExpertCache:
         host_cache_capacity_bytes: int = 0,
         pinned_staging_capacity_bytes: int = 0,
         non_blocking: bool = False,
+        telemetry_enabled: bool = False,
     ) -> None:
         if (
             not isinstance(host_cache_capacity_bytes, int)
@@ -79,6 +100,8 @@ class GLM5XPackedExpertCache:
             raise ValueError("GLM5X_PACKED_CACHE_PINNED_CAPACITY")
         if not isinstance(non_blocking, bool):
             raise ValueError("GLM5X_PACKED_CACHE_NON_BLOCKING")
+        if not isinstance(telemetry_enabled, bool):
+            raise ValueError("GLM5X_PACKED_CACHE_TELEMETRY")
         if non_blocking and pinned_staging_capacity_bytes == 0:
             raise ValueError("GLM5X_PACKED_CACHE_PINNED_CAPACITY_REQUIRED")
         self.root = Path(root)
@@ -96,11 +119,32 @@ class GLM5XPackedExpertCache:
         self._pinned_resident_bytes = 0
         self._pinned_hits = 0
         self._pinned_payloads: OrderedDict[Path, _PinnedPayload] = OrderedDict()
+        self._telemetry_enabled = telemetry_enabled
+        self._sidecar_read_calls = 0
+        self._sidecar_read_bytes = 0
+        self._decoded_payload_bytes = 0
+        self._h2d_bytes = 0
+        self._h2d_submission_nanoseconds = 0
+        self._h2d_event_nanoseconds = 0
         self._lock = Lock()
 
     @property
     def non_blocking(self) -> bool:
         return self._non_blocking
+
+    @property
+    def telemetry_enabled(self) -> bool:
+        with self._lock:
+            return self._telemetry_enabled
+
+    def _merge_telemetry(self, sample: _PackedExpertTelemetrySample) -> None:
+        with self._lock:
+            self._sidecar_read_calls += sample.sidecar_read_calls
+            self._sidecar_read_bytes += sample.sidecar_read_bytes
+            self._decoded_payload_bytes += sample.decoded_payload_bytes
+            self._h2d_bytes += sample.h2d_bytes
+            self._h2d_submission_nanoseconds += sample.h2d_submission_nanoseconds
+            self._h2d_event_nanoseconds += sample.h2d_event_nanoseconds
 
     def _host_get(self, path: Path) -> _HostPayload | None:
         if self._host_capacity_bytes == 0:
@@ -409,6 +453,7 @@ class GLM5XPackedExpertCache:
         precision: str,
         non_blocking: bool = False,
         pinned_sections: dict[tuple[int, int], torch.Tensor] | None = None,
+        telemetry: _PackedExpertTelemetrySample | None = None,
     ) -> GLM5XInt4Weight | GLM5XNVFP4Weight | tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         shape = tuple(int(value) for value in metadata["shape"])
         packed_shape = tuple(int(value) for value in metadata["packed_shape"])
@@ -425,6 +470,35 @@ class GLM5XPackedExpertCache:
             raise ValueError("GLM5X_PACKED_CACHE_PACKED_CRC")
         if google_crc32c.value(qparams_data) != int(metadata["qparams_crc32c"]):
             raise ValueError("GLM5X_PACKED_CACHE_QPARAM_CRC")
+        if telemetry is not None:
+            telemetry.decoded_payload_bytes += packed_bytes + qparams_bytes
+
+        def transfer_tensor(
+            source: torch.Tensor, *, dtype: torch.dtype | None = None
+        ) -> torch.Tensor:
+            event_start = None
+            event_end = None
+            is_h2d = source.device.type == "cpu" and device.type == "cuda"
+            if telemetry is not None and is_h2d:
+                event_start = torch.cuda.Event(enable_timing=True)
+                event_end = torch.cuda.Event(enable_timing=True)
+                event_start.record(torch.cuda.current_stream(device))
+            started = (
+                time.perf_counter_ns()
+                if telemetry is not None and is_h2d
+                else 0
+            )
+            result = source.to(
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            )
+            if telemetry is not None and is_h2d:
+                telemetry.h2d_submission_nanoseconds += time.perf_counter_ns() - started
+                telemetry.h2d_bytes += int(result.numel()) * int(result.element_size())
+                event_end.record(torch.cuda.current_stream(device))
+                telemetry.h2d_events.append((event_start, event_end))
+            return result
 
         def transfer(
             data: bytes, *, offset: int, dtype: torch.dtype, shape: tuple[int, ...]
@@ -433,7 +507,7 @@ class GLM5XPackedExpertCache:
                 source = torch.frombuffer(bytearray(data), dtype=dtype).reshape(shape)
             else:
                 source = pinned_sections[(offset, len(data))].view(dtype).reshape(shape)
-            return source.to(device=device, non_blocking=non_blocking)
+            return transfer_tensor(source)
 
         if precision == "nvfp4_gate_up" and metadata.get("representation") == "bf16":
             if qparams_bytes != 0:
@@ -482,12 +556,12 @@ class GLM5XPackedExpertCache:
                 )
             else:
                 qparams_source = pinned_sections[(qparams_offset, qparams_bytes)]
-            scales = qparams_source[:scale_bytes].to(
-                device=device, non_blocking=non_blocking
-            ).view(torch.float8_e4m3fn).reshape(qparams_shape)
-            global_scale = qparams_source[scale_bytes:].view(torch.float32).to(
-                device=device, non_blocking=non_blocking
-            ).reshape(())
+            scales_source = qparams_source[:scale_bytes]
+            scales = transfer_tensor(scales_source)
+            scales = scales.view(torch.float8_e4m3fn).reshape(qparams_shape)
+            global_source = qparams_source[scale_bytes:].view(torch.float32)
+            global_scale = transfer_tensor(global_source)
+            global_scale = global_scale.reshape(())
             return GLM5XNVFP4Weight(
                 packed=packed.to(device=device),
                 scales=scales.to(device=device),
@@ -500,8 +574,8 @@ class GLM5XPackedExpertCache:
             shape[0],
             shape[1],
             int(metadata["group_size"]),
-        ).to(dtype=torch.bfloat16, device=device)
-        return decoded
+        )
+        return transfer_tensor(decoded, dtype=torch.bfloat16)
 
     def get(
         self,
@@ -523,10 +597,18 @@ class GLM5XPackedExpertCache:
             raise ValueError("GLM5X_PACKED_CACHE_PINNED_CAPACITY_REQUIRED")
         path = self._path(self.root, key, precision)
         pinned_is_new = False
+        telemetry = (
+            _PackedExpertTelemetrySample()
+            if self.telemetry_enabled
+            else None
+        )
         try:
             cached = self._host_get(path)
             if cached is None:
                 data = path.read_bytes()
+                if telemetry is not None:
+                    telemetry.sidecar_read_calls = 1
+                    telemetry.sidecar_read_bytes = len(data)
                 if len(data) < _HEADER.size:
                     raise ValueError("GLM5X_PACKED_CACHE_HEADER")
                 magic, version, metadata_length = _HEADER.unpack_from(data)
@@ -575,6 +657,7 @@ class GLM5XPackedExpertCache:
                     precision=precision,
                     non_blocking=non_blocking,
                     pinned_sections=None if pinned is None else pinned.sections,
+                    telemetry=telemetry,
                 )
                 for role in roles
             )
@@ -615,6 +698,19 @@ class GLM5XPackedExpertCache:
             with self._lock:
                 self._misses += 1
             return None
+        finally:
+            if telemetry is not None:
+                try:
+                    for event_start, event_end in telemetry.h2d_events:
+                        event_end.synchronize()
+                        telemetry.h2d_event_nanoseconds += int(
+                            event_start.elapsed_time(event_end) * 1_000_000
+                        )
+                except RuntimeError:
+                    # The exact cache miss/error remains authoritative; timing is additive.
+                    telemetry.h2d_event_nanoseconds = 0
+                telemetry.h2d_events.clear()
+                self._merge_telemetry(telemetry)
 
     def get_many(
         self,
@@ -685,4 +781,10 @@ class GLM5XPackedExpertCache:
                 pinned_staging_bytes=self._pinned_resident_bytes,
                 pinned_staging_capacity_bytes=self._pinned_capacity_bytes,
                 pinned_staging_hits=self._pinned_hits,
+                sidecar_read_calls=self._sidecar_read_calls,
+                sidecar_read_bytes=self._sidecar_read_bytes,
+                decoded_payload_bytes=self._decoded_payload_bytes,
+                h2d_bytes=self._h2d_bytes,
+                h2d_submission_nanoseconds=self._h2d_submission_nanoseconds,
+                h2d_event_nanoseconds=self._h2d_event_nanoseconds,
             )

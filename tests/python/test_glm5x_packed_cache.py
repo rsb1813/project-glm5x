@@ -216,3 +216,80 @@ def test_packed_expert_cache_non_blocking_pinned_nvfp4_round_trip(tmp_path) -> N
     assert second is not None
     torch.cuda.synchronize()
     assert cache.stats.pinned_staging_hits == 1
+
+
+def test_packed_expert_cache_rejects_non_boolean_telemetry_flag(tmp_path) -> None:
+    with pytest.raises(ValueError, match="TELEMETRY"):
+        GLM5XPackedExpertCache(tmp_path, telemetry_enabled=1)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_packed_expert_cache_telemetry_separates_file_decode_and_h2d(tmp_path) -> None:
+    torch.manual_seed(71)
+    expert = GLM5XExpertWeights(
+        gate_proj=quantize_nvfp4_weight(
+            torch.randn(32, 64, device="cuda"), device="cuda"
+        ),
+        up_proj=quantize_nvfp4_weight(
+            torch.randn(32, 64, device="cuda"), device="cuda"
+        ),
+        down_proj=quantize_nvfp4_weight(
+            torch.randn(64, 32, device="cuda"), device="cuda"
+        ),
+    )
+    cache = GLM5XPackedExpertCache(tmp_path, telemetry_enabled=True)
+    digest = "digest-telemetry-000000000000000000000000"
+    cache.put((4, 16), digest, expert, precision="nvfp4")
+    sidecar = tmp_path / "layer-0004-expert-0016.pn4"
+
+    loaded = cache.get((4, 16), digest, device="cuda", precision="nvfp4")
+    assert loaded is not None
+    torch.cuda.synchronize()
+
+    stats = cache.stats
+    assert stats.sidecar_read_calls == 1
+    assert stats.sidecar_read_bytes == sidecar.stat().st_size
+    assert stats.decoded_payload_bytes > 0
+    assert stats.h2d_bytes == stats.decoded_payload_bytes
+    assert stats.h2d_submission_nanoseconds > 0
+    assert stats.h2d_event_nanoseconds > 0
+
+    loaded_again = cache.get((4, 16), digest, device="cuda", precision="nvfp4")
+    assert loaded_again is not None
+    torch.cuda.synchronize()
+    repeated = cache.stats
+    assert repeated.sidecar_read_calls == 2
+    assert repeated.sidecar_read_bytes == sidecar.stat().st_size * 2
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_packed_expert_cache_telemetry_does_not_count_host_hit_as_file_read(tmp_path) -> None:
+    torch.manual_seed(73)
+    expert = GLM5XExpertWeights(
+        gate_proj=quantize_nvfp4_weight(
+            torch.randn(32, 64, device="cuda"), device="cuda"
+        ),
+        up_proj=quantize_nvfp4_weight(
+            torch.randn(32, 64, device="cuda"), device="cuda"
+        ),
+        down_proj=quantize_nvfp4_weight(
+            torch.randn(64, 32, device="cuda"), device="cuda"
+        ),
+    )
+    cache = GLM5XPackedExpertCache(
+        tmp_path, host_cache_capacity_bytes=1 << 20, telemetry_enabled=True
+    )
+    digest = "digest-host-telemetry-0000000000000000000000"
+    cache.put((4, 17), digest, expert, precision="nvfp4")
+    sidecar = tmp_path / "layer-0004-expert-0017.pn4"
+    assert cache.get((4, 17), digest, device="cuda", precision="nvfp4") is not None
+    sidecar_bytes = sidecar.stat().st_size
+    sidecar.unlink()
+    assert cache.get((4, 17), digest, device="cuda", precision="nvfp4") is not None
+    torch.cuda.synchronize()
+
+    stats = cache.stats
+    assert stats.sidecar_read_calls == 1
+    assert stats.sidecar_read_bytes == sidecar_bytes
+    assert stats.decoded_payload_bytes > 0
+    assert stats.h2d_bytes > 0
