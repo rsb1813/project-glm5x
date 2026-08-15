@@ -4,7 +4,7 @@
 
 GLM5X is a correctness-first runtime and storage project for running GLM-5.x on a machine with a 16 GB consumer GPU, large system RAM, and NVMe storage. It is designed around the model's sparse MoE routing, DSA/MLA attention, MTP speculative decoding, and expert-major verification rather than treating the workload as a dense model with a generic cache.
 
-> **Status:** The exact GLM-5.2 reference graph, resumable converter, and CUDA expert sublayer boundaries are implemented and tested. The local full checkpoint is now materialized as `282` verified `.k3x` artifacts; lazy assembly indexes `59,585` tensors and `19,456` complete experts. The first full exact BF16 natural Top-16 gate on an RTX 5080 measured `0.003304` decode tok/s, `0.003258` prefill tok/s, `609.621 s` TTFT, and `79.763 GB` of logical artifact reads per token. This is a correctness/storage baseline, not an optimized result. The cached two-token run also measured `0.003271` tok/s with zero expert-cache hits because the current cache capacities do not retain the working set. The next performance milestone is exact resident trunk reuse plus layer-aware pinned/asynchronous staging; no quality-changing fast mode is enabled from these measurements. Public Linux correctness and C++/Python CodeQL are green on the current PR head; no cloud or paid resource was used.
+> **Status:** The exact GLM-5.2 reference graph, resumable converter, and CUDA expert sublayer boundaries are implemented and tested. The local full checkpoint is materialized as `282` verified `.k3x` artifacts; lazy assembly indexes `59,585` tensors and `19,456` complete experts. The best exact full-model decode measured so far is `0.010559` tok/s. The latest mixed-NVFP4 gate reached `0.014484` tok/s but changed the output token and is rejected as a quality/default path. Packed-sidecar traffic telemetry, pooled pinned staging, protected residency, and exact N+1 transition prefetch are implemented as opt-in experiments. The N+1 synthetic gate reduced exposed load wait but slowed decode, so it remains default-off. The next performance milestone is exact multi-layer device residency plus pooled asynchronous sidecar-to-VRAM staging; no 10 tok/s claim exists.
 
 The current precision decision is explicit: official FP8, if supplied, is consumed as an interoperability/comparison artifact; the project’s optimization target is native Blackwell FP4. The new NVFP4 path is implemented and bounded-tested, but remains experimental/default-off until calibration and full-model quality gates pass.
 
@@ -16,7 +16,8 @@ The latest residency follow-up is also opt-in. C++ now protects the expert keys 
 
 - K3X-compatible aligned checkpoint extents, checksums, and resumable streaming conversion core.
 - Three-tier residency interfaces for VRAM, system RAM, and NVMe.
-- Deadline-aware prefetch, task/session profiles, expert cache policies, and benchmark schemas inherited from K3X.
+- Deadline-aware loading, task/session profiles, expert cache policies, and benchmark schemas inherited from K3X.
+- Deterministic exact N+1 transition prefetch with recall, overfetch, readiness, byte, and stall telemetry. It never changes natural routing and is default-off after its first synthetic slowdown.
 - GLM descriptor validation for DSA, 256 routed experts, Top-8 routing, shared experts, and MTP metadata.
 - `GLM5XTensorManifest` validation for safetensors shard maps and source byte totals before conversion.
 - Official manifest role resolution for GLM indexer `full/shared` layers and `wk/wq_b/weights_proj/k_norm` tensor names without opening a shard.

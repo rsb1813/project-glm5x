@@ -251,6 +251,72 @@ std::vector<ExpertKey> RuntimeProfile::hot_bank(std::size_t count) const {
     return result;
 }
 
+std::vector<ExpertKey> RuntimeProfile::predict_next(
+    std::span<const ExpertKey> current, std::size_t next_layer,
+    std::size_t expert_count, std::size_t max_candidates,
+    std::uint64_t prior_strength) const {
+    if (current.empty() || expert_count == 0 || max_candidates == 0) return {};
+    const auto source_layer = current.front().layer;
+    if (next_layer != source_layer + 1 ||
+        std::any_of(current.begin(), current.end(), [source_layer](ExpertKey key) {
+            return key.layer != source_layer;
+        })) {
+        return {};
+    }
+
+    struct Candidate {
+        ExpertKey key;
+        long double prior{};
+        long double live{};
+        long double score{};
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(expert_count);
+    long double prior_total = 0.0L;
+    long double live_total = 0.0L;
+    for (std::size_t expert = 0; expert < expert_count; ++expert) {
+        Candidate candidate{{next_layer, expert}};
+        for (const auto from : current) {
+            candidate.prior += static_cast<long double>(
+                prior_transition(from, candidate.key));
+            candidate.live += static_cast<long double>(
+                live_transition(from, candidate.key));
+        }
+        prior_total += candidate.prior;
+        live_total += candidate.live;
+        candidates.push_back(candidate);
+    }
+    if (prior_total == 0.0L && live_total == 0.0L) return {};
+
+    const auto alpha = static_cast<long double>(prior_weight(prior_strength));
+    for (auto& candidate : candidates) {
+        const auto prior = prior_total == 0.0L
+                               ? 0.0L
+                               : candidate.prior / prior_total;
+        const auto live = live_total == 0.0L
+                              ? 0.0L
+                              : candidate.live / live_total;
+        candidate.score = alpha * prior + (1.0L - alpha) * live;
+    }
+    std::erase_if(candidates, [](const Candidate& candidate) {
+        return candidate.score <= 0.0L;
+    });
+    std::sort(candidates.begin(), candidates.end(),
+              [](const Candidate& left, const Candidate& right) {
+                  if (left.score != right.score) return left.score > right.score;
+                  if (left.key.layer != right.key.layer) {
+                      return left.key.layer < right.key.layer;
+                  }
+                  return left.key.expert < right.key.expert;
+              });
+    if (candidates.size() > max_candidates) candidates.resize(max_candidates);
+
+    std::vector<ExpertKey> result;
+    result.reserve(candidates.size());
+    for (const auto& candidate : candidates) result.push_back(candidate.key);
+    return result;
+}
+
 Result<bool> RuntimeProfile::save(const std::filesystem::path& path) const {
     std::map<FrequencyKey, std::uint64_t> frequencies = prior_frequency_;
     if (!checked_merge(frequencies, live_frequency_)) {

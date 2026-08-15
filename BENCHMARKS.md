@@ -1023,3 +1023,16 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Quality: synchronous and pooled-pinned gate/up packed values, blocked scales, global scales, and BF16 down tensor were bit-exact. No logits, generated token, coding benchmark, or full-model quality score was produced.
 - Enabled optimization/result: pooled pinned staging reduced this warm expert's event median by `66.24%` and wall median by `36.16%`. It remains default-off; the measurement does not change the latest full-model truth or establish 10 tok/s.
 - Verification after implementation: focused `25 passed, 6 skipped`; complete WSL Python suite `360 passed, 124 skipped` in `78.30 s`; changed-module `py_compile` and `git diff --check` passed.
+
+## 2026-08-15 -- Exact N+1 transition-prefetch synthetic gate
+
+- Date/commit: 2026-08-15; working tree based on `6d16408` before the transition-prefetch implementation commit.
+- Hardware/model: Ryzen 7 9800X3D host under WSL2 Ubuntu-24.04; synthetic K3X model; CPU backend; four prompt tokens and six generated tokens, so five decode steps are timed.
+- Mode: exact natural routing, disabled L1 expert cache, deadline loader with eight workers, persisted route profile, one warmup and five measured iterations. Only `transition_prefetch_candidates` changes across rows.
+- Candidate `0`: decode `150.14145276689527 tok/s`, prefill `84.38126425410506 tok/s`, TTFT `525.890293 ms`, median exposed expert-load wait `50,024,297 ns`.
+- Candidate `1`: decode `129.3377722401667 tok/s`, prefill `81.90670789113182 tok/s`, TTFT `550.735001 ms`, median exposed wait `43,357,191 ns`; `18` submissions, `10` matches, `26` selected misses, `8` unused, `29,376` requested bytes, and `16,320` useful bytes.
+- Candidate `2`: decode `113.32778238744828 tok/s`, prefill `73.09190164570985 tok/s`, TTFT `532.860618 ms`, median exposed wait `33,961,549 ns`; `36` submissions, `17` matches, `19` selected misses, `19` unused, `58,752` requested bytes, and `27,744` useful bytes.
+- Correctness: all rows produced token IDs `[43,32,28,49,9,28]` and routed experts `[4,7,7,3,3,7,7,4,3,7,7,3,0,5,4,5,0,3,4,5,7,5,0,5]`. Every matched ticket was ready before use, no submission failed, and `matches + unused == submissions`.
+- Result: rejected as a default optimization. Candidate 2 reduced exposed wait by about `32.1%` but reduced decode throughput by about `24.5%`. This is a synthetic CPU scheduling result, not GLM full-model TPS; VRAM, physical NVMe, H2D, quality benchmarks, average adaptive Top-K, and speculative acceptance are not applicable or were not measured.
+- Artifacts: `results/b0001-transition-prefetch-synthetic/c0.{json,csv}`, `c1.{json,csv}`, and `c2.{json,csv}`. JSON SHA-256 values are `d229db04d54c8d59046b0512dcefeb44b33a3289b2a3dbb9c9d3f2e5870fa22d`, `c2eed384de11c1165e205bc2ca127589d897b749f0a5496dbc6f84061d0065f6`, and `2244cac5f8bcdd4dda86dd7362aac048a99ecf831826c23b518f92e5d33b8078` respectively.
+- Verification: CUDA CTest `27/27`, CPU CTest `15/15`, full CPU-build Python suite `362 passed, 124 skipped` in `106.39 s`, focused integration/schema tests green, `py_compile`, and `git diff --check` passed.

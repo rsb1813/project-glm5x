@@ -2,6 +2,7 @@
 import csv
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -512,6 +513,44 @@ def test_benchmark_once_accepts_l2_expert_workers(
         l2_expert_workers=1,
     )
     assert record.backend == "cpu"
+
+
+def test_benchmark_once_collects_transition_prefetch_telemetry(
+    synthetic_source: Path, tmp_path: Path
+) -> None:
+    artifact = tmp_path / "synthetic.k3x"
+    profile = tmp_path / "routes.k3xp"
+    profile_output = tmp_path / "profile.json"
+    convert(synthetic_source, artifact, chunk_bytes=257)
+    subprocess.run(
+        [
+            str(cpp_binary("k3x_run")),
+            "--model", str(artifact),
+            "--prompt-ids", "1,7,3,9",
+            "--generate", "6",
+            "--mode", "incremental",
+            "--runtime-profile-out", str(profile),
+            "--json", str(profile_output),
+        ],
+        check=True,
+    )
+    record = benchmark_once(
+        artifact,
+        cpp_binary("k3x_run"),
+        warmup=0,
+        iterations=1,
+        backend="cpu",
+        l2_expert_schedule="deadline",
+        runtime_profile_in=profile,
+        transition_prefetch_candidates=2,
+    )
+    assert record.transition_prefetch_candidates == 2
+    assert record.transition_prefetch_submissions > 0
+    assert (
+        record.transition_prefetch_matches + record.transition_prefetch_unused
+        == record.transition_prefetch_submissions
+    )
+    assert record.transition_prefetch_submission_failures == 0
 
 
 def test_benchmark_once_collects_scripted_speculative_telemetry(

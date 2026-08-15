@@ -102,4 +102,5 @@
 - [x] Add opt-in pooled pinned sidecar staging with non-blocking CUDA copies and event-safe eviction.
 - [x] Run the full WSL verification after the residency/staging change (`356 passed, 124 skipped`; CTest `27/27`).
 - [x] Add opt-in packed-sidecar file/decode/H2D telemetry and record one bounded RTX 5080 measurement.
+- [x] Add deterministic exact N+1 transition prefetch with recall/overfetch/stall telemetry and route parity; retain it default-off after the synthetic slowdown.
 - [ ] Measure pooled next-layer prefetch with sidecar/H2D/physical-NVMe telemetry and final-logit parity.

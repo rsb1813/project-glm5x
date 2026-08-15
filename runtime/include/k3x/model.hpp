@@ -35,6 +35,19 @@ struct RuntimeOptions {
     SpeculativeVerificationMode speculative_verification{
         SpeculativeVerificationMode::token_major};
     std::size_t l2_expert_workers{8};
+    std::size_t transition_prefetch_candidates{};
+};
+
+struct TransitionPrefetchStats {
+    std::uint64_t submissions{};
+    std::uint64_t matches{};
+    std::uint64_t selected_misses{};
+    std::uint64_t unused{};
+    std::uint64_t ready_before_use{};
+    std::uint64_t late_at_use{};
+    std::uint64_t submission_failures{};
+    std::uint64_t requested_bytes{};
+    std::uint64_t useful_bytes{};
 };
 
 class RuntimeSession {
@@ -47,6 +60,7 @@ public:
           expert_store_(options.l1_expert_cache,
                         options.l1_expert_cache_bytes,
                         options.profile_observation ||
+                                options.transition_prefetch_candidates != 0 ||
                                 options.l1_expert_cache ==
                                     L1ExpertCacheMode::profiled
                             ? &profile_
@@ -142,6 +156,7 @@ struct GenerationResult {
     std::vector<std::uint32_t> evaluated_routed_k;
     L1ExpertCacheStats l1_expert_cache;
     ExpertLoadSchedulerStats expert_load_scheduler;
+    TransitionPrefetchStats transition_prefetch;
     std::uint64_t routing_decisions{};
     std::uint32_t routing_natural_top_k{};
     std::uint64_t routing_selected_experts{};

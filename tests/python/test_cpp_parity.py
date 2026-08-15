@@ -1420,6 +1420,60 @@ def test_deadline_expert_schedule_preserves_exact_runtime_contract(
     assert deadline["expert_load_exposed_wait_nanoseconds"] >= 0
 
 
+def test_transition_prefetch_preserves_routes_and_reports_reuse(
+    synthetic_source: Path, tmp_path: Path
+) -> None:
+    artifact = tmp_path / "synthetic.k3x"
+    profile = tmp_path / "routes.k3xp"
+    baseline_output = tmp_path / "baseline.json"
+    prefetch_output = tmp_path / "prefetch.json"
+    convert(synthetic_source, artifact, chunk_bytes=257)
+    common = [
+        str(cpp_binary("k3x_run")),
+        "--model", str(artifact),
+        "--prompt-ids", "1,7,3,9",
+        "--generate", "6",
+        "--mode", "incremental",
+        "--diagnostics", "true",
+        "--l1-expert-cache", "static",
+        "--l1-expert-cache-bytes", "65536",
+    ]
+    subprocess.run(
+        [*common, "--runtime-profile-out", str(profile),
+         "--json", str(baseline_output)],
+        check=True,
+    )
+    subprocess.run(
+        [*common, "--runtime-profile-in", str(profile),
+         "--l2-schedule", "deadline",
+         "--transition-prefetch-candidates", "2",
+         "--json", str(prefetch_output)],
+        check=True,
+    )
+    baseline = json.loads(baseline_output.read_text(encoding="utf-8"))
+    prefetch = json.loads(prefetch_output.read_text(encoding="utf-8"))
+    assert prefetch["token_ids"] == baseline["token_ids"]
+    assert prefetch["prefill_routed_experts"] == baseline["prefill_routed_experts"]
+    assert prefetch["routed_experts"] == baseline["routed_experts"]
+    assert prefetch["routed_k"] == baseline["routed_k"]
+    assert prefetch["transition_prefetch_candidates"] == 2
+    assert prefetch["transition_prefetch_submissions"] > 0
+    assert (
+        prefetch["transition_prefetch_matches"]
+        + prefetch["transition_prefetch_unused"]
+        == prefetch["transition_prefetch_submissions"]
+    )
+    assert (
+        prefetch["transition_prefetch_ready_before_use"]
+        + prefetch["transition_prefetch_late_at_use"]
+        == prefetch["transition_prefetch_matches"]
+    )
+    assert prefetch["transition_prefetch_submission_failures"] == 0
+    assert prefetch["transition_prefetch_useful_bytes"] <= prefetch[
+        "transition_prefetch_requested_bytes"
+    ]
+
+
 @pytest.mark.skipif(
     os.environ.get("K3X_TEST_IO_URING") != "1",
     reason="requires the optional liburing build",

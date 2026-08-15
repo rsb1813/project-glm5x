@@ -168,6 +168,47 @@ int main(int argc, char** argv) {
     require(deadline_reads.requested_bytes == first_reads.requested_bytes);
     require(deadline_reads.completed_bytes == first_reads.completed_bytes);
 
+    auto profile_reader = k3x::Reader::open(
+        std::filesystem::path(argv[1]), reader_options);
+    require(static_cast<bool>(profile_reader));
+    auto profile_backend = k3x::make_cpu_backend();
+    auto profile_options = options;
+    profile_options.profile_observation = true;
+    k3x::RuntimeSession profile_session(profile_options);
+    auto profile_generation = k3x::generate_greedy(
+        profile_reader.value(), *profile_backend, prompt, 6, profile_session);
+    require(static_cast<bool>(profile_generation));
+
+    auto transition_reader = k3x::Reader::open(
+        std::filesystem::path(argv[1]), reader_options);
+    require(static_cast<bool>(transition_reader));
+    auto transition_backend = k3x::make_cpu_backend();
+    auto transition_options = deadline_options;
+    transition_options.transition_prefetch_candidates = 2;
+    k3x::RuntimeSession transition_session(
+        transition_options, std::move(profile_session.profile()));
+    auto transition = k3x::generate_greedy(
+        transition_reader.value(), *transition_backend, prompt, 6,
+        transition_session);
+    require(static_cast<bool>(transition));
+    require(transition.value().token_ids == first.value().token_ids);
+    require(transition.value().prefill_routed_experts ==
+            first.value().prefill_routed_experts);
+    require(transition.value().routed_experts == first.value().routed_experts);
+    require(transition.value().routed_k == first.value().routed_k);
+    const auto transition_prefetch = transition.value().transition_prefetch;
+    require(transition_prefetch.submissions > 0);
+    require(transition_prefetch.matches > 0);
+    require(transition_prefetch.matches + transition_prefetch.unused ==
+            transition_prefetch.submissions);
+    require(transition_prefetch.ready_before_use +
+                transition_prefetch.late_at_use ==
+            transition_prefetch.matches);
+    require(transition_prefetch.useful_bytes <=
+            transition_prefetch.requested_bytes);
+    require(transition_prefetch.submission_failures == 0);
+    require(transition_session.profile().live_route_observations() > 0);
+
     auto protected_reader = k3x::Reader::open(
         std::filesystem::path(argv[1]), reader_options);
     require(static_cast<bool>(protected_reader));

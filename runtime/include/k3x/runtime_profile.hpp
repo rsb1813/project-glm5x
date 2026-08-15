@@ -42,6 +42,10 @@ public:
     double prior_weight(std::uint64_t prior_strength) const noexcept;
     double usefulness(ExpertKey key, std::uint64_t prior_strength) const;
     std::vector<ExpertKey> hot_bank(std::size_t count) const;
+    std::vector<ExpertKey> predict_next(
+        std::span<const ExpertKey> current, std::size_t next_layer,
+        std::size_t expert_count, std::size_t max_candidates,
+        std::uint64_t prior_strength) const;
 
     Result<bool> save(const std::filesystem::path& path) const;
     static Result<RuntimeProfile> load(const std::filesystem::path& path);
