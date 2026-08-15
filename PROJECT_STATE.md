@@ -298,3 +298,8 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 - A 40 GiB host sidecar cache plus a 40 GiB trunk cache was safely interrupted at approximately `72 GiB` WSL RSS before producing a full-gate result. Do not maximize both capacities independently on the 96 GB host.
 - Fixed the synthetic benchmark's existing `l2_expert_workers` forwarding omission. The requested CUDA prefetch smoke completed at `55.250838` synthetic decode tok/s versus `49.563953` synchronous; this is synthetic-only evidence.
 - Next bottleneck: integrate host-side sidecar reuse with route-stable layer-window admission and pinned/nonblocking H2D, then run a bounded full-layer quality gate before attempting another full 78-layer run.
+
+## 2026-08-15 -- Linux CUDA-less INT4 guard repair
+
+- GitHub correctness run `31884496150` exposed a CPU-only CI mismatch: the INT4 helper returned `RuntimeError(GLM5X_INT4_CUDA_UNAVAILABLE)` before the public CPU-target `ValueError(GLM5X_INT4_CUDA_REQUIRED)` contract. The explicit target/availability guard is fixed in `0d5621d`.
+- Local focused INT4/packed-cache/benchmark tests passed `9`, and the complete WSL Python suite passed `354 passed, 124 skipped` in `78.52 s`. A new public CI run is in progress for `0d5621d`.

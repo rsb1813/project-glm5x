@@ -738,3 +738,11 @@
 - Evidence: the CLI previously raised `TypeError: benchmark_once() got an unexpected keyword argument 'l2_expert_workers'`; the RED regression reproduced it, the focused test passed after the one-parameter forwarding fix, and the CUDA synthetic prefetch benchmark completed with its requested worker count.
 - Accepted because: it restores an existing benchmark contract without changing runtime semantics. The synthetic prefetch measurement is recorded separately and is not a GLM full-model claim.
 - Revisit: if benchmark schema generation changes again, add a direct CLI smoke test rather than relying only on function-level coverage.
+
+## D-0093 -- Normalize the INT4 guard on CUDA-less CI
+
+- Decision: reject INT4 quantization with `ValueError(GLM5X_INT4_CUDA_REQUIRED)` before entering the quantizer whenever the requested target is CPU or CUDA is unavailable.
+- Alternatives: let the lower-level quantizer raise its environment-specific `RuntimeError`, skip the test on CPU-only runners, or change the test contract.
+- Evidence: GitHub Linux run `31884496150` reproduced the mismatch as `RuntimeError: GLM5X_INT4_CUDA_UNAVAILABLE` for a test that requires the stable CPU-target `ValueError`. The focused regression passed after the guard, and the full local WSL suite remained `354 passed, 124 skipped`.
+- Accepted because: callers receive one stable API error independent of whether the host has CUDA, while CUDA-enabled packing behavior is unchanged.
+- Revisit: only if the public quantization API later adopts a distinct environment-error type across all precision paths.

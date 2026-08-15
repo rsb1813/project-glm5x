@@ -582,3 +582,7 @@
 
 - Repeated `.pgu` reads spent more time in file/JSON/CRC work than the gate/up CUDA projection. `--expert-packed-host-cache-bytes` therefore caches only validated metadata/payload pairs in RAM, with zero as the exact reference default. A 2 GiB real-sidecar probe reduced the second 16-entry pass to `0.282 s`; a 40 GiB sidecar tier plus a 40 GiB trunk tier reached about `72 GiB` WSL RSS and was stopped before a full-model result.
 - The existing `l2_expert_workers` CLI argument was not threaded through `benchmark_once()`. The RED regression reproduced the TypeError, the forwarding fix passed, and the synthetic CUDA prefetch smoke completed. Synthetic TPS remains separate from GLM full-model evidence.
+
+## 2026-08-15 -- Linux CUDA-less guard repair
+
+- GitHub Linux correctly exposed a pre-existing contract mismatch: `_quantize_expert_int4(..., device="cpu")` reached the lower-level CUDA availability error on a CPU-only runner, while the test/API contract requires `ValueError(GLM5X_INT4_CUDA_REQUIRED)`. A target/environment guard fixed this without changing CUDA packing.
