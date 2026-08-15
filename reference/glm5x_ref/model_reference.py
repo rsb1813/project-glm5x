@@ -261,7 +261,7 @@ class GLM5XDecoderModelReference:
             raise ValueError("GLM5X_BUNDLE_TRUNK_CACHE_CAPACITY")
         if trunk_precision not in {"bf16", "int4"}:
             raise ValueError("GLM5X_INVALID_TRUNK_PRECISION")
-        if expert_precision not in {"bf16", "fp8", "int4"}:
+        if expert_precision not in {"bf16", "fp8", "int4", "mxfp4"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
         if routing_top_k is not None and (
             not isinstance(routing_top_k, int)
@@ -335,7 +335,7 @@ class GLM5XDecoderModelReference:
         packed_expert_cache = (
             GLM5XPackedExpertCache(packed_expert_cache_path)
             if packed_expert_cache_path is not None
-            and expert_precision in {"int4", "fp8"}
+            and expert_precision in {"int4", "fp8", "mxfp4"}
             else None
         )
         read = lambda name: GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)  # noqa: E731

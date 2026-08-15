@@ -70,7 +70,7 @@ def main() -> int:
     parser.add_argument("--activation", type=Path, required=True)
     parser.add_argument("--top-k", type=int, nargs="+", default=[8, 6, 4, 2])
     parser.add_argument(
-        "--expert-precision", choices=("bf16", "fp8", "int4"), default="bf16"
+        "--expert-precision", choices=("bf16", "fp8", "int4", "mxfp4"), default="bf16"
     )
     parser.add_argument("--packed-cache-dir", type=Path, default=None)
     parser.add_argument("--proxy-mode", choices=("none", "shared"), default="none")

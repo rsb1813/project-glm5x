@@ -96,9 +96,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--expert-precision",
-        choices=("bf16", "fp8", "int4"),
+        choices=("bf16", "fp8", "int4", "mxfp4"),
         default="bf16",
-        help="expert projection precision; fp8/int4 are experimental and default-off",
+        help="expert projection precision; fp8/int4/mxfp4 are experimental and default-off",
     )
     parser.add_argument(
         "--trunk-precision",

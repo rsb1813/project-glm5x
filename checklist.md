@@ -91,3 +91,5 @@
 - [x] Add explicit reduced-routing and shared cold-expert proxy controls with a real-layer quality gate; keep the measured high-drift proxy default-off.
 - [ ] Add exact route-stable multi-layer residency policy that materially lowers full-model logical expert bytes/token.
 - [ ] Re-run a fresh full-model quality/throughput gate after packed sidecar/residency work; do not claim 10--20 tok/s before this gate.
+- [x] Add an experimental fingerprinted MXFP4 `.pm4` sidecar and reference-only pack/decode path; keep FP4 default-off pending calibration/native CUDA execution.
+- [ ] Add calibrated FP4 residual metadata and native RTX 5080 FP4 execution; do not promote the current uncalibrated reference path.

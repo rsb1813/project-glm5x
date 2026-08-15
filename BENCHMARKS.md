@@ -1,5 +1,15 @@
 # GLM5X Benchmarks
 
+## 2026-08-15 -- Experimental MXFP4 sidecar quality/bytes gate
+
+- Commit: working tree based on public `ee186c7` with the FP4 extension uncommitted at measurement time.
+- Hardware: RTX 5080 16 GB, WSL2 CUDA 13.0/PyTorch 2.13.0; model/checkpoint: official GLM-5.2 layer-10 real activation and full expert bundle; context: one candidate token, natural Top-8.
+- Precision path: reference MXFP4 E2M1 values with E8M0 group scales, `.pm4` fingerprinted sidecars, BF16 decode for the current reference MLP. Eight routed experts were selected and route IDs matched BF16.
+- Storage: `160,440,156` sidecar bytes for the eight selected experts versus `603,979,776` corresponding raw BF16 role bytes (`26.5638291835785%`).
+- Timing: first population including CPU pack/decode and atomic writes `27.440241339994827 s`; fresh sidecar reuse including CPU MXFP4 decode `17.867729659978068 s`; paired BF16 reference `2.79652249100036 s`. The current reference decode is therefore slower and is not a throughput optimization.
+- Quality: relative L2 error `0.16359105706214905`, maximum absolute error `0.001750946044921875` against BF16; route equality `true`.
+- Decision: keep `.pm4` and `expert_precision=mxfp4` experimental/default-off. Do not promote uncalibrated MXFP4, and do not interpret this bounded result as full-model tok/s. Native NVFP4/MXFP4 CUDA execution and calibrated residual metadata are the next FP4 gates. FP8 work is comparison-only and its abandoned full-model gate produced no result.
+
 ## 2026-08-15 -- Reduced-routing and shared-proxy quality gate
 
 - Hardware: RTX 5080 16 GB, WSL2 CUDA 13.0/PyTorch 2.13.0; model/checkpoint: official GLM-5.2 layer-10 real activation and five-shard expert bundle; context: four candidate tokens.

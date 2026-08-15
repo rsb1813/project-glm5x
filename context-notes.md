@@ -549,3 +549,10 @@
 - Generalized the fingerprint-bound sidecar to `.pi4` INT4 and `.pf8` row-scaled E4M3 FP8 records. FP8 stores the quantized role bytes and row scales, while the source digest and per-section CRC checks remain mandatory.
 - Real layer-10 four-token results: first FP8 population `21.4064 s`; fresh-process reuse `4.8204 s` versus BF16 `11.7594 s`, identical routes, and `5.6966%` relative L2 drift. The 31 `.pf8` files occupy `1,171,511,902` bytes, about half of the raw BF16 role bytes. The warm improvement is real but bounded to one MoE layer.
 - FP8 is experimental/default-off until final logits, coding quality, and full-model traffic are measured. The next performance work is still multi-layer residency and asynchronous staging.
+
+## 2026-08-15 -- FP4 pivot
+
+- The user clarified that FP8 is not the target because an official FP8 path may exist; FP4 is the intended optimization direction. The long full-model FP8 population was terminated and its partial sidecars were preserved.
+- Added `expert_precision="mxfp4"` and `.pm4` sidecars using the existing E2M1/E8M0 reference codec. The current loader decodes to BF16, so this is storage/correctness plumbing, not a native FP4 speed path.
+- Bounded real layer-10 one-token evidence: eight routed experts, `160,440,156` sidecar bytes versus `603,979,776` BF16 bytes, unchanged routes, `0.16359105706214905` relative L2 error, and `17.867729659978068 s` fresh sidecar decode versus `2.79652249100036 s` BF16.
+- Next decision gate is calibrated FP4 (outlier residual or mixed precision) plus a native RTX 5080 kernel. Do not claim full-model TPS from this layer result.

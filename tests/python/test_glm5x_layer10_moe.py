@@ -256,6 +256,21 @@ def test_glm5x_fp8_expert_mlp_has_bounded_cpu_error() -> None:
     assert float((actual.float() - expected.float()).norm() / expected.float().norm()) < 0.25
 
 
+def test_glm5x_mxfp4_reference_quantizer_is_explicit_and_finite() -> None:
+    torch.manual_seed(31)
+    expert = GLM5XExpertWeights(
+        gate_proj=torch.randn(64, 64, dtype=torch.bfloat16),
+        up_proj=torch.randn(64, 64, dtype=torch.bfloat16),
+        down_proj=torch.randn(64, 64, dtype=torch.bfloat16),
+    )
+    quantized = GLM5XLayer10MoEReference._quantize_expert_mxfp4(expert)
+    assert quantized.gate_proj.dtype == torch.bfloat16
+    assert quantized.gate_proj.shape == expert.gate_proj.shape
+    assert torch.isfinite(quantized.gate_proj).all()
+    assert torch.isfinite(quantized.up_proj).all()
+    assert torch.isfinite(quantized.down_proj).all()
+
+
 def test_glm5x_int4_expert_quantizer_requires_cuda() -> None:
     expert = GLM5XExpertWeights(
         gate_proj=torch.zeros((256, 256)),

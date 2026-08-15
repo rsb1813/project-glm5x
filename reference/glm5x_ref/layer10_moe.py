@@ -17,6 +17,7 @@ from k3x_converter.reader import K3XReader
 from glm5x_converter.bundle import GLM5XExpertBundle
 
 from .int4 import GLM5XInt4Weight, linear, quantize_int4_weight, weight_shape
+from k3x_ref.mxfp4 import decode_mxfp4, encode_mxfp4
 from .packed_cache import GLM5XPackedExpertCache
 
 
@@ -327,7 +328,7 @@ class GLM5XLayer10MoEReference:
             raise ValueError("GLM5X_INVALID_EXPERT_CACHE_FLAG")
         if execution_mode not in {"loop", "expert_major"}:
             raise ValueError("GLM5X_INVALID_EXECUTION_MODE")
-        if expert_precision not in {"bf16", "fp8", "int4"}:
+        if expert_precision not in {"bf16", "fp8", "int4", "mxfp4"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
         if proxy_mode not in {"none", "shared"}:
             raise ValueError("GLM5X_INVALID_PROXY_MODE")
@@ -362,6 +363,8 @@ class GLM5XLayer10MoEReference:
             if expert_precision == "fp8"
             else self._quantize_expert_int4(shared_expert)
             if expert_precision == "int4"
+            else self._quantize_expert_mxfp4(shared_expert)
+            if expert_precision == "mxfp4"
             else shared_expert
         )
         self.top_k = top_k
@@ -397,6 +400,10 @@ class GLM5XLayer10MoEReference:
             expert = self._quantize_expert_fp8(expert)
         elif self.expert_precision == "int4":
             expert = self._quantize_expert_int4(expert, device=self._device_for_expert(expert))
+        elif self.expert_precision == "mxfp4":
+            expert = self._quantize_expert_mxfp4(
+                expert, device=self._device_for_expert(expert)
+            )
         if expert.gate_proj.shape[1] != self.hidden_size:
             raise ValueError("GLM5X_EXPERT_HIDDEN_SIZE_MISMATCH")
         if self.cache_experts:
@@ -436,6 +443,10 @@ class GLM5XLayer10MoEReference:
                 expert = self._quantize_expert_int4(
                     expert, device=self._device_for_expert(expert)
                 )
+            elif self.expert_precision == "mxfp4":
+                expert = self._quantize_expert_mxfp4(
+                    expert, device=self._device_for_expert(expert)
+                )
             if expert.gate_proj.shape[1] != self.hidden_size:
                 raise ValueError("GLM5X_EXPERT_HIDDEN_SIZE_MISMATCH")
             experts[expert_id] = expert
@@ -465,6 +476,37 @@ class GLM5XLayer10MoEReference:
             gate_scale=gate_scale,
             up_scale=up_scale,
             down_scale=down_scale,
+        )
+
+    @staticmethod
+    def _quantize_expert_mxfp4(
+        expert: GLM5XExpertWeights,
+        *,
+        device: torch.device | str | None = None,
+    ) -> GLM5XExpertWeights:
+        """Reference-only E2M1/E8M0 pack/decode; native CUDA FP4 is separate."""
+        if any(isinstance(weight, GLM5XInt4Weight) for weight in (
+            expert.gate_proj, expert.up_proj, expert.down_proj
+        )):
+            raise ValueError("GLM5X_MXFP4_REQUIRES_FLOAT_WEIGHTS")
+        target = None if device is None else torch.device(device)
+
+        def quantize(weight: torch.Tensor) -> torch.Tensor:
+            tensor = torch.as_tensor(weight)
+            if tensor.ndim != 2 or tensor.shape[1] % 32:
+                raise ValueError("GLM5X_MXFP4_GROUP_ALIGNMENT")
+            packed, scales = encode_mxfp4(
+                tensor, group_size=32, scale_mode="max_abs"
+            )
+            decoded = decode_mxfp4(
+                packed, scales, int(tensor.shape[0]), int(tensor.shape[1]), 32
+            ).to(dtype=torch.bfloat16)
+            return decoded if target is None else decoded.to(device=target)
+
+        return GLM5XExpertWeights(
+            gate_proj=quantize(expert.gate_proj),
+            up_proj=quantize(expert.up_proj),
+            down_proj=quantize(expert.down_proj),
         )
 
     @staticmethod
@@ -801,7 +843,7 @@ class GLM5XLayer10MoEReference:
 
         prefix = f"model.layers.{layer_id}.mlp"
         target = None if device is None else torch.device(device)
-        if expert_precision not in {"bf16", "fp8", "int4"}:
+        if expert_precision not in {"bf16", "fp8", "int4", "mxfp4"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
         if trunk_precision not in {"bf16", "int4"}:
             raise ValueError("GLM5X_INVALID_TRUNK_PRECISION")
@@ -832,6 +874,8 @@ class GLM5XLayer10MoEReference:
             if target is None or target.type != "cuda" or not torch.cuda.is_available():
                 raise ValueError("GLM5X_INT4_CUDA_REQUIRED")
             shared = cls._quantize_expert_int4(shared, device=target)
+        elif expert_precision == "mxfp4":
+            shared = cls._quantize_expert_mxfp4(shared, device=target)
         if target is not None:
             if not isinstance(shared.gate_proj, GLM5XInt4Weight):
                 shared = GLM5XExpertWeights(
@@ -862,7 +906,7 @@ class GLM5XLayer10MoEReference:
                 if cached is not None:
                     return cached
             source_digest = None
-            if packed_expert_cache is not None and expert_precision in {"int4", "fp8"}:
+            if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4"}:
                 source_digest = bundle.expert_source_digest(layer_id, expert_id)
                 cached = packed_expert_cache.get(
                     cache_key,
@@ -885,7 +929,7 @@ class GLM5XLayer10MoEReference:
                 device=target,
                 precision=expert_precision,
             )
-            if packed_expert_cache is not None and expert_precision in {"int4", "fp8"}:
+            if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4"}:
                 assert source_digest is not None
                 packed_expert_cache.put(
                     cache_key, source_digest, expert, precision=expert_precision
@@ -913,7 +957,7 @@ class GLM5XLayer10MoEReference:
                 payload_pending: list[int] = []
                 source_digests: dict[int, str] = {}
                 for expert_id in pending:
-                    if packed_expert_cache is not None and expert_precision in {"int4", "fp8"}:
+                    if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4"}:
                         digest = bundle.expert_source_digest(layer_id, expert_id)
                         cached = packed_expert_cache.get(
                             (layer_id, expert_id),
@@ -946,7 +990,7 @@ class GLM5XLayer10MoEReference:
                     device=target,
                     precision=expert_precision,
                 )
-                if packed_expert_cache is not None and expert_precision in {"int4", "fp8"}:
+                if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4"}:
                     packed_expert_cache.put(
                         (layer_id, expert_id),
                         source_digests[expert_id],
@@ -1083,7 +1127,7 @@ class GLM5XLayer10MoEReference:
         precision: str = "bf16",
     ) -> GLM5XExpertWeights:
         target = None if device is None else torch.device(device)
-        if precision not in {"bf16", "fp8", "int4"}:
+        if precision not in {"bf16", "fp8", "int4", "mxfp4"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
 
         def decode(role: str, shape: tuple[int, int]) -> torch.Tensor:
@@ -1103,6 +1147,8 @@ class GLM5XLayer10MoEReference:
             if target is None or target.type != "cuda" or not torch.cuda.is_available():
                 raise ValueError("GLM5X_INT4_CUDA_REQUIRED")
             return cls._quantize_expert_int4(expert, device=target)
+        elif precision == "mxfp4":
+            expert = cls._quantize_expert_mxfp4(expert, device=target)
         if target is None:
             return expert
         return GLM5XExpertWeights(

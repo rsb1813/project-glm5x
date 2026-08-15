@@ -665,3 +665,11 @@
 - Evidence: on the real layer-10 four-token activation, a fresh FP8 sidecar process measured `4.820426017016871 s` versus BF16 `11.759381022013258 s`, with identical route IDs, `5.696592479944229%` relative L2 drift, and `0.0007408261299133301` maximum absolute error. First population was slower at `21.40642180899158 s` because it read BF16 roles, quantized, and wrote 31 sidecars; the 31 files totaled `1,171,511,902` bytes, `50.05%` of the raw BF16 role bytes.
 - Accepted as experimental because: sidecar reuse removes repeated source decode/quantization and the quality drift is materially lower than the measured MXFP4/Top-K proxy paths, but no full-model logits or coding benchmark has passed.
 - Revisit: after a full-model cold/warm gate records FP8 bytes/token, VRAM/RAM pressure, final-token quality, and task-level regression.
+
+## D-0084 -- Make FP4 the optimization target and demote FP8 to a comparison baseline
+
+- Decision: stop the long full-model FP8 sidecar population, retain the already measured FP8 sidecar only as an opt-in comparison/interoperability baseline, and prioritize an explicit MXFP4/NVFP4 path for GLM experts. If an official GLM FP8 artifact is supplied later, consume it rather than maintaining a competing local FP8 format.
+- Alternatives: continue the full FP8 gate, make local FP8 the default, or directly promote uncalibrated FP4 to the runtime default.
+- Evidence: FP8 was not the requested final precision and its full-model gate produced no completed result. The bounded reference MXFP4 path stored eight layer-10 routed experts in `160,440,156` bytes (`26.56%` of corresponding BF16 bytes) with unchanged routes but `0.16359105706214905` relative L2 error and `17.867729659978068 s` fresh sidecar decode versus `2.79652249100036 s` BF16. Existing real-layer MXFP4 quality evidence therefore requires calibration/native kernels before promotion.
+- Accepted because: it prevents time being spent on a precision the project does not target, preserves a useful measured control, and keeps the correctness BF16 path unchanged while the FP4 storage and CUDA work proceeds.
+- Revisit: after calibrated outlier/mixed FP4 residuals, native RTX 5080 FP4 execution, full-model final-logit parity, and a fresh bytes/quality/TPS gate.

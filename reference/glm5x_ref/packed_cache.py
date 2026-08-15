@@ -13,13 +13,14 @@ from typing import Any
 import google_crc32c
 import torch
 
+from k3x_ref.mxfp4 import decode_mxfp4, encode_mxfp4
 from .int4 import GLM5XInt4Weight
 
 
 _MAGIC = b"GLM5XPI4"
 _VERSION = 1
 _HEADER = struct.Struct("<8sII")
-_PRECISIONS = {"int4", "fp8"}
+_PRECISIONS = {"int4", "fp8", "mxfp4"}
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ class GLM5XPackedExpertCache:
         layer_id, expert_id = (int(value) for value in key)
         if layer_id < 0 or expert_id < 0:
             raise ValueError("GLM5X_PACKED_CACHE_KEY")
-        suffix = "pi4" if precision == "int4" else "pf8"
+        suffix = {"int4": "pi4", "fp8": "pf8", "mxfp4": "pm4"}[precision]
         return root / f"layer-{layer_id:04d}-expert-{expert_id:04d}.{suffix}"
 
     @staticmethod
@@ -67,7 +68,7 @@ class GLM5XPackedExpertCache:
             group_size = int(weight.group_size)
             inner_k_tiles = int(weight.inner_k_tiles)
             qparams_dtype = "bfloat16"
-        else:
+        elif precision == "fp8":
             if (
                 not isinstance(weight, torch.Tensor)
                 or weight.dtype != torch.float8_e4m3fn
@@ -82,6 +83,23 @@ class GLM5XPackedExpertCache:
             group_size = 0
             inner_k_tiles = 0
             qparams_dtype = "float32"
+        else:
+            if (
+                not isinstance(weight, torch.Tensor)
+                or weight.ndim != 2
+                or weight.shape[1] % 32
+                or not weight.is_floating_point()
+            ):
+                raise ValueError("GLM5X_PACKED_CACHE_REQUIRES_MXFP4")
+            packed_bytes, qparam_bytes = encode_mxfp4(
+                weight, group_size=32, scale_mode="max_abs"
+            )
+            shape = list(weight.shape)
+            packed = torch.empty(len(packed_bytes), dtype=torch.uint8)
+            qparams = torch.empty(len(qparam_bytes), dtype=torch.uint8)
+            group_size = 32
+            inner_k_tiles = 0
+            qparams_dtype = "uint8"
         return (
             {
                 "shape": shape,
@@ -116,7 +134,7 @@ class GLM5XPackedExpertCache:
         if precision == "int4":
             if not all(isinstance(weight, GLM5XInt4Weight) for weight in weights):
                 raise ValueError("GLM5X_PACKED_CACHE_REQUIRES_INT4")
-        else:
+        elif precision == "fp8":
             scales = (expert.gate_scale, expert.up_scale, expert.down_scale)
             if not expert.is_fp8:
                 raise ValueError("GLM5X_PACKED_CACHE_REQUIRES_FP8")
@@ -196,12 +214,21 @@ class GLM5XPackedExpertCache:
                 group_size=int(metadata["group_size"]),
                 inner_k_tiles=int(metadata["inner_k_tiles"]),
             )
-        packed = torch.frombuffer(bytearray(packed_data), dtype=torch.uint8).reshape(
-            packed_shape
-        ).view(torch.float8_e4m3fn)
-        return packed.to(device=device), torch.frombuffer(
-            bytearray(qparams_data), dtype=torch.float32
-        ).reshape(qparams_shape).to(device=device)
+        if precision == "fp8":
+            packed = torch.frombuffer(bytearray(packed_data), dtype=torch.uint8).reshape(
+                packed_shape
+            ).view(torch.float8_e4m3fn)
+            return packed.to(device=device), torch.frombuffer(
+                bytearray(qparams_data), dtype=torch.float32
+            ).reshape(qparams_shape).to(device=device)
+        decoded = decode_mxfp4(
+            packed_data,
+            qparams_data,
+            shape[0],
+            shape[1],
+            int(metadata["group_size"]),
+        ).to(dtype=torch.bfloat16, device=device)
+        return decoded
 
     def get(
         self,
@@ -256,6 +283,12 @@ class GLM5XPackedExpertCache:
                         gate_scale=gate_scale,
                         up_scale=up_scale,
                         down_scale=down_scale,
+                    )
+                if precision == "mxfp4":
+                    return GLM5XExpertWeights(
+                        gate_proj=decoded[0],
+                        up_proj=decoded[1],
+                        down_proj=decoded[2],
                     )
                 return GLM5XExpertWeights(
                     gate_proj=decoded[0], up_proj=decoded[1], down_proj=decoded[2]

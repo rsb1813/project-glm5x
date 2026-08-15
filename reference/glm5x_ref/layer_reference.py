@@ -307,7 +307,7 @@ class GLM5XDecoderLayerReference:
                 and ".mlp.gate.weight" not in name
                 and not (
                     "shared_experts" in name
-                    and expert_precision in {"fp8", "int4"}
+                    and expert_precision in {"fp8", "int4", "mxfp4"}
                 )
             ):
                 return quantize_int4_weight(value)
