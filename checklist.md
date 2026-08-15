@@ -94,5 +94,11 @@
 - [x] Add an experimental fingerprinted MXFP4 `.pm4` sidecar and reference-only pack/decode path; keep FP4 default-off pending calibration/native CUDA execution.
 - [x] Add the experimental RTX 5080 NVFP4 blocked-scale CUDA path and `.pn4`/`.pgu` sidecars; keep both modes default-off pending calibration and final-logit quality.
 - [x] Share NVFP4 gate/up activation quantization and verify the resident microkernel speedup; do not treat the result as end-to-end tok/s.
+- [x] Add an opt-in bounded RAM cache for verified packed sidecar payloads and record a real `.pgu` reuse probe; keep capacity zero as the default.
+- [x] Repair `benchmark_synthetic.py` forwarding for the existing `l2_expert_workers` option and run synchronous/prefetch smoke comparisons.
 - [ ] Replace plain full-model LRU expert residency with layer-aware protected/hot-bank scheduling and explicit sidecar-I/O telemetry.
 - [ ] Add calibrated FP4 residual metadata and promote only after native RTX 5080 FP4 full-model quality/traffic gates; do not promote the current uncalibrated path.
+- [x] Add explicit C++ resident access-set protection and byte-bounded eviction safety for selected expert keys.
+- [x] Add opt-in pooled pinned sidecar staging with non-blocking CUDA copies and event-safe eviction.
+- [x] Run the full WSL verification after the residency/staging change (`356 passed, 124 skipped`; CTest `27/27`).
+- [ ] Measure pooled next-layer prefetch with sidecar/H2D/physical-NVMe telemetry and final-logit parity.

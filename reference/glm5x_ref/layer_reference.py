@@ -98,6 +98,7 @@ class GLM5XDecoderLayerReference:
         trunk_precision: str = "bf16",
         proxy_mode: str = "none",
         proxy_top_k: int | None = None,
+        grouped_nvfp4: bool = False,
     ) -> "GLM5XDecoderLayerReference":
         bundle = GLM5XExpertBundle.open(
             bundle_path,
@@ -134,6 +135,7 @@ class GLM5XDecoderLayerReference:
             trunk_precision=trunk_precision,
             proxy_mode=proxy_mode,
             proxy_top_k=proxy_top_k,
+            grouped_nvfp4=grouped_nvfp4,
         )
 
     @classmethod
@@ -169,6 +171,7 @@ class GLM5XDecoderLayerReference:
         trunk_precision: str = "bf16",
         proxy_mode: str = "none",
         proxy_top_k: int | None = None,
+        grouped_nvfp4: bool = False,
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
         """Open and validate one bundle once, then provide individual layers."""
         bundle = GLM5XExpertBundle.open(
@@ -209,6 +212,7 @@ class GLM5XDecoderLayerReference:
                 trunk_precision=trunk_precision,
                 proxy_mode=proxy_mode,
                 proxy_top_k=proxy_top_k,
+                grouped_nvfp4=grouped_nvfp4,
             )
 
         return load
@@ -245,6 +249,7 @@ class GLM5XDecoderLayerReference:
         trunk_precision: str = "bf16",
         proxy_mode: str = "none",
         proxy_top_k: int | None = None,
+        grouped_nvfp4: bool = False,
     ) -> "GLM5XDecoderLayerReference":
         if mlp_type not in {"dense", "sparse"}:
             raise ValueError("GLM5X_LAYER_MLP_TYPE")
@@ -367,6 +372,7 @@ class GLM5XDecoderLayerReference:
                 trunk_precision=trunk_precision,
                 proxy_mode=proxy_mode,
                 proxy_top_k=proxy_top_k,
+                grouped_nvfp4=grouped_nvfp4,
                 tensor_values=tensor_values,
             )
         return cls(

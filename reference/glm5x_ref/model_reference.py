@@ -229,13 +229,19 @@ class GLM5XDecoderModelReference:
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache_capacity_bytes: int = 0,
+        expert_device_cache_policy: str = "lru",
+        expert_device_cache_protected_entries_per_layer: int = 0,
         trunk_cache_capacity_bytes: int = 0,
         packed_expert_cache_path: str | Path | None = None,
+        packed_expert_host_cache_capacity_bytes: int = 0,
+        packed_expert_pinned_staging_capacity_bytes: int = 0,
+        packed_expert_non_blocking: bool = False,
         routing_top_k: int | None = None,
         proxy_mode: str = "none",
         proxy_top_k: int | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
+        grouped_nvfp4: bool = False,
     ) -> "GLM5XDecoderModelReference":
         """Build an out-of-core model factory from one validated GLM bundle.
 
@@ -253,16 +259,65 @@ class GLM5XDecoderModelReference:
             or expert_device_cache_capacity_bytes < 0
         ):
             raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_CAPACITY")
+        if expert_device_cache_policy not in {"lru", "layer_balanced"}:
+            raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_POLICY")
+        if (
+            not isinstance(expert_device_cache_protected_entries_per_layer, int)
+            or isinstance(expert_device_cache_protected_entries_per_layer, bool)
+            or expert_device_cache_protected_entries_per_layer < 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
+        if (
+            expert_device_cache_policy == "layer_balanced"
+            and expert_device_cache_protected_entries_per_layer <= 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
         if (
             not isinstance(trunk_cache_capacity_bytes, int)
             or isinstance(trunk_cache_capacity_bytes, bool)
             or trunk_cache_capacity_bytes < 0
         ):
             raise ValueError("GLM5X_BUNDLE_TRUNK_CACHE_CAPACITY")
+        if (
+            not isinstance(packed_expert_host_cache_capacity_bytes, int)
+            or isinstance(packed_expert_host_cache_capacity_bytes, bool)
+            or packed_expert_host_cache_capacity_bytes < 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_HOST_CACHE_CAPACITY")
+        if (
+            not isinstance(packed_expert_pinned_staging_capacity_bytes, int)
+            or isinstance(packed_expert_pinned_staging_capacity_bytes, bool)
+            or packed_expert_pinned_staging_capacity_bytes < 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_PINNED_CAPACITY")
+        if not isinstance(packed_expert_non_blocking, bool):
+            raise ValueError("GLM5X_BUNDLE_PACKED_NON_BLOCKING")
+        if (
+            packed_expert_host_cache_capacity_bytes > 0
+            and packed_expert_cache_path is None
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_HOST_CACHE_REQUIRES_PATH")
+        if (
+            packed_expert_pinned_staging_capacity_bytes > 0
+            and packed_expert_cache_path is None
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_PINNED_REQUIRES_PATH")
+        if (
+            packed_expert_non_blocking
+            and packed_expert_pinned_staging_capacity_bytes == 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_PINNED_CAPACITY_REQUIRED")
+        if packed_expert_non_blocking and expert_load_workers != 1:
+            raise ValueError("GLM5X_BUNDLE_PACKED_NON_BLOCKING_WORKERS")
         if trunk_precision not in {"bf16", "int4"}:
             raise ValueError("GLM5X_INVALID_TRUNK_PRECISION")
         if expert_precision not in {"bf16", "fp8", "int4", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
+        if (
+            packed_expert_pinned_staging_capacity_bytes > 0
+            and expert_precision == "bf16"
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_PINNED_REQUIRES_PACKED_PRECISION")
         if routing_top_k is not None and (
             not isinstance(routing_top_k, int)
             or isinstance(routing_top_k, bool)
@@ -323,7 +378,11 @@ class GLM5XDecoderModelReference:
         )
         tensor_refs = _collect_tensor_refs(bundle)
         expert_device_cache = (
-            GLM5XExpertTensorCache(expert_device_cache_capacity_bytes)
+            GLM5XExpertTensorCache(
+                expert_device_cache_capacity_bytes,
+                policy=expert_device_cache_policy,
+                protected_entries_per_layer=expert_device_cache_protected_entries_per_layer,
+            )
             if expert_device_cache_capacity_bytes
             else None
         )
@@ -333,7 +392,14 @@ class GLM5XDecoderModelReference:
             else None
         )
         packed_expert_cache = (
-            GLM5XPackedExpertCache(packed_expert_cache_path)
+            GLM5XPackedExpertCache(
+                packed_expert_cache_path,
+                host_cache_capacity_bytes=packed_expert_host_cache_capacity_bytes,
+                pinned_staging_capacity_bytes=(
+                    packed_expert_pinned_staging_capacity_bytes
+                ),
+                non_blocking=packed_expert_non_blocking,
+            )
             if packed_expert_cache_path is not None
             and expert_precision in {"int4", "fp8", "mxfp4", "nvfp4", "nvfp4_gate_up"}
             else None
@@ -385,6 +451,7 @@ class GLM5XDecoderModelReference:
                 trunk_precision=trunk_precision,
                 proxy_mode=proxy_mode,
                 proxy_top_k=proxy_top_k,
+                grouped_nvfp4=grouped_nvfp4,
             )
 
         instance = cls.from_layer_loader(

@@ -1,10 +1,10 @@
 # GLM5X Project State
 
-Latest verified complete Python regression: `341 passed, 124 skipped` in `173.77 s`. The prior milestone text below retains historical counts for context.
+Latest verified complete Python regression: `354 passed, 124 skipped` in `79.53 s` from WSL2 CUDA environment. The prior milestone text below retains historical counts for context.
 
 ## Current milestone
 
-GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q-residual/MLA/DSA/MoE reference, configuration-driven all-layer loading, resumable local full-checkpoint streaming, lazy final bundle indexing, disjoint shard-range workers, exact cache/prefetch experiments, CUDA expert-major sublayer boundaries, logical storage telemetry, grouped decoder-layer reads, exact FP32 LM-head reuse, reduced-routing/proxy controls, INT4/FP8 comparison sidecars, experimental MXFP4 sidecars, and the explicit full-bundle benchmark gate are implemented. The latest local regression is `336 passed, 124 skipped`; the C++ suite remains green at `15/15`. All 282 real shards now have verified `.k3x` artifacts and source-deletion markers, and lazy assembly reports 19,456 complete experts. The first exact full-model CUDA gate is measured: cold prefill `0.003258 tok/s`, cold decode `0.003304 tok/s`, TTFT `609.621 s`, and logical storage reads `79,763,152,896` bytes per token. The cached two-token gate remains exact but records `0.003271 tok/s`, `0.0` expert-cache hit rate, and `159,526,305,792` decode bytes because the current 8 GiB host/4 GiB device capacity is smaller than the working set and the trunk is still reloaded. These are baseline measurements, not a target claim. FP8 full-model population was stopped with no result. Full CUDA final-logit quality, MTP, paged KV, asynchronous residency, calibrated/native FP4, and optimized end-to-end execution remain open.
+GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q-residual/MLA/DSA/MoE reference, configuration-driven all-layer loading, resumable local full-checkpoint streaming, lazy final bundle indexing, disjoint shard-range workers, exact cache/prefetch experiments, CUDA expert-major sublayer boundaries, logical storage telemetry, grouped decoder-layer reads, exact FP32 LM-head reuse, reduced-routing/proxy controls, INT4/FP8 comparison sidecars, experimental MXFP4 sidecars, and the explicit full-bundle benchmark gate are implemented. The latest local regression is `354 passed, 124 skipped`; the WSL CUDA CTest suite is green at `27/27`. All 282 real shards now have verified `.k3x` artifacts and source-deletion markers, and lazy assembly reports 19,456 complete experts. The first exact full-model CUDA gate is measured: cold prefill `0.003258 tok/s`, cold decode `0.003304 tok/s`, TTFT `609.621 s`, and logical storage reads `79,763,152,896` bytes per token. The cached two-token gate remains exact but records `0.003271` tok/s with zero expert-cache hits because the current capacities do not retain the working set. These are baseline measurements, not a target claim. FP8 full-model population was stopped with no result. Full CUDA final-logit quality, MTP, paged KV, asynchronous residency, calibrated/native FP4, and optimized end-to-end execution remain open.
 
 ## Current live snapshot -- 2026-08-15
 
@@ -15,9 +15,11 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 - Storage: the source manifest totals `1,506,659,919,872` bytes. The raw-BF16 artifact set is therefore approximately `1.507 TB` decimal before any future derived/quantized copy. Free-space headroom must be checked before any second representation is created.
 - Full-gate result: exact cold one-token run took `306.933 s` prefill plus `302.688 s` decode, with `79.763 GB` of logical artifact reads per token and `8.083 GB` peak allocated VRAM. The cached two-token run took `303.585 s` prefill and `611.386 s` decode, with zero expert-cache hits because the configured cache capacity evicted the working set.
 - Current bottleneck: the exact reference is still limited by storage/reload, while the first NVFP4 full gate exposes additional sidecar I/O/native FP4 overhead and final-token divergence. A 4 GiB plain LRU device cache had `0` hits and `1,691` evictions, so the next target is layer-aware protected residency and explicit sidecar-to-VRAM prefetch, followed by calibrated FP4 residual handling and final-logit parity.
+- New host packed tier: `--expert-packed-host-cache-bytes` is implemented as an opt-in bounded RAM LRU for validated `.pi4/.pf8/.pm4/.pn4/.pgu` payloads. A real 16-sidecar probe improved `1.715 s` first admission to `0.282 s` on reuse with `629,145,728` resident bytes. A 40 GiB host tier combined with a 40 GiB trunk tier reached approximately `72 GiB` WSL RSS without a completed full gate, so large capacities are unsafe without a joint memory budget.
 - Reduced-routing/proxy gate: the real layer-10 four-token shared Top-4 proxy measured `5.043440291978186 s` versus natural Top-8 `12.43729756900575 s`, but relative L2 drift was `0.8120684623718262`; the proxy is default-off and does not count toward the TPS target.
-- Verification: the latest complete WSL Python suite passed `341 passed, 124 skipped` in `173.77 s`; the focused NVFP4/layer/cache/model group passed `17 passed` for the selected follow-up set. These are current local results; no full-model speed claim changed.
+- Verification: the latest complete WSL Python suite passed `354 passed, 124 skipped` in `79.53 s`; the focused packed-cache/benchmark regression passed `8` selected tests. These are current local results; no full-model speed claim changed.
 - GitHub: public head `bb85223` contains the native NVFP4 path, full-gate measurements, and documentation. The latest local verification is `341 passed, 124 skipped`; the recurring red `correctness / Linux (push)` notification is stale run `31795400168` on `b94c8b8`, where 50 historical evidence files were absent; it is not an active failure on `main`.
+- Public PR `#5` (`agent/nvfp4-grouped-cache`) contains the grouped NVFP4, protected-cache, host packed-tier, benchmark-repair, and documentation updates. The current PR head has green Linux correctness and C++/Python CodeQL checks; the PR remains draft and unmerged.
 - Dependency status: Dependabot update PRs `#1`--`#4` are closed and no open Dependabot PR exists. The repository security-alert endpoints are disabled (`403`/`404`), so the visible alarm cannot be converted into a verified CVE count.
 
 ## Completed
@@ -279,3 +281,48 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 - Added experimental `.pm4` fingerprinted sidecars and `expert_precision=mxfp4`. The current reference path packs E2M1/E8M0 MXFP4, then decodes to BF16 for execution; BF16 remains the exact/default path.
 - Real layer-10 one-token gate: eight routed experts occupied `160,440,156` sidecar bytes (`26.56%` of corresponding BF16 role bytes), route IDs matched, and MXFP4-vs-BF16 relative L2 error was `0.16359105706214905` with max absolute error `0.001750946044921875`. Fresh sidecar decode took `17.867729659978068 s` versus `2.79652249100036 s` BF16 because the native FP4 kernel is not connected yet.
 - Status: FP4 storage plumbing is implemented and tested, but uncalibrated MXFP4 is not promoted. Next is calibrated residual metadata plus native RTX 5080 FP4 execution, followed by one fresh full-model quality/traffic gate.
+
+## 2026-08-15 -- Luna parallel NVFP4/cache follow-up
+
+- Implemented: `reference/glm5x_ref/nvfp4_batched.py`, the `grouped_nvfp4` layer/model switch, `--nvfp4-grouped`, and focused parity tests. The grouped API is an experimental CUDA kernel boundary and is not silently enabled for the full model.
+- Implemented: explicit protected-key tracking for `GLM5XExpertTensorCache(policy="layer_balanced")`. A RED regression reproduced protected-entry eviction; the focused suite is green after the fix.
+- Measured: grouped NVFP4 projection samples were variable (`0.783x` to `2.138x` versus sequential depending on expert count). The real sidecar admission/H2D probe measured roughly `89.505--102.677 ms` GPU-event time per expert, while gate/up projection itself was about `0.131 ms`; transfer/residency is the current dominant boundary.
+- Verification complete: full WSL Python regression passed `352 passed, 124 skipped` in `75.19 s` after the focused `38 passed` result.
+- Known blocker: the current full NVFP4 gate remains `0.0144835562212668` decode tok/s with final-token divergence from exact BF16. Ten tok/s is not achieved; the next concrete task is pinned asynchronous staging plus route-stable layer-window residency and separate sidecar/H2D telemetry.
+
+## 2026-08-15 -- Verified packed-sidecar host tier
+
+- Implemented `GLM5XPackedExpertCache(host_cache_capacity_bytes=...)` and the CLI flag `--expert-packed-host-cache-bytes`. The tier retains only validated metadata/payload pairs in a bounded RAM LRU; capacity `0` is the exact previous behavior, and decoded CUDA residency remains a separate cache.
+- TDD evidence: the host-reuse regression failed on the missing constructor option, then passed after implementation. The full WSL Python suite passed `354 passed, 124 skipped` in `79.53 s`; changed modules compile successfully.
+- Real sidecar probe: 16 `.pgu` entries, 16 readers, RTX 5080. Host cache disabled measured `2.022659/1.954926 s` for two passes; 2 GiB host cache measured `1.714678/0.281999 s`, with 16 host hits and `629,145,728` resident payload bytes. This is not full-model tok/s.
+- A 40 GiB host sidecar cache plus a 40 GiB trunk cache was safely interrupted at approximately `72 GiB` WSL RSS before producing a full-gate result. Do not maximize both capacities independently on the 96 GB host.
+- Fixed the synthetic benchmark's existing `l2_expert_workers` forwarding omission. The requested CUDA prefetch smoke completed at `55.250838` synthetic decode tok/s versus `49.563953` synchronous; this is synthetic-only evidence.
+- Next bottleneck: integrate host-side sidecar reuse with route-stable layer-window admission and pinned/nonblocking H2D, then run a bounded full-layer quality gate before attempting another full 78-layer run.
+
+## 2026-08-15 -- Linux CUDA-less INT4 guard repair
+
+- GitHub correctness run `31884496150` exposed a CPU-only CI mismatch: the INT4 helper returned `RuntimeError(GLM5X_INT4_CUDA_UNAVAILABLE)` before the public CPU-target `ValueError(GLM5X_INT4_CUDA_REQUIRED)` contract. The explicit target/availability guard is fixed in `0d5621d`.
+- Local focused INT4/packed-cache/benchmark tests passed `9`, and the complete WSL Python suite passed `354 passed, 124 skipped` in `78.52 s`. Public correctness and C++/Python CodeQL all pass on the current PR head.
+
+## 2026-08-15 -- Protected residency and pinned staging milestone
+
+- Current implementation commit: `49c386b` (`perf: add protected residency and pinned staging`). The C++ runtime now has a byte-bounded resident-weight LRU with explicit per-layer protected access sets. The Python packed-sidecar cache has an opt-in page-locked staging pool and non-blocking CUDA transfer mode.
+- Defaults and correctness boundary are unchanged. Natural routing, exact BF16, synchronous sidecar loading, and zero-capacity caches remain the reference path. Pinned staging requires a packed expert precision, a positive capacity, and one expert reader; BF16 misuse is rejected.
+- Verification: WSL CUDA build succeeded; CTest `27/27` passed; focused Python `26 passed, 6 skipped`; full WSL Python `356 passed, 124 skipped` in `77.29 s`; changed-module `py_compile` and `git diff --check` passed.
+- Bounded measurements: the synthetic C++ residency fixture kept exact token IDs `[43, 32]` under 4 KiB and 1 MiB budgets, but the larger budget did not improve median latency. Real layer-10 pinned sidecar staging was slower on first use (`5.606441 s`) and slightly faster on the repeated bounded call (`3.370938 s` versus `3.469007 s` synchronous). No full-model rerun or quality promotion was made.
+- Latest full-model truth remains exact BF16 `0.010559 tok/s` in the best measured resident-trunk/host configuration and NVFP4 `0.014484 tok/s` in the latest quality-rejected gate. The 10--20 tok/s target is not achieved, and no projected number is recorded as measured.
+
+## In progress
+
+- Replace the current per-layer residency boundary with route-stable multi-layer lookahead and a pooled asynchronous sidecar/H2D scheduler. Add separate sidecar bytes, H2D bytes/time, physical NVMe sampling, eviction counts, and deadline misses before another 78-layer gate.
+- Connect the exact GLM MLA/DSA hidden-state path to the C++ expert-major backend and final logits, then run a quality gate before enabling any FP4 or adaptive Top-K mode.
+
+## Known blockers
+
+- Pinned staging currently improves the CUDA event component in an isolated transport probe but can worsen wall time when staging buffers are allocated per sample. It is a boundary for future reuse, not a proven full-model optimization.
+- The C++ resident table still owns one active access context per backend/table. Concurrent forwards sharing one `RuntimeSession` are not a supported contract until the context is made per-forward or the session is serialized.
+- The full-model bottleneck remains expert sidecar admission/H2D and trunk residency. Existing logical expert traffic is tens of GB per token, so isolated sub-millisecond projection results cannot reach 10 tok/s without a residency/traffic change.
+
+## Last known-good test state
+
+- Commit `49c386b`; WSL CUDA CMake build and CTest `27/27` green; full WSL Python `356 passed, 124 skipped`; no cloud or paid resources used.

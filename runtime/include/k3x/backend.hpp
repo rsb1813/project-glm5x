@@ -173,6 +173,8 @@ public:
     virtual BackendKind kind() const noexcept = 0;
     virtual const BackendOptions& options() const noexcept = 0;
     virtual BackendRuntimeStats runtime_stats() const noexcept = 0;
+    virtual void begin_resident_access_set(
+        std::uint64_t, std::span<const Mxfp4MlpView>) {}
     virtual Result<std::vector<float>> dense_matvec(
         std::span<const float> input, DenseWeightView weight,
         std::uint32_t layer, ProfilePhase phase) = 0;

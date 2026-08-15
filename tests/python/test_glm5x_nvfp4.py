@@ -9,6 +9,8 @@ from glm5x_ref.nvfp4 import (
     dequantize_nvfp4,
     linear_nvfp4,
     linear_nvfp4_pair,
+    linear_nvfp4_pair_from_activation,
+    quantize_nvfp4_activation,
     quantize_nvfp4_weight,
 )
 
@@ -60,3 +62,22 @@ def test_nvfp4_gate_up_pair_reuses_activation_quantization() -> None:
     individual_up = linear_nvfp4(hidden, up)
     assert torch.allclose(paired_gate, individual_gate, atol=2e-2, rtol=2e-2)
     assert torch.allclose(paired_up, individual_up, atol=2e-2, rtol=2e-2)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_nvfp4_prequantized_activation_matches_pair() -> None:
+    torch.manual_seed(53)
+    gate = quantize_nvfp4_weight(
+        torch.randn(128, 256, dtype=torch.bfloat16, device="cuda"), device="cuda"
+    )
+    up = quantize_nvfp4_weight(
+        torch.randn(128, 256, dtype=torch.bfloat16, device="cuda"), device="cuda"
+    )
+    hidden = torch.randn(1, 256, dtype=torch.bfloat16, device="cuda")
+    activation = quantize_nvfp4_activation(hidden)
+    actual_gate, actual_up = linear_nvfp4_pair_from_activation(
+        activation, gate, up
+    )
+    expected_gate, expected_up = linear_nvfp4_pair(hidden, gate, up)
+    assert torch.allclose(actual_gate, expected_gate, atol=2e-2, rtol=2e-2)
+    assert torch.allclose(actual_up, expected_up, atol=2e-2, rtol=2e-2)

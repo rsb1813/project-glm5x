@@ -242,6 +242,55 @@ def _quantize_cuda_activation(
     return packed, _to_blocked(raw_scales), global_scale
 
 
+def quantize_nvfp4_activation(
+    values: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Quantize one CUDA activation slab for reuse across NVFP4 projections."""
+    flat = torch.as_tensor(values).reshape(-1, values.shape[-1])
+    if flat.device.type != "cuda":
+        raise ValueError("GLM5X_NVFP4_ACTIVATION_CUDA_REQUIRED")
+    return _quantize_cuda_activation(flat)
+
+
+def linear_nvfp4_from_activation(
+    activation: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    weight: GLM5XNVFP4Weight,
+) -> torch.Tensor:
+    """Apply an already quantized CUDA activation to one NVFP4 weight."""
+    activation_packed, activation_blocked, activation_global = activation
+    if activation_packed.device.type != "cuda" or weight.device.type != "cuda":
+        raise ValueError("GLM5X_NVFP4_ACTIVATION_CUDA_REQUIRED")
+    if activation_packed.ndim != 2 or activation_packed.shape[1] * 2 != weight.shape[1]:
+        raise ValueError("GLM5X_NVFP4_ACTIVATION_SHAPE")
+    return _scaled_mm_nvfp4(
+        activation_packed, activation_blocked, activation_global, weight
+    )
+
+
+def linear_nvfp4_pair_from_activation(
+    activation: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    gate_weight: GLM5XNVFP4Weight,
+    up_weight: GLM5XNVFP4Weight,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply one quantized CUDA activation to gate and up NVFP4 weights."""
+    activation_packed, activation_blocked, activation_global = activation
+    if activation_packed.device.type != "cuda":
+        raise ValueError("GLM5X_NVFP4_ACTIVATION_CUDA_REQUIRED")
+    if (
+        activation_packed.ndim != 2
+        or activation_packed.shape[1] * 2 != gate_weight.shape[1]
+        or activation_packed.shape[1] * 2 != up_weight.shape[1]
+    ):
+        raise ValueError("GLM5X_NVFP4_ACTIVATION_SHAPE")
+    gate = _scaled_mm_nvfp4(
+        activation_packed, activation_blocked, activation_global, gate_weight
+    )
+    up = _scaled_mm_nvfp4(
+        activation_packed, activation_blocked, activation_global, up_weight
+    )
+    return gate, up
+
+
 def linear_nvfp4(
     values: torch.Tensor,
     weight: GLM5XNVFP4Weight,

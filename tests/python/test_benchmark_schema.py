@@ -476,6 +476,22 @@ def test_benchmark_once_collects_cpu_backend_profile(
     assert record.speculative_acceptance_rate is None
 
 
+def test_benchmark_once_accepts_l2_expert_workers(
+    synthetic_source: Path, tmp_path: Path
+) -> None:
+    artifact = tmp_path / "synthetic.k3x"
+    convert(synthetic_source, artifact, chunk_bytes=257)
+    record = benchmark_once(
+        artifact,
+        cpp_binary("k3x_run"),
+        warmup=0,
+        iterations=1,
+        backend="cpu",
+        l2_expert_workers=1,
+    )
+    assert record.backend == "cpu"
+
+
 def test_benchmark_once_collects_scripted_speculative_telemetry(
     synthetic_source: Path, tmp_path: Path
 ) -> None:

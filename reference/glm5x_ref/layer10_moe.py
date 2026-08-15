@@ -21,8 +21,11 @@ from .nvfp4 import (
     GLM5XNVFP4Weight,
     linear_nvfp4,
     linear_nvfp4_pair,
+    linear_nvfp4_pair_from_activation,
+    quantize_nvfp4_activation,
     quantize_nvfp4_weight,
 )
+from .nvfp4_batched import linear_nvfp4_gate_up_batched_from_activation
 from k3x_ref.mxfp4 import decode_mxfp4, encode_mxfp4
 from .packed_cache import GLM5XPackedExpertCache
 
@@ -101,17 +104,36 @@ class GLM5XExpertTensorCacheStats:
 class GLM5XExpertTensorCache:
     """Bounded exact decoded expert tensors shared across layer objects."""
 
-    def __init__(self, capacity_bytes: int) -> None:
+    def __init__(
+        self,
+        capacity_bytes: int,
+        *,
+        policy: str = "lru",
+        protected_entries_per_layer: int = 0,
+    ) -> None:
         if (
             not isinstance(capacity_bytes, int)
             or isinstance(capacity_bytes, bool)
             or capacity_bytes <= 0
         ):
             raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_CAPACITY")
+        if policy not in {"lru", "layer_balanced"}:
+            raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_POLICY")
+        if (
+            not isinstance(protected_entries_per_layer, int)
+            or isinstance(protected_entries_per_layer, bool)
+            or protected_entries_per_layer < 0
+        ):
+            raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
+        if policy == "layer_balanced" and protected_entries_per_layer <= 0:
+            raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
         self.capacity_bytes = capacity_bytes
+        self.policy = policy
+        self.protected_entries_per_layer = protected_entries_per_layer
         self._entries: OrderedDict[
             tuple[int, int], tuple[GLM5XExpertWeights, int]
         ] = OrderedDict()
+        self._protected_by_layer: dict[int, set[tuple[int, int]]] = {}
         self._resident_bytes = 0
         self._hits = 0
         self._misses = 0
@@ -145,11 +167,44 @@ class GLM5XExpertTensorCache:
             previous = self._entries.pop(key, None)
             if previous is not None:
                 self._resident_bytes -= previous[1]
-            while self._entries and self._resident_bytes + size > self.capacity_bytes:
-                _, (_, evicted_size) = self._entries.popitem(last=False)
-                self._resident_bytes -= evicted_size
-                self._evictions += 1
+            protected = self._protected_by_layer.setdefault(int(key[0]), set())
+            was_protected = key in protected
+            if self.policy == "layer_balanced":
+                while self._resident_bytes + size > self.capacity_bytes:
+                    candidate = None
+                    for existing_key in self._entries:
+                        layer_count = sum(
+                            1
+                            for layer_key in self._entries
+                            if int(layer_key[0]) == int(existing_key[0])
+                        )
+                        if (
+                            layer_count > self.protected_entries_per_layer
+                            and existing_key
+                            not in self._protected_by_layer.get(int(existing_key[0]), set())
+                        ):
+                            candidate = existing_key
+                            break
+                    if candidate is None:
+                        if previous is not None:
+                            self._entries[key] = previous
+                            self._resident_bytes += previous[1]
+                        return
+                    _, evicted_size = self._entries.pop(candidate)
+                    self._resident_bytes -= evicted_size
+                    self._protected_by_layer.get(int(candidate[0]), set()).discard(candidate)
+                    self._evictions += 1
+            else:
+                while self._entries and self._resident_bytes + size > self.capacity_bytes:
+                    _, (_, evicted_size) = self._entries.popitem(last=False)
+                    self._resident_bytes -= evicted_size
+                    self._evictions += 1
             self._entries[key] = (expert, size)
+            if (
+                self.policy == "layer_balanced"
+                and (was_protected or len(protected) < self.protected_entries_per_layer)
+            ):
+                protected.add(key)
             self._resident_bytes += size
 
     @property
@@ -315,6 +370,7 @@ class GLM5XLayer10MoEReference:
         trunk_precision: str = "bf16",
         proxy_mode: str = "none",
         proxy_top_k: int | None = None,
+        grouped_nvfp4: bool = False,
     ) -> None:
         router_weight = torch.as_tensor(router_weight)
         correction_bias = torch.as_tensor(correction_bias)
@@ -339,6 +395,8 @@ class GLM5XLayer10MoEReference:
             raise ValueError("GLM5X_INVALID_ROUTED_SCALE")
         if not isinstance(cache_experts, bool):
             raise ValueError("GLM5X_INVALID_EXPERT_CACHE_FLAG")
+        if not isinstance(grouped_nvfp4, bool):
+            raise ValueError("GLM5X_INVALID_GROUPED_NVFP4_FLAG")
         if execution_mode not in {"loop", "expert_major"}:
             raise ValueError("GLM5X_INVALID_EXECUTION_MODE")
         if expert_precision not in {"bf16", "fp8", "int4", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
@@ -395,6 +453,7 @@ class GLM5XLayer10MoEReference:
         self.expert_precision = expert_precision
         self.proxy_mode = proxy_mode
         self.proxy_top_k = proxy_top_k
+        self.grouped_nvfp4 = grouped_nvfp4
         self._expert_cache: dict[int, GLM5XExpertWeights] = {}
 
     @property
@@ -612,6 +671,10 @@ class GLM5XLayer10MoEReference:
                 if isinstance(weight, torch.Tensor) and weight.device.type == "cuda":
                     target = weight.device
                     break
+        if target is not None and target.type != "cuda":
+            raise ValueError("GLM5X_INT4_CUDA_REQUIRED")
+        if not torch.cuda.is_available():
+            raise ValueError("GLM5X_INT4_CUDA_REQUIRED")
         return GLM5XExpertWeights(
             gate_proj=quantize_int4_weight(torch.as_tensor(weights[0]), device=target),
             up_proj=quantize_int4_weight(torch.as_tensor(weights[1]), device=target),
@@ -674,6 +737,26 @@ class GLM5XLayer10MoEReference:
             up = linear(hidden, expert.up_proj)
         return linear(F.silu(gate) * up, expert.down_proj)
 
+    @staticmethod
+    def _mlp_with_prequantized_activation(
+        hidden: torch.Tensor,
+        expert: GLM5XExpertWeights,
+        activation: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None,
+    ) -> torch.Tensor:
+        if (
+            activation is None
+            or not isinstance(expert.gate_proj, GLM5XNVFP4Weight)
+            or not isinstance(expert.up_proj, GLM5XNVFP4Weight)
+        ):
+            return GLM5XLayer10MoEReference._mlp(hidden, expert)
+        gate, up = linear_nvfp4_pair_from_activation(
+            activation, expert.gate_proj, expert.up_proj
+        )
+        routed = F.silu(gate) * up
+        if isinstance(expert.down_proj, GLM5XNVFP4Weight):
+            return linear_nvfp4(routed, expert.down_proj)
+        return linear(routed, expert.down_proj)
+
     def _route(self, hidden: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         router = self.router_weight.to(device=hidden.device, dtype=torch.float32)
         bias = self.correction_bias.to(device=hidden.device, dtype=torch.float32)
@@ -716,11 +799,47 @@ class GLM5XLayer10MoEReference:
         exact_weights = topk_weights[:, : self.proxy_top_k]
         expert_ids = [int(value) for value in torch.unique(exact_indices, sorted=True)]
         experts, loaded = self._load_experts(expert_ids)
+        shared_activation = None
+        if (
+            flat.shape[0] == 1
+            and flat.device.type == "cuda"
+            and all(
+                isinstance(experts[expert_id].gate_proj, GLM5XNVFP4Weight)
+                and isinstance(experts[expert_id].up_proj, GLM5XNVFP4Weight)
+                for expert_id in expert_ids
+            )
+        ):
+            shared_activation = quantize_nvfp4_activation(flat)
+        grouped_routed: dict[int, torch.Tensor] = {}
+        if self.grouped_nvfp4 and shared_activation is not None and len(expert_ids) > 1:
+            gate_weights = tuple(experts[expert_id].gate_proj for expert_id in expert_ids)
+            up_weights = tuple(experts[expert_id].up_proj for expert_id in expert_ids)
+            if all(
+                isinstance(weight, GLM5XNVFP4Weight)
+                for weight in gate_weights + up_weights
+            ):
+                grouped_gate, grouped_up = linear_nvfp4_gate_up_batched_from_activation(
+                    shared_activation, gate_weights, up_weights
+                )
+                grouped_routed = {
+                    expert_id: F.silu(grouped_gate[0, index]) * grouped_up[0, index]
+                    for index, expert_id in enumerate(expert_ids)
+                }
         for expert_id in expert_ids:
             expert = experts[expert_id]
             slot_mask = exact_indices == expert_id
             token_indices, slots = torch.where(slot_mask)
-            routed = self._mlp(flat[token_indices], expert)
+            if grouped_routed:
+                routed_input = grouped_routed[expert_id]
+                routed = (
+                    linear_nvfp4(routed_input, expert.down_proj)
+                    if isinstance(expert.down_proj, GLM5XNVFP4Weight)
+                    else linear(routed_input, expert.down_proj)
+                )
+            else:
+                routed = self._mlp_with_prequantized_activation(
+                    flat[token_indices], expert, shared_activation
+                )
             weighted = routed * exact_weights[token_indices, slots].to(
                 routed.dtype
             ).unsqueeze(-1)
@@ -874,6 +993,7 @@ class GLM5XLayer10MoEReference:
         trunk_precision: str = "bf16",
         proxy_mode: str = "none",
         proxy_top_k: int | None = None,
+        grouped_nvfp4: bool = False,
     ) -> "GLM5XLayer10MoEReference":
         bundle = GLM5XExpertBundle.open(
             bundle_path,
@@ -902,6 +1022,7 @@ class GLM5XLayer10MoEReference:
             trunk_precision=trunk_precision,
             proxy_mode=proxy_mode,
             proxy_top_k=proxy_top_k,
+            grouped_nvfp4=grouped_nvfp4,
         )
 
     @classmethod
@@ -929,6 +1050,7 @@ class GLM5XLayer10MoEReference:
         trunk_precision: str = "bf16",
         proxy_mode: str = "none",
         proxy_top_k: int | None = None,
+        grouped_nvfp4: bool = False,
     ) -> "GLM5XLayer10MoEReference":
 
         prefix = f"model.layers.{layer_id}.mlp"
@@ -1005,6 +1127,7 @@ class GLM5XLayer10MoEReference:
                     source_digest,
                     device=target if target is not None else "cuda",
                     precision=expert_precision,
+                    non_blocking=packed_expert_cache.non_blocking,
                 )
                 if cached is not None:
                     if expert_device_cache is not None:
@@ -1048,23 +1171,45 @@ class GLM5XLayer10MoEReference:
             try:
                 payload_pending: list[int] = []
                 source_digests: dict[int, str] = {}
-                for expert_id in pending:
-                    if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
-                        digest = bundle.expert_source_digest(layer_id, expert_id)
-                        cached = packed_expert_cache.get(
-                            (layer_id, expert_id),
-                            digest,
-                            device=target if target is not None else "cuda",
-                            precision=expert_precision,
-                        )
-                        if cached is not None:
-                            result[expert_id] = cached
-                            if expert_device_cache is not None:
-                                expert_device_cache.put((layer_id, expert_id), cached)
-                            continue
-                        source_digests[expert_id] = digest
-                    payload_pending.append(expert_id)
-                payload_map = bundle.read_experts(layer_id, payload_pending)
+                packed_precisions = {
+                    "int4",
+                    "fp8",
+                    "mxfp4",
+                    "nvfp4",
+                    "nvfp4_gate_up",
+                }
+                if packed_expert_cache is not None and expert_precision in packed_precisions:
+                    source_digests = {
+                        expert_id: bundle.expert_source_digest(layer_id, expert_id)
+                        for expert_id in pending
+                    }
+                    cached_many = packed_expert_cache.get_many(
+                        {
+                            (layer_id, expert_id): digest
+                            for expert_id, digest in source_digests.items()
+                        },
+                        device=target if target is not None else "cuda",
+                        precision=expert_precision,
+                        workers=expert_load_workers,
+                        non_blocking=packed_expert_cache.non_blocking,
+                    )
+                    for (cached_layer, expert_id), cached in cached_many.items():
+                        if cached_layer != layer_id:
+                            raise K3XError(
+                                "GLM5X_LAYER_EXPERT_CACHE_LAYER_MISMATCH",
+                                str(cached_layer),
+                            )
+                        result[expert_id] = cached
+                        if expert_device_cache is not None:
+                            expert_device_cache.put((layer_id, expert_id), cached)
+                payload_pending = [
+                    expert_id for expert_id in pending if expert_id not in result
+                ]
+                payload_map = (
+                    bundle.read_experts(layer_id, payload_pending)
+                    if payload_pending
+                    else {}
+                )
             except (KeyError, K3XError) as exc:
                 missing = pending[0] if pending else -1
                 raise K3XError(
@@ -1112,6 +1257,7 @@ class GLM5XLayer10MoEReference:
             expert_precision=expert_precision,
             proxy_mode=proxy_mode,
             proxy_top_k=proxy_top_k,
+            grouped_nvfp4=grouped_nvfp4,
         )
 
     @classmethod

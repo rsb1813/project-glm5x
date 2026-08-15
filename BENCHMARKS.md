@@ -1,5 +1,20 @@
 # GLM5X Benchmarks
 
+## 2026-08-15 -- Verified packed-sidecar host-cache boundary
+
+- Commit: `ad3b033`; hardware: RTX 5080 16 GB, WSL2 CUDA 13.0, PyTorch 2.13.0; model/checkpoint: official GLM-5.2 `.pgu` sidecars; context: 16 distinct real `(layer, expert)` entries, `expert_load_workers=16`, CUDA target, two sequential admissions.
+- Mode A, host cache disabled: first pass `2.022659 s`, second pass `1.954926 s`, host hits `0`, host resident bytes `0`.
+- Mode B, bounded verified host cache `2,147,483,648` bytes: first pass `1.714678 s`, second pass `0.281999 s`, host hits `16`, host misses `16`, host resident bytes `629,145,728` bytes. The packed cache still performs exact role decoding and H2D on each pass; the measured reduction is file/JSON/CRC work only.
+- Decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, physical NVMe GB/token, H2D GB/token, speculative acceptance, and final-token quality: not applicable to this 16-sidecar boundary. No 10--20 tok/s claim is made.
+- Safety note: a separate full-gate attempt with `40 GiB` packed host capacity plus `40 GiB` trunk capacity reached approximately `72 GiB` WSL RSS before a result and was stopped; it is not a benchmark record.
+
+## 2026-08-15 -- Synthetic CUDA prefetch forwarding smoke
+
+- Commit: `ad3b033`; hardware: RTX 5080 16 GB, WSL2 CUDA 13.0; model/checkpoint: synthetic K3X fixture; context: four prompt tokens and six generated tokens, two measured iterations, grouped CUDA FFN boundary.
+- Synchronous transfer: decode `49.563953 tok/s`, prefill `19.685733 tok/s`, zero async calls.
+- Pinned asynchronous transfer: decode `55.250838 tok/s`, prefill `24.460513 tok/s`, `27` async prefetch calls, `27` ready-before-use, `0` late-at-use. The paired synthetic output/token and numerical-error checks passed.
+- This is only a synthetic runtime smoke result and exercises the existing C++ async pipeline; it is not an official GLM-5.2 full-model throughput result. The benchmark's `l2_expert_workers` forwarding regression is included in the same commit.
+
 ## 2026-08-15 -- RTX 5080 NVFP4 native scaled-GEMM and mixed-precision gate
 
 - Commit: `1db2e0a` (the implementation and documentation were committed after the layer gate; the full gate below was rerun from this commit).
@@ -957,3 +972,40 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Focused sidecar/bundle/layer/model/MoE/schema suite: `32 passed, 6 skipped`.
 - Changed-module `py_compile` and `git diff --check`: passed.
 - No full-model rerun was started because the prior exact/INT4 gates already take several minutes and the current sidecar evidence is intentionally bounded.
+
+## 2026-08-15 -- Luna RTX 5080 NVFP4 grouped-projection probe
+
+- Commit: working tree based on public head `0093480`; grouped implementation is uncommitted at measurement time.
+- Hardware/model: NVIDIA GeForce RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.0, official GLM-5.2 layer-10 `.pgu` sidecars for gate/up (`hidden=6144`, `intermediate=2048`). The activation was synthetic because no activation artifact is stored in the sidecar.
+- Mode: compare sequential per-expert gate/up scaled GEMMs with `nvfp4_batched.py`'s single concatenated scaled GEMM. This is a projection-only measurement; no decoder layer, logits, or model tok/s is included.
+- Measured samples: `4` experts `0.449 ms` grouped versus `0.412 ms` sequential (`0.917x`); `8` experts `2.708 ms` versus `4.382 ms` (`1.618x`); `16` experts `3.737 ms` versus `7.989 ms` (`2.138x`); `24` experts `2.886 ms` versus `2.258 ms` (`0.783x`). A second short sample for `8` experts/one token was `0.973 ms` grouped versus `0.898 ms` sequential, showing launch/clock variance.
+- Correctness: the new CPU test passed `5/5`; the CUDA parity probe was bit-equal for the tested shapes with relative error `0.0`. The primitive is retained as an experimental ablation, not enabled as a full-model default.
+- Boundary: down projections remain BF16 in gate/up-only mode, and no H2D, sidecar, full-layer, TTFT, or end-to-end tok/s improvement is claimed from this probe.
+
+## 2026-08-15 -- Luna RTX 5080 sidecar-transfer bottleneck probe
+
+- Hardware/model: same RTX 5080/WSL2 and real layer-10 `.pn4` expert sidecar (`21,234,842` bytes, `M=1`, `K=6144`, `N=2048`).
+- Sidecar reuse timing: three `cache.get` samples including GPU event timing were `102.677`, `95.659`, and `89.505 ms`; wall times including file/JSON/CRC/decode/H2D were `107.534`, `100.173`, and `93.738 ms`. The H2D/device admission dominates the observed expert load; the current path is synchronous and uses pageable host tensors.
+- Kernel timing: input activation quantization `0.583008 ms`; gate/up projections `0.131 ms` combined; down activation quantization `2.621888 ms`; down prequantized projection `0.364576 ms`; current dynamic down path `2.790816 ms`.
+- Full-gate cross-check: the existing 78-layer gate measured `0.0144835562212668` decode tok/s (`138.08763327499 s` for two decode tokens), `1,779` packed-sidecar hits, `1,670` device-cache evictions, and `12,370,165,248` bytes peak allocated VRAM. Sidecar file traffic and H2D are outside the logical K3X counters.
+- Conclusion: grouped projection and activation sharing are secondary to persistent layer-window residency, pinned staging, asynchronous H2D, and separate sidecar/H2D telemetry. These are measured bottlenecks, not a 10 tok/s result.
+
+## 2026-08-15 -- Layer-balanced cache protection regression
+
+- A new regression first failed because the count-only `layer_balanced` policy evicted `(layer=0, expert=0)` even though it was the layer's protected entry. The implementation now tracks protected keys explicitly and excludes them from eviction candidates.
+- Verification: the focused layer/cache/NVFP4/model suite passed `38` tests, including the grouped-runtime parity test and `5` grouped-NVFP4 primitive tests. The complete WSL2 regression then passed `352 passed, 124 skipped` in `75.19 s`.
+
+## 2026-08-15 -- Protected C++ resident-cache boundary
+
+- Commit: `49c386b`; hardware: RTX 5080 16 GB, WSL2 CUDA 13.0; model/checkpoint: synthetic K3X fixture; context: four prompt IDs and two generated tokens, CUDA custom backend, grouped FFN boundary.
+- A 4 KiB resident budget produced exact token IDs `[43, 32]` in three runs with decode medians `17.018/15.932/19.230 ms`, `350` misses, `240` bypasses, `2,767,680` weight-H2D bytes, `3,264` resident bytes, and `4,096` peak resident bytes.
+- A 1 MiB budget produced the same exact token IDs with decode medians `17.116/14.849/19.032 ms`, `253` hits, `97` misses, `568,224` weight-H2D bytes, and `568,224` resident bytes. The larger budget was not faster in this compute-dominated synthetic fixture; the result validates eviction safety, not end-to-end GLM throughput.
+- The CUDA residency suite passed `27/27`. Full-model decode tok/s, prefill tok/s, TTFT, physical NVMe GB/token, H2D GB/token, and coding-quality metrics are not applicable to this synthetic boundary.
+
+## 2026-08-15 -- Pinned packed-sidecar staging boundary
+
+- Commit: `49c386b`; hardware: RTX 5080 16 GB, WSL2 CUDA 13.0/PyTorch 2.13.0; model/checkpoint: real GLM-5.2 layer-10 `.pgu` sidecars; context: two-token bounded forwards, one expert reader, 1 GiB pinned staging capacity.
+- Synchronous reference samples were approximately `4.130233 s` first forward and `3.469007 s` repeated forward. The pinned/non-blocking path measured `5.606441 s` first forward and `3.370938 s` repeated forward, with `629,145,728` pinned bytes resident and `16` pinned-staging hits on the repeated call.
+- The repeated-call difference is a bounded cache/transport observation, not a layer or model throughput result. The first-use staging cost is material, and no full-model quality or final-token parity gate was rerun with this option.
+- Separate RTX 5080 transport samples for a 21,233,672-byte sidecar measured pageable `1.358 ms` GPU-event/`1.701 ms` wall versus pinned non-blocking `0.588 ms` GPU-event/`16.138 ms` wall when each sample allocated its own staging buffer. This demonstrates why pooled staging is required; it does not prove end-to-end overlap.
+- Python verification for the commit: focused `26 passed, 6 skipped`; full `356 passed, 124 skipped` in `77.29 s`; changed-module `py_compile` and `git diff --check` passed. No 10--20 tok/s claim is made.

@@ -214,6 +214,23 @@ public:
 
     BackendKind kind() const noexcept override { return options_.kind; }
     const BackendOptions& options() const noexcept override { return options_; }
+    void begin_resident_access_set(
+        std::uint64_t forward_cycle,
+        std::span<const Mxfp4MlpView> experts) override {
+        if (!resident_weights_) return;
+        std::vector<cuda::ResidentWeightKey> keys;
+        keys.reserve(experts.size() * 3);
+        const auto append = [&keys](const Mxfp4WeightView& weight) {
+            keys.push_back({weight.tensor_id, cuda::WeightRepresentation::mxfp4,
+                            weight.rows, weight.cols, weight.group_size});
+        };
+        for (const auto& expert : experts) {
+            append(expert.gate);
+            append(expert.up);
+            append(expert.down);
+        }
+        resident_weights_->begin_access_set(forward_cycle, keys);
+    }
     BackendRuntimeStats runtime_stats() const noexcept override {
         return runtime_stats_;
     }

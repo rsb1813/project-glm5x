@@ -168,6 +168,8 @@ public:
         auto working_state = committed_state;
 
         for (std::size_t layer = 0; layer < config_.layers; ++layer) {
+            backend_.begin_resident_access_set(
+                active_forward_cycle_, std::span<const Mxfp4MlpView>{});
             const auto layer_start = std::chrono::steady_clock::now();
             std::vector<Vector> prefix_sums(tokens.size());
             std::vector<Vector> ffn_inputs(tokens.size());
@@ -290,6 +292,19 @@ public:
                 expert_store_.begin_access_set(
                     active_forward_cycle_, layer, selected);
 
+                std::vector<ExpertPayloadHandle> payloads;
+                payloads.reserve(plan.value().groups.size());
+                std::vector<Mxfp4MlpView> expert_views;
+                expert_views.reserve(plan.value().groups.size());
+                for (const auto& group : plan.value().groups) {
+                    const auto payload = load_expert(layer, group.expert_id);
+                    ++result.payload_loads;
+                    payloads.push_back(payload);
+                    expert_views.push_back(payload->view(config_.group_size));
+                }
+                backend_.begin_resident_access_set(
+                    active_forward_cycle_, expert_views);
+
                 std::vector<std::vector<Vector>> routed_outputs(
                     tokens.size());
                 for (std::size_t position = 0; position < tokens.size();
@@ -297,9 +312,10 @@ public:
                     routed_outputs[position].resize(
                         token_routes[position].expert_ids.size());
                 }
-                for (const auto& group : plan.value().groups) {
-                    const auto payload = load_expert(layer, group.expert_id);
-                    ++result.payload_loads;
+                for (std::size_t group_index = 0;
+                     group_index < plan.value().groups.size(); ++group_index) {
+                    const auto& group = plan.value().groups[group_index];
+                    const auto& payload = payloads[group_index];
                     if (backend_.kind() == BackendKind::cuda_custom) {
                         std::vector<float> flat_inputs;
                         flat_inputs.reserve(
@@ -428,6 +444,8 @@ public:
                       embedding.begin() + (token + 1) * config_.hidden);
         std::vector<Vector> sources;
         for (std::size_t layer = 0; layer < config_.layers; ++layer) {
+            backend_.begin_resident_access_set(
+                active_forward_cycle_, std::span<const Mxfp4MlpView>{});
             const auto layer_start = std::chrono::steady_clock::now();
             const auto prefix = hidden;
             Vector attention_input = sources.empty()
@@ -1001,6 +1019,8 @@ private:
             for (const auto& payload : payloads) {
                 expert_views.push_back(payload->view(config_.group_size));
             }
+            backend_.begin_resident_access_set(
+                active_forward_cycle_, expert_views);
             std::vector<float> contributions;
             contributions.reserve(selected_k);
             for (std::size_t slot = 0; slot < selected_k; ++slot) {

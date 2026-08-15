@@ -706,3 +706,59 @@
 - Evidence: resident RTX 5080 GLM-shaped microbenchmark averaged `0.0007789301977027208 s` paired versus `0.0014070075005292893 s` independent (`1.8063332307297124x`); parity test passed and the full suite was `341 passed, 124 skipped`.
 - Accepted because: it is local, correctness-preserving, and removes duplicated activation work without changing routing or quantized weights.
 - Revisit: after a full clean NVFP4 gate; the microbenchmark is not an end-to-end TPS claim.
+
+## D-0089 -- Keep grouped NVFP4 projection experimental
+
+- Decision: add and test `nvfp4_batched.py` as a selectable kernel boundary, but do not silently replace the full-model loop scheduler with it yet.
+- Alternatives: enable grouped gate/up for every NVFP4 token, discard the prototype because transfer dominates, or implement a larger fused expert-major scheduler first.
+- Evidence: CUDA parity was bit-equal on the tested shapes. Real RTX 5080 layer-10 samples ranged from `0.783x` to `2.138x` versus sequential gate/up depending on expert count, while the full gate is dominated by roughly `90--100 ms` sidecar admission/H2D per expert and measured `0.0144836` decode tok/s.
+- Accepted because: the primitive is small, independently tested, and preserves an exact fallback, but the data does not justify making a variable projection microbenchmark the default end-to-end path.
+- Revisit: after pinned/asynchronous staging and a layer-window residency scheduler provide a clean full-layer and full-model comparison.
+
+## D-0090 -- Make layer-balanced protection explicit
+
+- Decision: represent protected `(layer, expert)` keys explicitly in `GLM5XExpertTensorCache`; a protected key is never selected as an eviction candidate while a non-protected overrepresented entry exists.
+- Alternatives: keep the count-only heuristic, pin all entries from a layer, or increase the device-cache capacity without changing policy.
+- Evidence: the RED regression reproduced eviction of `(0,0)` after `(0,0)`, `(0,1)`, `(1,0)`, and `(0,2)` were admitted with one protected entry per layer. A larger synthetic multi-layer trace also produced zero second-pass hits under the old heuristic.
+- Accepted because: it fixes the stated policy invariant without changing LRU behavior or natural routing. It does not claim that a 4 GiB cache can hold the full expert working set.
+- Revisit: after route-stable hot-bank selection and a full-model trace show how many protected entries per layer fit the 16 GiB VRAM budget.
+
+## D-0091 -- Add a bounded verified packed-sidecar host tier
+
+- Decision: add `--expert-packed-host-cache-bytes` as an opt-in RAM LRU for already validated packed sidecar payloads. Keep the default at zero, keep decoded GPU residency separate, and reject capacities that are not explicitly budgeted with the trunk cache.
+- Alternatives: reread and CRC-check every sidecar request, cache all packed sidecars without a bound, or implement pinned H2D before eliminating repeated file/CRC work.
+- Evidence: on 16 real `.pgu` sidecars with 16 readers and an RTX 5080, the first 2 GiB host-cache pass took `1.715 s` and the second pass `0.282 s`; `16` host hits retained `629,145,728` payload bytes. A 40 GiB host tier plus a 40 GiB trunk tier reached approximately `72 GiB` WSL RSS before a two-token full gate produced a result and was stopped safely.
+- Accepted because: the cache preserves source digest, role metadata, CRC validation on first admission, exact decoder output, and a zero-capacity reference mode while removing repeated NVMe/JSON/CRC work for warm sessions.
+- Revisit: after a route-stable multi-layer trace reports host hit rate, physical NVMe bytes, H2D bytes, RSS, and final-token parity. Do not treat the bounded sidecar result as full-model tok/s.
+
+## D-0092 -- Repair the synthetic benchmark worker-option forwarding
+
+- Decision: thread `l2_expert_workers` through `benchmark_once()` and every reference/diagnostic invocation so the CLI option no longer fails before running.
+- Alternatives: remove the CLI option, silently ignore it, or leave the benchmark runner broken and rely on direct binary calls.
+- Evidence: the CLI previously raised `TypeError: benchmark_once() got an unexpected keyword argument 'l2_expert_workers'`; the RED regression reproduced it, the focused test passed after the one-parameter forwarding fix, and the CUDA synthetic prefetch benchmark completed with its requested worker count.
+- Accepted because: it restores an existing benchmark contract without changing runtime semantics. The synthetic prefetch measurement is recorded separately and is not a GLM full-model claim.
+- Revisit: if benchmark schema generation changes again, add a direct CLI smoke test rather than relying only on function-level coverage.
+
+## D-0093 -- Normalize the INT4 guard on CUDA-less CI
+
+- Decision: reject INT4 quantization with `ValueError(GLM5X_INT4_CUDA_REQUIRED)` before entering the quantizer whenever the requested target is CPU or CUDA is unavailable.
+- Alternatives: let the lower-level quantizer raise its environment-specific `RuntimeError`, skip the test on CPU-only runners, or change the test contract.
+- Evidence: GitHub Linux run `31884496150` reproduced the mismatch as `RuntimeError: GLM5X_INT4_CUDA_UNAVAILABLE` for a test that requires the stable CPU-target `ValueError`. The focused regression passed after the guard, and the full local WSL suite remained `354 passed, 124 skipped`.
+- Accepted because: callers receive one stable API error independent of whether the host has CUDA, while CUDA-enabled packing behavior is unchanged.
+- Revisit: only if the public quantization API later adopts a distinct environment-error type across all precision paths.
+
+## D-0094 -- Protect the current layer's resident expert set
+
+- Decision: use an explicit per-layer access set in the C++ resident-weight table. Selected expert keys are protected before grouped execution, cache hits are touched, and only non-protected entries are eligible for byte-budget eviction. If every candidate is protected, admission bypasses rather than invalidating a live pointer.
+- Alternatives: keep the previous capacity-only bypass, evict by plain LRU during a grouped launch, or pin the whole resident table. The first two either thrash or can invalidate pointers collected before a launch; the last one violates the VRAM budget.
+- Evidence: the new CUDA unit test passes protected-first/second admission, all-protected bypass, explicit access protection, resident-byte accounting, and route/token parity. The synthetic 4 KiB and 1 MiB runs both produced exact token IDs; latency was statistically neutral (`17.018 ms` versus `17.116 ms` medians), so this is a safety/policy result rather than a speed claim.
+- Accepted because: it preserves correctness under constrained residency without changing natural routing or default capacity behavior.
+- Revisit: when a route-stable multi-layer trace supplies eviction counts, transition probabilities, and full-model H2D/quality measurements. A shared table still needs a per-forward context or session serialization before concurrent forwards are supported.
+
+## D-0095 -- Keep pinned sidecar staging explicit and default-off
+
+- Decision: add a bounded page-locked staging pool and non-blocking CUDA copy path to the packed sidecar cache, but require an explicit positive capacity and one expert reader. Reject pinned staging with BF16 precision or without a packed sidecar path.
+- Alternatives: always allocate pinned buffers, use non-blocking copies from pageable memory, or enable multiple reader threads immediately. The first increases RAM pressure for every run; the second cannot provide asynchronous H2D; the third risks stream/event lifetime races in the current cache implementation.
+- Evidence: the focused Python suite and full suite passed (`356 passed, 124 skipped`). On a real layer-10 bounded probe, the pinned path was slower on first use (`5.606441 s` versus `4.130233 s`) and slightly faster on the repeated forward (`3.370938 s` versus `3.469007 s`). A standalone RTX 5080 transport probe reduced GPU event time (`1.358 ms` to `0.588 ms`) but increased wall time when staging allocation was not pooled.
+- Accepted because: the feature creates a measurable, correctness-preserving boundary for future overlap while keeping the exact synchronous reference path unchanged.
+- Revisit: after pooled reuse across a layer window reports physical sidecar bytes, H2D bytes/time, host RSS, cache hits, and final-logit parity. It is not evidence for 10--20 tok/s by itself.

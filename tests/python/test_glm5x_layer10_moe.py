@@ -11,6 +11,7 @@ from glm5x_ref.layer10_moe import (
     GLM5XExpertWeights,
     GLM5XLayer10MoEReference,
 )
+from glm5x_ref.nvfp4 import quantize_nvfp4_weight
 
 
 def _weights(expert_id: int, *, hidden: int = 3, intermediate: int = 2) -> GLM5XExpertWeights:
@@ -243,6 +244,53 @@ def test_glm5x_decoded_expert_cache_tracks_exact_residency() -> None:
     assert stats.evictions == 0
 
 
+def test_glm5x_layer_balanced_cache_protects_one_entry_per_layer() -> None:
+    cache = GLM5XExpertTensorCache(
+        144, policy="layer_balanced", protected_entries_per_layer=1
+    )
+    cache.put((0, 0), _weights(0))
+    cache.put((1, 0), _weights(1))
+    cache.put((0, 1), _weights(2))
+
+    assert cache.get((0, 0)) is not None
+    assert cache.get((1, 0)) is not None
+    assert cache.get((0, 1)) is None
+    assert cache.stats.entries == 2
+
+
+def test_glm5x_layer_balanced_cache_evicts_only_an_overrepresented_layer() -> None:
+    cache = GLM5XExpertTensorCache(
+        216, policy="layer_balanced", protected_entries_per_layer=1
+    )
+    cache.put((0, 0), _weights(0))
+    cache.put((0, 1), _weights(1))
+    cache.put((1, 0), _weights(2))
+
+    cache.put((2, 0), _weights(3))
+
+    assert cache.stats.entries == 3
+    assert cache.stats.evictions == 1
+    assert sum(cache.get((0, expert_id)) is not None for expert_id in (0, 1)) == 1
+    assert cache.get((1, 0)) is not None
+    assert cache.get((2, 0)) is not None
+
+
+def test_glm5x_layer_balanced_cache_keeps_the_layer_protected_entry() -> None:
+    cache = GLM5XExpertTensorCache(
+        216, policy="layer_balanced", protected_entries_per_layer=1
+    )
+    cache.put((0, 0), _weights(0))
+    cache.put((0, 1), _weights(1))
+    cache.put((1, 0), _weights(2))
+
+    cache.put((0, 2), _weights(3))
+
+    assert cache.get((0, 0)) is not None
+    assert cache.get((0, 1)) is None
+    assert cache.get((0, 2)) is not None
+    assert cache.get((1, 0)) is not None
+
+
 def test_glm5x_fp8_expert_mlp_has_bounded_cpu_error() -> None:
     expert = _weights(0)
     quantized = GLM5XLayer10MoEReference._quantize_expert_fp8(expert)
@@ -279,3 +327,53 @@ def test_glm5x_int4_expert_quantizer_requires_cuda() -> None:
     )
     with pytest.raises(ValueError, match="GLM5X_INT4_CUDA_REQUIRED"):
         GLM5XLayer10MoEReference._quantize_expert_int4(expert, device="cpu")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_glm5x_nvfp4_grouped_loop_matches_per_expert_loop() -> None:
+    torch.manual_seed(151)
+    hidden_size = 64
+    intermediate_size = 32
+    device = torch.device("cuda")
+    experts = tuple(
+        GLM5XExpertWeights(
+            gate_proj=quantize_nvfp4_weight(
+                torch.randn(intermediate_size, hidden_size, device=device, dtype=torch.bfloat16),
+                device=device,
+            ),
+            up_proj=quantize_nvfp4_weight(
+                torch.randn(intermediate_size, hidden_size, device=device, dtype=torch.bfloat16),
+                device=device,
+            ),
+            down_proj=quantize_nvfp4_weight(
+                torch.randn(hidden_size, intermediate_size, device=device, dtype=torch.bfloat16),
+                device=device,
+            ),
+        )
+        for _ in range(4)
+    )
+    shared = GLM5XExpertWeights(
+        gate_proj=torch.randn(intermediate_size, hidden_size, device=device, dtype=torch.bfloat16),
+        up_proj=torch.randn(intermediate_size, hidden_size, device=device, dtype=torch.bfloat16),
+        down_proj=torch.randn(hidden_size, intermediate_size, device=device, dtype=torch.bfloat16),
+    )
+    kwargs = dict(
+        router_weight=torch.ones((4, hidden_size), device=device),
+        correction_bias=torch.zeros(4, device=device),
+        expert_loader=lambda expert_id: experts[expert_id],
+        shared_expert=shared,
+        top_k=4,
+        n_group=1,
+        topk_group=1,
+        cache_experts=False,
+    )
+    reference = GLM5XLayer10MoEReference(**kwargs, grouped_nvfp4=False)
+    grouped = GLM5XLayer10MoEReference(**kwargs, grouped_nvfp4=True)
+    hidden = torch.randn(1, hidden_size, device=device, dtype=torch.bfloat16)
+
+    expected = reference(hidden)
+    actual = grouped(hidden)
+
+    torch.testing.assert_close(actual.topk_indices, expected.topk_indices)
+    torch.testing.assert_close(actual.topk_weights, expected.topk_weights)
+    torch.testing.assert_close(actual.output, expected.output, rtol=0, atol=0)
