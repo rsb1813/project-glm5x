@@ -1,0 +1,661 @@
+{
+  "benchmark_id": "B-0004",
+  "boundary": "structured-real-sidecar-residency",
+  "bundle": "build-glm5x-full-k3x/glm5x-experts-full.json",
+  "bundle_sha256": "c75b96f8b7be54603fcd7755f7d821814116907cf6e0bc3f5b65f55a4dc741c8",
+  "device_cache_capacity_bytes": 805306368,
+  "experts_per_layer": 8,
+  "full_model_tps": null,
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "host_cache_capacity_bytes": 8589934592,
+  "layers": 16,
+  "passes": [
+    {
+      "device_cache": {
+        "bypasses": 112,
+        "evictions": 0,
+        "hits": 0,
+        "misses": 128,
+        "promotions": 0
+      },
+      "elapsed_nanoseconds": 35273268734,
+      "packed_cache": {
+        "decoded_payload_bytes": 5033165824,
+        "h2d_bytes": 5033165824,
+        "h2d_event_nanoseconds": 1170663292,
+        "h2d_submission_nanoseconds": 1204118362,
+        "hits": 128,
+        "host_capacity_bytes": 0,
+        "host_hits": 0,
+        "host_misses": 128,
+        "host_resident_bytes": 5033165824,
+        "misses": 0,
+        "pinned_staging_bytes": 0,
+        "pinned_staging_capacity_bytes": 0,
+        "pinned_staging_hits": 0,
+        "sidecar_read_bytes": 5033316197,
+        "sidecar_read_calls": 128,
+        "writes": 0
+      },
+      "pass": 1,
+      "resident_bytes": 629145728,
+      "resident_entries": 16
+    },
+    {
+      "device_cache": {
+        "bypasses": 112,
+        "evictions": 0,
+        "hits": 16,
+        "misses": 112,
+        "promotions": 0
+      },
+      "elapsed_nanoseconds": 3297889444,
+      "packed_cache": {
+        "decoded_payload_bytes": 4404020096,
+        "h2d_bytes": 4404020096,
+        "h2d_event_nanoseconds": 587826739,
+        "h2d_submission_nanoseconds": 593929874,
+        "hits": 112,
+        "host_capacity_bytes": 0,
+        "host_hits": 112,
+        "host_misses": 0,
+        "host_resident_bytes": 0,
+        "misses": 0,
+        "pinned_staging_bytes": 0,
+        "pinned_staging_capacity_bytes": 0,
+        "pinned_staging_hits": 0,
+        "sidecar_read_bytes": 0,
+        "sidecar_read_calls": 0,
+        "writes": 0
+      },
+      "pass": 2,
+      "resident_bytes": 629145728,
+      "resident_entries": 16
+    },
+    {
+      "device_cache": {
+        "bypasses": 112,
+        "evictions": 0,
+        "hits": 16,
+        "misses": 112,
+        "promotions": 0
+      },
+      "elapsed_nanoseconds": 3162173769,
+      "packed_cache": {
+        "decoded_payload_bytes": 4404020096,
+        "h2d_bytes": 4404020096,
+        "h2d_event_nanoseconds": 506354967,
+        "h2d_submission_nanoseconds": 507775254,
+        "hits": 112,
+        "host_capacity_bytes": 0,
+        "host_hits": 112,
+        "host_misses": 0,
+        "host_resident_bytes": 0,
+        "misses": 0,
+        "pinned_staging_bytes": 0,
+        "pinned_staging_capacity_bytes": 0,
+        "pinned_staging_hits": 0,
+        "sidecar_read_bytes": 0,
+        "sidecar_read_calls": 0,
+        "writes": 0
+      },
+      "pass": 3,
+      "resident_bytes": 629145728,
+      "resident_entries": 16
+    },
+    {
+      "device_cache": {
+        "bypasses": 112,
+        "evictions": 0,
+        "hits": 16,
+        "misses": 112,
+        "promotions": 0
+      },
+      "elapsed_nanoseconds": 3268563048,
+      "packed_cache": {
+        "decoded_payload_bytes": 4404020096,
+        "h2d_bytes": 4404020096,
+        "h2d_event_nanoseconds": 526445122,
+        "h2d_submission_nanoseconds": 531803269,
+        "hits": 112,
+        "host_capacity_bytes": 0,
+        "host_hits": 112,
+        "host_misses": 0,
+        "host_resident_bytes": 0,
+        "misses": 0,
+        "pinned_staging_bytes": 0,
+        "pinned_staging_capacity_bytes": 0,
+        "pinned_staging_hits": 0,
+        "sidecar_read_bytes": 0,
+        "sidecar_read_calls": 0,
+        "writes": 0
+      },
+      "pass": 4,
+      "resident_bytes": 629145728,
+      "resident_entries": 16
+    }
+  ],
+  "peak_cuda_allocated_bytes": 668484608,
+  "policy": "stable_hot_bank",
+  "precision": "nvfp4_gate_up",
+  "protected_entries_per_layer": 1,
+  "quality_claim": "cache-only exact payload identity; no model-logit claim",
+  "schema_version": 1,
+  "sidecar_dir": "build-glm5x-full-nvfp4-sidecars",
+  "torch_version": "2.13.0+cu130",
+  "trace": [
+    [
+      3,
+      4
+    ],
+    [
+      3,
+      11
+    ],
+    [
+      3,
+      15
+    ],
+    [
+      3,
+      17
+    ],
+    [
+      3,
+      19
+    ],
+    [
+      3,
+      26
+    ],
+    [
+      3,
+      34
+    ],
+    [
+      3,
+      41
+    ],
+    [
+      4,
+      6
+    ],
+    [
+      4,
+      24
+    ],
+    [
+      4,
+      37
+    ],
+    [
+      4,
+      44
+    ],
+    [
+      4,
+      51
+    ],
+    [
+      4,
+      60
+    ],
+    [
+      4,
+      66
+    ],
+    [
+      4,
+      71
+    ],
+    [
+      5,
+      11
+    ],
+    [
+      5,
+      23
+    ],
+    [
+      5,
+      32
+    ],
+    [
+      5,
+      47
+    ],
+    [
+      5,
+      50
+    ],
+    [
+      5,
+      57
+    ],
+    [
+      5,
+      71
+    ],
+    [
+      5,
+      86
+    ],
+    [
+      6,
+      16
+    ],
+    [
+      6,
+      36
+    ],
+    [
+      6,
+      37
+    ],
+    [
+      6,
+      57
+    ],
+    [
+      6,
+      73
+    ],
+    [
+      6,
+      80
+    ],
+    [
+      6,
+      105
+    ],
+    [
+      6,
+      111
+    ],
+    [
+      7,
+      0
+    ],
+    [
+      7,
+      4
+    ],
+    [
+      7,
+      13
+    ],
+    [
+      7,
+      21
+    ],
+    [
+      7,
+      26
+    ],
+    [
+      7,
+      28
+    ],
+    [
+      7,
+      51
+    ],
+    [
+      7,
+      55
+    ],
+    [
+      8,
+      4
+    ],
+    [
+      8,
+      19
+    ],
+    [
+      8,
+      21
+    ],
+    [
+      8,
+      25
+    ],
+    [
+      8,
+      43
+    ],
+    [
+      8,
+      68
+    ],
+    [
+      8,
+      86
+    ],
+    [
+      8,
+      96
+    ],
+    [
+      9,
+      2
+    ],
+    [
+      9,
+      4
+    ],
+    [
+      9,
+      15
+    ],
+    [
+      9,
+      22
+    ],
+    [
+      9,
+      30
+    ],
+    [
+      9,
+      31
+    ],
+    [
+      9,
+      69
+    ],
+    [
+      9,
+      71
+    ],
+    [
+      10,
+      21
+    ],
+    [
+      10,
+      35
+    ],
+    [
+      10,
+      36
+    ],
+    [
+      10,
+      45
+    ],
+    [
+      10,
+      48
+    ],
+    [
+      10,
+      51
+    ],
+    [
+      10,
+      52
+    ],
+    [
+      10,
+      57
+    ],
+    [
+      11,
+      26
+    ],
+    [
+      11,
+      37
+    ],
+    [
+      11,
+      58
+    ],
+    [
+      11,
+      78
+    ],
+    [
+      11,
+      101
+    ],
+    [
+      11,
+      104
+    ],
+    [
+      11,
+      123
+    ],
+    [
+      11,
+      146
+    ],
+    [
+      12,
+      1
+    ],
+    [
+      12,
+      22
+    ],
+    [
+      12,
+      38
+    ],
+    [
+      12,
+      47
+    ],
+    [
+      12,
+      53
+    ],
+    [
+      12,
+      56
+    ],
+    [
+      12,
+      57
+    ],
+    [
+      12,
+      58
+    ],
+    [
+      13,
+      3
+    ],
+    [
+      13,
+      14
+    ],
+    [
+      13,
+      25
+    ],
+    [
+      13,
+      33
+    ],
+    [
+      13,
+      46
+    ],
+    [
+      13,
+      50
+    ],
+    [
+      13,
+      66
+    ],
+    [
+      13,
+      88
+    ],
+    [
+      14,
+      3
+    ],
+    [
+      14,
+      4
+    ],
+    [
+      14,
+      25
+    ],
+    [
+      14,
+      57
+    ],
+    [
+      14,
+      58
+    ],
+    [
+      14,
+      82
+    ],
+    [
+      14,
+      99
+    ],
+    [
+      14,
+      107
+    ],
+    [
+      15,
+      14
+    ],
+    [
+      15,
+      22
+    ],
+    [
+      15,
+      36
+    ],
+    [
+      15,
+      46
+    ],
+    [
+      15,
+      48
+    ],
+    [
+      15,
+      61
+    ],
+    [
+      15,
+      73
+    ],
+    [
+      15,
+      105
+    ],
+    [
+      16,
+      3
+    ],
+    [
+      16,
+      13
+    ],
+    [
+      16,
+      26
+    ],
+    [
+      16,
+      36
+    ],
+    [
+      16,
+      39
+    ],
+    [
+      16,
+      61
+    ],
+    [
+      16,
+      85
+    ],
+    [
+      16,
+      86
+    ],
+    [
+      17,
+      3
+    ],
+    [
+      17,
+      4
+    ],
+    [
+      17,
+      7
+    ],
+    [
+      17,
+      35
+    ],
+    [
+      17,
+      36
+    ],
+    [
+      17,
+      58
+    ],
+    [
+      17,
+      63
+    ],
+    [
+      17,
+      69
+    ],
+    [
+      18,
+      13
+    ],
+    [
+      18,
+      27
+    ],
+    [
+      18,
+      28
+    ],
+    [
+      18,
+      36
+    ],
+    [
+      18,
+      72
+    ],
+    [
+      18,
+      73
+    ],
+    [
+      18,
+      84
+    ],
+    [
+      18,
+      103
+    ]
+  ],
+  "trace_entries": 128
+}

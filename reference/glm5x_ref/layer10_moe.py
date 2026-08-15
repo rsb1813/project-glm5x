@@ -119,7 +119,12 @@ class GLM5XExpertTensorCache:
             or capacity_bytes <= 0
         ):
             raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_CAPACITY")
-        if policy not in {"lru", "layer_balanced", "stable_hot_bank"}:
+        if policy not in {
+            "lru",
+            "layer_balanced",
+            "stable_hot_bank",
+            "adaptive_hot_bank",
+        }:
             raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_POLICY")
         if (
             not isinstance(protected_entries_per_layer, int)
@@ -127,7 +132,10 @@ class GLM5XExpertTensorCache:
             or protected_entries_per_layer < 0
         ):
             raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
-        if policy in {"layer_balanced", "stable_hot_bank"} and protected_entries_per_layer <= 0:
+        if (
+            policy in {"layer_balanced", "stable_hot_bank", "adaptive_hot_bank"}
+            and protected_entries_per_layer <= 0
+        ):
             raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
         self.capacity_bytes = capacity_bytes
         self.policy = policy
@@ -137,6 +145,7 @@ class GLM5XExpertTensorCache:
         ] = OrderedDict()
         self._protected_by_layer: dict[int, set[tuple[int, int]]] = {}
         self._access_counts: dict[tuple[int, int], int] = {}
+        self._adaptive_extras: set[tuple[int, int]] = set()
         self._resident_bytes = 0
         self._hits = 0
         self._misses = 0
@@ -156,7 +165,7 @@ class GLM5XExpertTensorCache:
 
     def get(self, key: tuple[int, int]) -> GLM5XExpertWeights | None:
         with self._lock:
-            if self.policy == "stable_hot_bank":
+            if self.policy in {"stable_hot_bank", "adaptive_hot_bank"}:
                 self._access_counts[key] = self._access_counts.get(key, 0) + 1
             entry = self._entries.get(key)
             if entry is None:
@@ -171,6 +180,88 @@ class GLM5XExpertTensorCache:
         if size > self.capacity_bytes:
             return
         with self._lock:
+            if self.policy == "adaptive_hot_bank":
+                layer = int(key[0])
+                protected = self._protected_by_layer.setdefault(layer, set())
+                previous = self._entries.get(key)
+                if previous is not None:
+                    prospective = self._resident_bytes - previous[1] + size
+                    while prospective > self.capacity_bytes:
+                        candidates = self._adaptive_extras - {key}
+                        if not candidates:
+                            self._bypasses += 1
+                            return
+                        victim = min(
+                            candidates,
+                            key=lambda item: (
+                                self._access_counts.get(item, 0),
+                                item,
+                            ),
+                        )
+                        _, victim_size = self._entries.pop(victim)
+                        self._adaptive_extras.remove(victim)
+                        self._resident_bytes -= victim_size
+                        prospective -= victim_size
+                        self._evictions += 1
+                    self._entries[key] = (expert, size)
+                    self._entries.move_to_end(key)
+                    self._resident_bytes = prospective
+                    return
+
+                if len(protected) < self.protected_entries_per_layer:
+                    while (
+                        self._resident_bytes + size > self.capacity_bytes
+                        and self._adaptive_extras
+                    ):
+                        victim = min(
+                            self._adaptive_extras,
+                            key=lambda item: (
+                                self._access_counts.get(item, 0),
+                                item,
+                            ),
+                        )
+                        _, victim_size = self._entries.pop(victim)
+                        self._adaptive_extras.remove(victim)
+                        self._resident_bytes -= victim_size
+                        self._evictions += 1
+                    if self._resident_bytes + size > self.capacity_bytes:
+                        self._bypasses += 1
+                        return
+                    self._entries[key] = (expert, size)
+                    protected.add(key)
+                    self._resident_bytes += size
+                    return
+
+                access_count = self._access_counts.get(key, 0)
+                if access_count < 2:
+                    self._bypasses += 1
+                    return
+                prospective = self._resident_bytes + size
+                victims: list[tuple[int, int]] = []
+                for victim in sorted(
+                    self._adaptive_extras,
+                    key=lambda item: (self._access_counts.get(item, 0), item),
+                ):
+                    if prospective <= self.capacity_bytes:
+                        break
+                    if self._access_counts.get(victim, 0) >= access_count:
+                        break
+                    prospective -= self._entries[victim][1]
+                    victims.append(victim)
+                if prospective > self.capacity_bytes:
+                    self._bypasses += 1
+                    return
+                for victim in victims:
+                    _, victim_size = self._entries.pop(victim)
+                    self._adaptive_extras.remove(victim)
+                    self._resident_bytes -= victim_size
+                    self._evictions += 1
+                self._entries[key] = (expert, size)
+                self._adaptive_extras.add(key)
+                self._resident_bytes += size
+                self._promotions += 1
+                return
+
             if self.policy == "stable_hot_bank":
                 layer = int(key[0])
                 protected = self._protected_by_layer.setdefault(layer, set())

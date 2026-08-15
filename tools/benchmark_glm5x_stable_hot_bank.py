@@ -67,7 +67,8 @@ def _select_trace(
 def benchmark(arguments: argparse.Namespace) -> dict[str, object]:
     if not torch.cuda.is_available():
         raise RuntimeError("GLM5X_HOT_BANK_CUDA_REQUIRED")
-    if arguments.policy == "stable_hot_bank" and arguments.protected_entries <= 0:
+    protected_policies = {"stable_hot_bank", "adaptive_hot_bank"}
+    if arguments.policy in protected_policies and arguments.protected_entries <= 0:
         raise ValueError("GLM5X_HOT_BANK_PROTECTED_ENTRIES")
 
     bundle = GLM5XExpertBundle.open(
@@ -90,7 +91,7 @@ def benchmark(arguments: argparse.Namespace) -> dict[str, object]:
         policy=arguments.policy,
         protected_entries_per_layer=(
             arguments.protected_entries
-            if arguments.policy == "stable_hot_bank"
+            if arguments.policy in protected_policies
             else 0
         ),
     )
@@ -134,14 +135,14 @@ def benchmark(arguments: argparse.Namespace) -> dict[str, object]:
 
     return {
         "schema_version": 1,
-        "benchmark_id": "B-0002",
+        "benchmark_id": arguments.benchmark_id,
         "boundary": "structured-real-sidecar-residency",
         "full_model_tps": None,
         "quality_claim": "cache-only exact payload identity; no model-logit claim",
         "policy": arguments.policy,
         "protected_entries_per_layer": (
             arguments.protected_entries
-            if arguments.policy == "stable_hot_bank"
+            if arguments.policy in protected_policies
             else 0
         ),
         "device_cache_capacity_bytes": arguments.device_cache_bytes,
@@ -166,8 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--sidecar-dir", type=Path, required=True)
     parser.add_argument(
-        "--policy", choices=("lru", "stable_hot_bank"), required=True
+        "--policy",
+        choices=("lru", "stable_hot_bank", "adaptive_hot_bank"),
+        required=True,
     )
+    parser.add_argument("--benchmark-id", default="B-0002")
     parser.add_argument("--device-cache-bytes", type=int, default=805_306_368)
     parser.add_argument("--host-cache-bytes", type=int, default=8_589_934_592)
     parser.add_argument("--protected-entries", type=int, default=1)

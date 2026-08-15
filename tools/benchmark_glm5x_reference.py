@@ -84,9 +84,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--expert-device-cache-policy",
-        choices=("lru", "layer_balanced", "stable_hot_bank"),
+        choices=(
+            "lru",
+            "layer_balanced",
+            "stable_hot_bank",
+            "adaptive_hot_bank",
+        ),
         default="lru",
-        help="expert device-cache policy; stable_hot_bank admits only repeated per-layer entries",
+        help="expert device-cache policy; adaptive_hot_bank fills spare bytes with repeated experts",
     )
     parser.add_argument(
         "--expert-device-cache-protected-entries-per-layer",
@@ -192,7 +197,8 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
     if arguments.expert_device_cache_protected_entries_per_layer < 0:
         raise ValueError("expert-device-cache-protected-entries-per-layer must be non-negative")
     if (
-        arguments.expert_device_cache_policy in {"layer_balanced", "stable_hot_bank"}
+        arguments.expert_device_cache_policy
+        in {"layer_balanced", "stable_hot_bank", "adaptive_hot_bank"}
         and arguments.expert_device_cache_protected_entries_per_layer <= 0
     ):
         raise ValueError(
