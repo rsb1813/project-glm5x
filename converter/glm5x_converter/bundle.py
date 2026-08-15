@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 from collections import OrderedDict, defaultdict
@@ -202,6 +203,41 @@ class GLM5XExpertBundle:
 
     def read_expert(self, layer_id: int, expert_id: int) -> dict[str, bytes]:
         return self.read_experts(layer_id, (expert_id,))[expert_id]
+
+    def expert_source_digest(self, layer_id: int, expert_id: int) -> str:
+        """Return a payload-independent digest for one exact expert identity."""
+        roles = self.experts.get((int(layer_id), int(expert_id)))
+        if roles is None:
+            raise K3XError(
+                "EXPERT_BUNDLE_EXPERT_NOT_FOUND", f"{layer_id}:{expert_id}"
+            )
+        identity: list[object] = []
+        for role in _ROLES:
+            item = roles.get(role)
+            ref = item.get("ref") if isinstance(item, dict) else None
+            if not isinstance(ref, dict) or not isinstance(ref.get("artifact"), str):
+                raise K3XError("EXPERT_BUNDLE_REFERENCE_METADATA", role)
+            artifact_key = ref["artifact"]
+            reader = self.readers.get(artifact_key)
+            if reader is None:
+                raise K3XError("EXPERT_BUNDLE_REFERENCE_ARTIFACT", artifact_key)
+            identity.append(
+                [
+                    role,
+                    artifact_key,
+                    reader.superblock.file_uuid.hex(),
+                    reader.superblock.root_sha256.hex(),
+                    ref.get("tensor_id"),
+                    ref.get("data_offset"),
+                    ref.get("data_length"),
+                    ref.get("logical_length"),
+                    ref.get("data_crc32c"),
+                ]
+            )
+        encoded = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        return hashlib.sha256(encoded).hexdigest()
 
     def read_experts(
         self, layer_id: int, expert_ids: Sequence[int]

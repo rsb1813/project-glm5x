@@ -529,3 +529,11 @@
 - Bounded warm evidence is useful: a layer-10 four-token repeated route took `13.281714103999548 s` on first INT4 pack/read and `0.00977079599397257 s` after a 2 GiB packed device cache fill. This is a sublayer observation only and must not be extrapolated to full-model tok/s.
 - The 8 GiB packed-cache, 1-layer-trunk, 2-token full-model run was stopped before completion to avoid further long turnaround. No partial output is treated as a benchmark.
 - Immediate next task is a storage-side packed expert artifact or exact route-stable multi-token residency; another isolated kernel toggle cannot overcome the measured `45.3 GB/token` logical expert reload.
+
+## 2026-08-15 -- Fingerprinted packed INT4 expert sidecar
+
+- Added `GLM5XPackedExpertCache` as an opt-in CUDA-only `.pi4` sidecar. Each entry records the source-layout digest, three packed INT4 role records, shapes, offsets, lengths, and CRC32C values; writes use a temporary file plus `fsync`/atomic replace.
+- `GLM5XExpertBundle.expert_source_digest()` fingerprints artifact UUID/root hashes and exact role extents without reading expert payload bytes. The layer loader checks device cache, then sidecar, then the source bundle and writes only misses.
+- RED/GREEN: the dedicated CUDA round-trip test first failed on the missing cache module, then passed after implementation. The bounded integration probe created 31 sidecars in `18.112762928998563 s`; a fresh layer instance reused them in `1.152440828998806 s`, with `31` hits and no bundle-read calls or bytes.
+- Full verification after integration is `332 passed, 124 skipped` in `76.14 s`; focused sidecar/bundle/layer/model/MoE/schema coverage is `32 passed, 6 skipped`.
+- This is a storage warm-path result only. It does not change routing, does not reduce the already measured cold `45.3 GB/token` expert bound, and does not justify a 10--20 tok/s claim. The next task is multi-layer residency/trunk staging followed by one fresh full-model gate.

@@ -20,6 +20,7 @@ from .layer10_moe import (
     _collect_tensor_refs,
 )
 from .int4 import GLM5XInt4Weight, quantize_int4_weight
+from .packed_cache import GLM5XPackedExpertCache
 from .mla_dsa import GLM5XMLAForward, GLM5XMLAReference, GLM5XMLAState, GLM5XMLAWeights, _rms_norm
 from .official_dsa import GLM5XOfficialDSAIndexer, GLM5XOfficialDSAState
 
@@ -92,6 +93,7 @@ class GLM5XDecoderLayerReference:
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
         trunk_tensor_cache: GLM5XTrunkTensorCache | None = None,
+        packed_expert_cache: GLM5XPackedExpertCache | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
     ) -> "GLM5XDecoderLayerReference":
@@ -125,6 +127,7 @@ class GLM5XDecoderLayerReference:
             expert_load_workers=expert_load_workers,
             expert_device_cache=expert_device_cache,
             trunk_tensor_cache=trunk_tensor_cache,
+            packed_expert_cache=packed_expert_cache,
             expert_precision=expert_precision,
             trunk_precision=trunk_precision,
         )
@@ -157,6 +160,7 @@ class GLM5XDecoderLayerReference:
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
         trunk_tensor_cache: GLM5XTrunkTensorCache | None = None,
+        packed_expert_cache: GLM5XPackedExpertCache | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
@@ -194,6 +198,7 @@ class GLM5XDecoderLayerReference:
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
                 trunk_tensor_cache=trunk_tensor_cache,
+                packed_expert_cache=packed_expert_cache,
                 expert_precision=expert_precision,
                 trunk_precision=trunk_precision,
             )
@@ -227,6 +232,7 @@ class GLM5XDecoderLayerReference:
         expert_load_workers: int = 1,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
         trunk_tensor_cache: GLM5XTrunkTensorCache | None = None,
+        packed_expert_cache: GLM5XPackedExpertCache | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
     ) -> "GLM5XDecoderLayerReference":
@@ -346,6 +352,7 @@ class GLM5XDecoderLayerReference:
                 execution_mode=execution_mode,
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
+                packed_expert_cache=packed_expert_cache,
                 expert_precision=expert_precision,
                 trunk_precision=trunk_precision,
                 tensor_values=tensor_values,

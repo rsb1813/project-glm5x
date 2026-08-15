@@ -243,3 +243,11 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 - In progress: design a storage-side packed expert artifact and an exact route-stable residency policy. The current source bundle still forces `45.3 GB/token` logical expert reads, so 10--20 tok/s is not yet physically plausible on the target NVMe/PCIe path.
 - Known blocker: the long 2-token 8 GiB packed-cache full-model run was stopped before completion because initial full-bundle materialization exceeded the requested turnaround; no partial result is treated as a benchmark.
 - Last known-good tests: the focused suite above; no new public push was made for the uncommitted INT4 work.
+
+## 2026-08-15 -- Fingerprinted packed expert sidecar
+
+- Implemented: optional CUDA-only `.pi4` sidecars for packed INT4 gate/up/down projections, source-layout fingerprints, per-role CRC32C validation, atomic writes, model/CLI wiring, and benchmark telemetry.
+- Measured bounded result: layer-10 sidecar population took `18.112762928998563 s`; a fresh layer instance reused 31 sidecars in `1.152440828998806 s` with `0` bundle-read calls and `0` bundle-read bytes. Route equality remained `true`.
+- Verification: full WSL Python suite `332 passed, 124 skipped` in `76.14 s`; focused sidecar integration `32 passed, 6 skipped`; changed-module `py_compile` passed.
+- Current limitation: this reduces repeat source-bundle I/O for selected INT4 experts but does not lower the measured full-model cold bound until the selected experts are actually reused. It is not enabled by default and no 10--20 tok/s claim is made.
+- Next bottleneck: implement and measure exact multi-layer route-stable residency/trunk staging, then run one deliberate 78-layer full-model gate with quality and physical I/O telemetry.

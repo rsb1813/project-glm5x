@@ -138,3 +138,10 @@ The strict reference path is always available. Any adaptive Top-K, proxy, prunin
 - The first full-model cold INT4-expert probe (`trunk=int4`, natural Top-8, no device cache) measured `0.002830 tok/s`, `353.331 s` decode, `45,298,483,200` logical expert bytes/token, and `17,341,184,512` peak allocated VRAM bytes. It is rejected as a default fast mode because it adds cold packing cost and exceeds the nominal 16 GiB device budget.
 - A bounded layer-10 probe with a 2 GiB packed device cache measured `13.2817 s` for the first 4-token MoE call and `0.00977 s` for the identical cached call. This confirms that resident reuse, not cold quantization, is the useful property. It is not a full-model tok/s result.
 - The next accepted performance boundary is an exact, budgeted packed-expert residency policy plus a storage-side packed format. Until that exists, no INT4 flag is promoted into QUALITY or BALANCED defaults.
+
+## Implemented experimental packed expert sidecar
+
+- `GLM5XPackedExpertCache` stores the three CUDA TinyGEMM INT4 projections for one `(layer, expert)` in an atomic `.pi4` sidecar. The record contains format/version metadata, source identity digest, shapes, offsets, lengths, and CRC32C values.
+- `GLM5XExpertBundle.expert_source_digest()` hashes artifact UUID/root identity and exact role extents without reading payload bytes. A sidecar hit is therefore invalidated when the source artifact or expert layout changes.
+- The layer loader checks device residency first, then the fingerprint-bound sidecar, then reads and packs only missing experts from the `.k3x` bundle. Sidecar use is opt-in, CUDA-only, and restricted to `expert_precision="int4"`; BF16/reference behavior is unchanged.
+- The bounded real layer-10 probe created 31 sidecars in `18.1128 s`, then a fresh layer instance loaded the same 31 experts in `1.1524 s` with `0` bundle-read calls and `0` bundle-read bytes. This removes repeated source-bundle reads for that sublayer but does not establish a full-model throughput result.

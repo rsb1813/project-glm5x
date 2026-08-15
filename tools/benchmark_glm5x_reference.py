@@ -65,6 +65,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="bounded exact decoded CUDA expert cache capacity; 0 disables it",
     )
     parser.add_argument(
+        "--expert-packed-cache-dir",
+        type=Path,
+        default=None,
+        help="optional persistent CUDA INT4 expert sidecar directory",
+    )
+    parser.add_argument(
         "--trunk-cache-bytes",
         type=int,
         default=0,
@@ -124,6 +130,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         expert_cache_capacity_bytes=arguments.expert_cache_bytes,
         expert_device_cache_capacity_bytes=arguments.expert_device_cache_bytes,
         trunk_cache_capacity_bytes=arguments.trunk_cache_bytes,
+        packed_expert_cache_path=arguments.expert_packed_cache_dir,
         expert_precision=arguments.expert_precision,
         trunk_precision=arguments.trunk_precision,
     )
@@ -206,6 +213,11 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         "expert_load_workers": arguments.expert_load_workers,
         "expert_cache_bytes": arguments.expert_cache_bytes,
         "expert_device_cache_bytes": arguments.expert_device_cache_bytes,
+        "expert_packed_cache_dir": (
+            None
+            if arguments.expert_packed_cache_dir is None
+            else str(arguments.expert_packed_cache_dir)
+        ),
         "trunk_cache_bytes": arguments.trunk_cache_bytes,
         "expert_precision": arguments.expert_precision,
         "trunk_precision": arguments.trunk_precision,
@@ -249,6 +261,18 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             "trunk_cache_hit_rate": (
                 trunk_stats.hits / trunk_lookups if trunk_lookups else 0.0
             ),
+        }
+    )
+    packed_stats = model.packed_expert_cache_stats
+    payload.update(
+        {
+            "packed_expert_cache_hits": 0 if packed_stats is None else packed_stats.hits,
+            "packed_expert_cache_misses": 0
+            if packed_stats is None
+            else packed_stats.misses,
+            "packed_expert_cache_writes": 0
+            if packed_stats is None
+            else packed_stats.writes,
         }
     )
     if device.type == "cuda":

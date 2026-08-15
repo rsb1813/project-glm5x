@@ -633,3 +633,19 @@
 - Evidence: the exact full-model baseline read `45,298,483,200` logical expert bytes per decode token even after trunk INT4 residency; the cold INT4 probe retained the same read volume and slowed to `0.002830 tok/s`. The layer-10 `0.00977 s` result is a four-token sublayer cache hit, not a decoder-token measurement.
 - Accepted because: it keeps benchmark semantics honest and identifies the next bottleneck as storage-side expert residency/packing rather than another isolated kernel toggle.
 - Revisit: after expert-major multi-token verification, packed sidecar conversion, or a measured cache trace demonstrates a lower full-model bytes/token value.
+
+## D-0080 -- Make packed INT4 sidecars fingerprint-bound and crash-safe
+
+- Decision: add an optional `.pi4` sidecar keyed by `(layer, expert)` with a source-layout digest, per-role shape/extent metadata, CRC32C checks, and atomic temporary-file replacement.
+- Alternatives: cache only by path, reuse raw BF16 payloads on every process, or write sidecars directly in place.
+- Evidence: the layer-10 repeat probe created 31 sidecars and a fresh process reused them with `0` bundle-read calls and `0` bundle-read bytes; the dedicated CUDA round-trip test and full Python suite passed.
+- Accepted because: exact source identity prevents stale reuse, atomic rename limits torn artifacts after interruption, and the feature is opt-in without changing natural routing or BF16 correctness mode.
+- Revisit: when multi-process locking, disk-budget eviction, and a complete 78-layer full-model gate are measured.
+
+## D-0081 -- Keep packed sidecars opt-in until full-model residency is measured
+
+- Decision: expose `--expert-packed-cache-dir` but do not enable it by default or promote INT4 to QUALITY/BALANCED.
+- Alternatives: auto-create sidecars for all experts, replace the source `.k3x` artifacts, or claim the layer-10 warm result as model tok/s.
+- Evidence: sidecar reuse is a measured sublayer improvement, while the only full-model INT4 gate remains `0.002830 tok/s` and `45,298,483,200` logical expert bytes/token.
+- Accepted because: it captures the safe warm-path win while preserving an auditable cold path and avoiding unbounded local disk growth.
+- Revisit: after a fresh full-model run records bytes/token, VRAM/RAM, physical NVMe traffic, and quality.

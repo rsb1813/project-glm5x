@@ -19,6 +19,7 @@ from .layer10_moe import (
     GLM5XTrunkTensorCacheStats,
     _collect_tensor_refs,
 )
+from .packed_cache import GLM5XPackedExpertCache
 from .model import GLM5XModelDescriptor
 from .mla_dsa import GLM5XMLAState
 from .official_dsa import GLM5XOfficialDSAState
@@ -145,6 +146,7 @@ class GLM5XDecoderModelReference:
         self._layer_cache_capacity = 0
         self._layer_cache: OrderedDict[int, GLM5XDecoderLayerReference] = OrderedDict()
         self._trunk_tensor_cache = None
+        self._packed_expert_cache = None
         self._rope_dim = int(self.layers[0].attention.weights.qk_rope_head_dim)
         self.final_norm = final_norm
         self.lm_head = lm_head
@@ -201,6 +203,7 @@ class GLM5XDecoderModelReference:
         instance._expert_bundle = None
         instance._expert_device_cache = None
         instance._trunk_tensor_cache = None
+        instance._packed_expert_cache = None
         instance.final_norm = final_norm
         instance.lm_head = lm_head
         instance._prepared_lm_head = None
@@ -227,6 +230,7 @@ class GLM5XDecoderModelReference:
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache_capacity_bytes: int = 0,
         trunk_cache_capacity_bytes: int = 0,
+        packed_expert_cache_path: str | Path | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
     ) -> "GLM5XDecoderModelReference":
@@ -304,6 +308,11 @@ class GLM5XDecoderModelReference:
             if trunk_cache_capacity_bytes
             else None
         )
+        packed_expert_cache = (
+            GLM5XPackedExpertCache(packed_expert_cache_path)
+            if packed_expert_cache_path is not None and expert_precision == "int4"
+            else None
+        )
         read = lambda name: GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)  # noqa: E731
         target = None if device is None else torch.device(device)
         if embedding is None:
@@ -346,6 +355,7 @@ class GLM5XDecoderModelReference:
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
                 trunk_tensor_cache=trunk_tensor_cache,
+                packed_expert_cache=packed_expert_cache,
                 expert_precision=expert_precision,
                 trunk_precision=trunk_precision,
             )
@@ -363,6 +373,7 @@ class GLM5XDecoderModelReference:
         instance._expert_bundle = bundle
         instance._expert_device_cache = expert_device_cache
         instance._trunk_tensor_cache = trunk_tensor_cache
+        instance._packed_expert_cache = packed_expert_cache
         return instance
 
     @property
@@ -404,6 +415,13 @@ class GLM5XDecoderModelReference:
         cache = getattr(self, "_trunk_tensor_cache", None)
         if cache is None:
             return GLM5XTrunkTensorCacheStats(0, 0, 0, 0, 0, 0)
+        return cache.stats
+
+    @property
+    def packed_expert_cache_stats(self):
+        cache = getattr(self, "_packed_expert_cache", None)
+        if cache is None:
+            return None
         return cache.stats
 
     @property

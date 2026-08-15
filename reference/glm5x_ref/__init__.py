@@ -34,6 +34,7 @@ from .turboquant import (
     quantize_vector,
 )
 from .int4 import GLM5XInt4Weight, linear as int4_linear, quantize_int4_weight
+from .packed_cache import GLM5XPackedExpertCache, GLM5XPackedExpertCacheStats
 
 __all__ = [
     "GLM5XModelDescriptor",
@@ -72,4 +73,6 @@ __all__ = [
     "GLM5XInt4Weight",
     "int4_linear",
     "quantize_int4_weight",
+    "GLM5XPackedExpertCache",
+    "GLM5XPackedExpertCacheStats",
 ]

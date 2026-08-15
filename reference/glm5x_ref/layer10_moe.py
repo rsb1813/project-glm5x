@@ -17,6 +17,7 @@ from k3x_converter.reader import K3XReader
 from glm5x_converter.bundle import GLM5XExpertBundle
 
 from .int4 import GLM5XInt4Weight, linear, quantize_int4_weight, weight_shape
+from .packed_cache import GLM5XPackedExpertCache
 
 
 def _tensor_from_readonly_buffer(data: bytes, dtype: torch.dtype) -> torch.Tensor:
@@ -705,6 +706,7 @@ class GLM5XLayer10MoEReference:
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
+        packed_expert_cache: GLM5XPackedExpertCache | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
     ) -> "GLM5XLayer10MoEReference":
@@ -726,6 +728,7 @@ class GLM5XLayer10MoEReference:
             execution_mode=execution_mode,
             expert_load_workers=expert_load_workers,
             expert_device_cache=expert_device_cache,
+            packed_expert_cache=packed_expert_cache,
             expert_precision=expert_precision,
             trunk_precision=trunk_precision,
         )
@@ -750,6 +753,7 @@ class GLM5XLayer10MoEReference:
         execution_mode: str = "loop",
         expert_load_workers: int = 1,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
+        packed_expert_cache: GLM5XPackedExpertCache | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
     ) -> "GLM5XLayer10MoEReference":
@@ -816,6 +820,18 @@ class GLM5XLayer10MoEReference:
                 cached = expert_device_cache.get(cache_key)
                 if cached is not None:
                     return cached
+            source_digest = None
+            if packed_expert_cache is not None and expert_precision == "int4":
+                source_digest = bundle.expert_source_digest(layer_id, expert_id)
+                cached = packed_expert_cache.get(
+                    cache_key,
+                    source_digest,
+                    device=target if target is not None else "cuda",
+                )
+                if cached is not None:
+                    if expert_device_cache is not None:
+                        expert_device_cache.put(cache_key, cached)
+                    return cached
             try:
                 payload = bundle.read_expert(layer_id, expert_id)
             except (KeyError, K3XError) as exc:
@@ -827,6 +843,9 @@ class GLM5XLayer10MoEReference:
                 device=target,
                 precision=expert_precision,
             )
+            if packed_expert_cache is not None and expert_precision == "int4":
+                assert source_digest is not None
+                packed_expert_cache.put(cache_key, source_digest, expert)
             if expert_device_cache is not None:
                 expert_device_cache.put(cache_key, expert)
             return expert
@@ -847,13 +866,33 @@ class GLM5XLayer10MoEReference:
                     result[int(expert_id)] = cached
 
             try:
-                payload_map = bundle.read_experts(layer_id, pending)
+                payload_pending: list[int] = []
+                source_digests: dict[int, str] = {}
+                for expert_id in pending:
+                    if packed_expert_cache is not None and expert_precision == "int4":
+                        digest = bundle.expert_source_digest(layer_id, expert_id)
+                        cached = packed_expert_cache.get(
+                            (layer_id, expert_id),
+                            digest,
+                            device=target if target is not None else "cuda",
+                        )
+                        if cached is not None:
+                            result[expert_id] = cached
+                            if expert_device_cache is not None:
+                                expert_device_cache.put((layer_id, expert_id), cached)
+                            continue
+                        source_digests[expert_id] = digest
+                    payload_pending.append(expert_id)
+                payload_map = bundle.read_experts(layer_id, payload_pending)
             except (KeyError, K3XError) as exc:
                 missing = pending[0] if pending else -1
                 raise K3XError(
                     "GLM5X_LAYER_EXPERT_NOT_FOUND", f"{layer_id}:{missing}"
                 ) from exc
-            payloads = [(expert_id, payload_map[expert_id]) for expert_id in pending]
+            payloads = [
+                (expert_id, payload_map[expert_id])
+                for expert_id in payload_pending
+            ]
             for expert_id, payload in payloads:
                 expert = cls._expert_from_payload(
                     payload,
@@ -862,6 +901,10 @@ class GLM5XLayer10MoEReference:
                     device=target,
                     precision=expert_precision,
                 )
+                if packed_expert_cache is not None and expert_precision == "int4":
+                    packed_expert_cache.put(
+                        (layer_id, expert_id), source_digests[expert_id], expert
+                    )
                 if expert_device_cache is not None:
                     expert_device_cache.put((layer_id, expert_id), expert)
                 result[expert_id] = expert

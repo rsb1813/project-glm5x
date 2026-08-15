@@ -877,3 +877,20 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - WSL Python focused suite: `33 passed, 6 skipped` across INT4, bundle, layer, model, MoE, and benchmark-schema tests.
 - `py_compile`: passed for the changed INT4/reference/benchmark modules.
 - No 10--20 tok/s full-model result exists. The measured full-model numbers above remain the only throughput evidence and are explicitly not targets.
+
+## 2026-08-15 -- Fingerprinted packed INT4 sidecar probe
+
+- Date: 2026-08-15.
+- Commit: working tree based on `1598ae6` before the sidecar commit.
+- Hardware/model: RTX 5080 16 GB under WSL2; official GLM-5.2 layer-10 bundle; four-token `layer10-real4-moe-input.gmlxact` route.
+- Mode: `expert_precision=int4`, exact natural Top-8, loop execution, optional `GLM5XPackedExpertCache`, 31 selected expert records, fresh layer instance for the hit measurement.
+- Cold sidecar population: `18.112762928998563 s` and `31` sidecar writes.
+- Fresh-process sidecar reuse: `1.152440828998806 s` (`3.4708940358135685` input tokens/s), `31` sidecar hits, `31` misses, `31` writes total across both phases, `0` bundle-read calls, `0` bundle-read bytes, and route equality `true`.
+- Result: the sidecar removes repeated BF16 source-bundle reads for this bounded sublayer. It is not a full-model decode measurement, does not prove 10--20 tok/s, and remains opt-in pending a 78-layer gate.
+
+## 2026-08-15 -- Verification after packed sidecar integration
+
+- WSL Python suite: `332 passed, 124 skipped` in `76.14 s`.
+- Focused sidecar/bundle/layer/model/MoE/schema suite: `32 passed, 6 skipped`.
+- Changed-module `py_compile` and `git diff --check`: passed.
+- No full-model rerun was started because the prior exact/INT4 gates already take several minutes and the current sidecar evidence is intentionally bounded.
