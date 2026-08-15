@@ -547,5 +547,5 @@
 ## 2026-08-15 -- FP8 sidecar reuse gate
 
 - Generalized the fingerprint-bound sidecar to `.pi4` INT4 and `.pf8` row-scaled E4M3 FP8 records. FP8 stores the quantized role bytes and row scales, while the source digest and per-section CRC checks remain mandatory.
-- Real layer-10 four-token results: first FP8 population `21.4064 s`; fresh-process reuse `4.8204 s` versus BF16 `11.7594 s`, identical routes, and `5.6966%` relative L2 drift. The warm improvement is real but bounded to one MoE layer.
+- Real layer-10 four-token results: first FP8 population `21.4064 s`; fresh-process reuse `4.8204 s` versus BF16 `11.7594 s`, identical routes, and `5.6966%` relative L2 drift. The 31 `.pf8` files occupy `1,171,511,902` bytes, about half of the raw BF16 role bytes. The warm improvement is real but bounded to one MoE layer.
 - FP8 is experimental/default-off until final logits, coding quality, and full-model traffic are measured. The next performance work is still multi-layer residency and asynchronous staging.
