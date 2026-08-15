@@ -264,6 +264,7 @@ class GLM5XDecoderModelReference:
             "lru",
             "layer_balanced",
             "stable_hot_bank",
+            "adaptive_hot_bank",
         }:
             raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_POLICY")
         if (
@@ -273,7 +274,8 @@ class GLM5XDecoderModelReference:
         ):
             raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
         if (
-            expert_device_cache_policy in {"layer_balanced", "stable_hot_bank"}
+            expert_device_cache_policy
+            in {"layer_balanced", "stable_hot_bank", "adaptive_hot_bank"}
             and expert_device_cache_protected_entries_per_layer <= 0
         ):
             raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")

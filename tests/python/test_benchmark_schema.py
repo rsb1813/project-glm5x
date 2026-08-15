@@ -17,6 +17,9 @@ from tools.benchmark_glm5x_reference import (
     _build_parser as build_glm5x_reference_parser,
     measure as measure_glm5x_reference,
 )
+from tools.benchmark_glm5x_stable_hot_bank import (
+    build_parser as build_hot_bank_parser,
+)
 from tools.benchmark_synthetic import BenchmarkRecord, benchmark_once, write_results
 
 
@@ -116,6 +119,37 @@ def test_glm5x_reference_parser_accepts_stable_hot_bank_policy(
         ]
     )
     assert arguments.expert_device_cache_policy == "stable_hot_bank"
+
+
+def test_glm5x_reference_parser_accepts_adaptive_hot_bank_policy(
+    tmp_path: Path,
+) -> None:
+    arguments = build_glm5x_reference_parser().parse_args(
+        [
+            "--bundle", str(tmp_path / "bundle.json"),
+            "--config", str(tmp_path / "config.json"),
+            "--prompt", "1",
+            "--expert-device-cache-policy", "adaptive_hot_bank",
+            "--expert-device-cache-protected-entries-per-layer", "1",
+        ]
+    )
+    assert arguments.expert_device_cache_policy == "adaptive_hot_bank"
+
+
+def test_real_sidecar_hot_bank_parser_accepts_adaptive_policy(
+    tmp_path: Path,
+) -> None:
+    arguments = build_hot_bank_parser().parse_args(
+        [
+            "--bundle", str(tmp_path / "bundle.json"),
+            "--sidecar-dir", str(tmp_path / "sidecars"),
+            "--policy", "adaptive_hot_bank",
+            "--benchmark-id", "B-0004",
+            "--output", str(tmp_path / "result.json"),
+        ]
+    )
+    assert arguments.policy == "adaptive_hot_bank"
+    assert arguments.benchmark_id == "B-0004"
 
 
 def test_benchmark_json_and_csv_preserve_schema(tmp_path: Path) -> None:

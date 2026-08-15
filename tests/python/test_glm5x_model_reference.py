@@ -256,6 +256,16 @@ def test_model_reference_factory_loads_dense_sparse_and_shared_indexer_layers(tm
         layer_cache_capacity=3,
     )
     forward = model.forward_tokens(torch.tensor([1, 2]))
+    adaptive_model = GLM5XDecoderModelReference.from_bundle(
+        bundle_path,
+        config=config,
+        layer_cache_capacity=3,
+        expert_device_cache_capacity_bytes=4096,
+        expert_device_cache_policy="adaptive_hot_bank",
+        expert_device_cache_protected_entries_per_layer=1,
+    )
+    adaptive_forward = adaptive_model.forward_tokens(torch.tensor([1, 2]))
+    torch.testing.assert_close(adaptive_forward.logits, forward.logits)
     sparse_model = GLM5XDecoderModelReference.from_bundle(
         bundle_path,
         config=config,
