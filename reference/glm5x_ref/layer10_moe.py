@@ -99,6 +99,8 @@ class GLM5XExpertTensorCacheStats:
     hits: int
     misses: int
     evictions: int
+    bypasses: int
+    promotions: int
 
 
 class GLM5XExpertTensorCache:
@@ -117,7 +119,7 @@ class GLM5XExpertTensorCache:
             or capacity_bytes <= 0
         ):
             raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_CAPACITY")
-        if policy not in {"lru", "layer_balanced"}:
+        if policy not in {"lru", "layer_balanced", "stable_hot_bank"}:
             raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_POLICY")
         if (
             not isinstance(protected_entries_per_layer, int)
@@ -125,7 +127,7 @@ class GLM5XExpertTensorCache:
             or protected_entries_per_layer < 0
         ):
             raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
-        if policy == "layer_balanced" and protected_entries_per_layer <= 0:
+        if policy in {"layer_balanced", "stable_hot_bank"} and protected_entries_per_layer <= 0:
             raise ValueError("GLM5X_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
         self.capacity_bytes = capacity_bytes
         self.policy = policy
@@ -134,10 +136,13 @@ class GLM5XExpertTensorCache:
             tuple[int, int], tuple[GLM5XExpertWeights, int]
         ] = OrderedDict()
         self._protected_by_layer: dict[int, set[tuple[int, int]]] = {}
+        self._access_counts: dict[tuple[int, int], int] = {}
         self._resident_bytes = 0
         self._hits = 0
         self._misses = 0
         self._evictions = 0
+        self._bypasses = 0
+        self._promotions = 0
         self._lock = Lock()
 
     @staticmethod
@@ -151,6 +156,8 @@ class GLM5XExpertTensorCache:
 
     def get(self, key: tuple[int, int]) -> GLM5XExpertWeights | None:
         with self._lock:
+            if self.policy == "stable_hot_bank":
+                self._access_counts[key] = self._access_counts.get(key, 0) + 1
             entry = self._entries.get(key)
             if entry is None:
                 self._misses += 1
@@ -164,6 +171,46 @@ class GLM5XExpertTensorCache:
         if size > self.capacity_bytes:
             return
         with self._lock:
+            if self.policy == "stable_hot_bank":
+                layer = int(key[0])
+                protected = self._protected_by_layer.setdefault(layer, set())
+                previous = self._entries.get(key)
+                if previous is not None:
+                    prospective = self._resident_bytes - previous[1] + size
+                    if prospective > self.capacity_bytes:
+                        self._bypasses += 1
+                        return
+                    self._entries[key] = (expert, size)
+                    self._entries.move_to_end(key)
+                    self._resident_bytes = prospective
+                    protected.add(key)
+                    return
+
+                victim = None
+                if len(protected) >= self.protected_entries_per_layer:
+                    victim = min(
+                        protected,
+                        key=lambda item: (self._access_counts.get(item, 0), item),
+                    )
+                    if self._access_counts.get(key, 0) <= self._access_counts.get(victim, 0):
+                        self._bypasses += 1
+                        return
+                victim_size = 0 if victim is None else self._entries[victim][1]
+                prospective = self._resident_bytes - victim_size + size
+                if prospective > self.capacity_bytes:
+                    self._bypasses += 1
+                    return
+                if victim is not None:
+                    self._entries.pop(victim)
+                    protected.remove(victim)
+                    self._resident_bytes -= victim_size
+                    self._evictions += 1
+                    self._promotions += 1
+                self._entries[key] = (expert, size)
+                protected.add(key)
+                self._resident_bytes += size
+                return
+
             previous = self._entries.pop(key, None)
             if previous is not None:
                 self._resident_bytes -= previous[1]
@@ -217,6 +264,8 @@ class GLM5XExpertTensorCache:
                 hits=self._hits,
                 misses=self._misses,
                 evictions=self._evictions,
+                bypasses=self._bypasses,
+                promotions=self._promotions,
             )
 
 

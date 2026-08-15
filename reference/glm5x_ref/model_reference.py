@@ -260,7 +260,11 @@ class GLM5XDecoderModelReference:
             or expert_device_cache_capacity_bytes < 0
         ):
             raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_CAPACITY")
-        if expert_device_cache_policy not in {"lru", "layer_balanced"}:
+        if expert_device_cache_policy not in {
+            "lru",
+            "layer_balanced",
+            "stable_hot_bank",
+        }:
             raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_POLICY")
         if (
             not isinstance(expert_device_cache_protected_entries_per_layer, int)
@@ -269,7 +273,7 @@ class GLM5XDecoderModelReference:
         ):
             raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
         if (
-            expert_device_cache_policy == "layer_balanced"
+            expert_device_cache_policy in {"layer_balanced", "stable_hot_bank"}
             and expert_device_cache_protected_entries_per_layer <= 0
         ):
             raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
@@ -510,7 +514,7 @@ class GLM5XDecoderModelReference:
     def expert_device_cache_stats(self) -> GLM5XExpertTensorCacheStats:
         cache = getattr(self, "_expert_device_cache", None)
         if cache is None:
-            return GLM5XExpertTensorCacheStats(0, 0, 0, 0, 0, 0)
+            return GLM5XExpertTensorCacheStats(0, 0, 0, 0, 0, 0, 0, 0)
         return cache.stats
 
     @property

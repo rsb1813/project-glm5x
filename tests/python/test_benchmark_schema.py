@@ -103,6 +103,21 @@ def test_glm5x_packed_telemetry_requires_sidecar_directory(tmp_path: Path) -> No
         measure_glm5x_reference(arguments)
 
 
+def test_glm5x_reference_parser_accepts_stable_hot_bank_policy(
+    tmp_path: Path,
+) -> None:
+    arguments = build_glm5x_reference_parser().parse_args(
+        [
+            "--bundle", str(tmp_path / "bundle.json"),
+            "--config", str(tmp_path / "config.json"),
+            "--prompt", "1",
+            "--expert-device-cache-policy", "stable_hot_bank",
+            "--expert-device-cache-protected-entries-per-layer", "1",
+        ]
+    )
+    assert arguments.expert_device_cache_policy == "stable_hot_bank"
+
+
 def test_benchmark_json_and_csv_preserve_schema(tmp_path: Path) -> None:
     json_path, csv_path = tmp_path / "result.json", tmp_path / "result.csv"
     write_results(_record(), json_path, csv_path)
