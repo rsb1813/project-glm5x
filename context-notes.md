@@ -671,3 +671,10 @@
 - C++ opened the full metadata set and loaded layer 10 expert 48 in `3.31 s`, `86,784 KiB` maximum RSS, and exactly `75,497,472` payload bytes. Python measured `3.36 s`, `210,184 KiB`, and the same bytes. All three role SHA-256 digests matched.
 - No wrapper benchmark script was added because the converter CLI and JSON-emitting C++ contract executable already provide the complete reproducible boundary; adding a second orchestration layer would duplicate parsing without exercising new product code.
 - This milestone does not execute a full decoder token. Exact full-model decode remains `0.010559 tok/s`; 10 tok/s is still unachieved. The next integration is exact trunk/layer construction and bounded final-logit parity through `.gxi`, followed by resident/asynchronous H2D scheduling.
+
+## 2026-08-16 -- Index-backed CUDA MoE start
+
+- Work continues directly without subagents on `codex/index-backed-cuda-moe`, stacked above runtime-index publication commit `450743e`.
+- The first integration deliberately reuses `k3x_cuda_glm5x_real_expert_bench` rather than creating another execution engine. Only router/shared/expert tensor acquisition changes from bounded shard scans to the official `.gxi`.
+- The artifact-directory path remains the control. Natural routing, selected experts, contributions, raw BF16 views, resident CUDA execution, GLM5XACT input/output, and numerical thresholds must remain identical.
+- A small metadata-plus-payload runtime-index API is preferred over a new general tensor-source abstraction. This keeps the change reversible and directly useful to the later decoder-layer loader.
