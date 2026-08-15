@@ -326,3 +326,14 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 ## Last known-good test state
 
 - Commit `49c386b`; WSL CUDA CMake build and CTest `27/27` green; full WSL Python `356 passed, 124 skipped`; no cloud or paid resources used.
+
+## 2026-08-15 -- Packed-sidecar telemetry milestone
+
+- Current milestone: exact packed-sidecar traffic accounting is implemented and measured. The work is committed locally as `25fc7c7` on `codex/sidecar-telemetry`, based on plan commit `5fa1fe8` and public `origin/main` `2b9c214`.
+- Completed: opt-in sidecar file/decode/H2D counters, phase-separated reference benchmark fields, validation for packed path/precision, CUDA-event timing, host-cache/file-read separation, focused CUDA regressions, and a five-iteration real expert-48 paired measurement.
+- Current hardware assumption: Ryzen 7 9800X3D, RTX 5080 16 GB, 96 GB system RAM, WSL2 Ubuntu-24.04/CUDA 13.0 for development; Linux native remains the deployment target.
+- Latest measured bottleneck: one real mixed `.pgu` expert still requires `39,321,608` H2D bytes when it is not device-resident. Pooled pinned staging reduced the warm transfer event median from `3.061 ms` to `1.033 ms` and wall median from `17.896 ms` to `11.425 ms`, but this is an expert transport boundary and not token throughput.
+- Full-model truth is unchanged: best exact measured decode remains `0.010559 tok/s`; latest mixed NVFP4 gate remains `0.014484 tok/s` and is quality-rejected. No 10 tok/s result exists.
+- Known blocker: exact multi-layer residency/lookahead is not implemented, physical NVMe traffic is still unmeasured, and `gh auth status` reports an invalid token for account `rsb1813`, so the verified local commits are not yet published from this session.
+- Next concrete task: design and implement a bounded N+1 exact-prefetch predictor over existing runtime-profile transitions, without changing natural routing. Measure recall, overfetch bytes, residency hit rate, H2D bytes, and final output parity before any full 78-layer rerun.
+- Last known-good tests: commit `25fc7c7`; focused benchmark/cache suite `25 passed, 6 skipped`; full WSL Python `360 passed, 124 skipped` in `78.30 s`; changed-module `py_compile` and `git diff --check` passed. C++ was unchanged; prior CTest `27/27` remains the latest applicable C++ result.
