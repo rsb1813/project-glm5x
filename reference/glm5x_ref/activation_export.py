@@ -155,22 +155,31 @@ def export_layer_activation(
     seed: int = 17,
     layer_id: int = 10,
     rope_theta: float = 8_000_000.0,
+    device: torch.device | str | None = None,
+    verify_bundle: bool = True,
 ) -> dict[str, object]:
     """Export one complete official decoder-layer input/output oracle."""
     if token_count <= 0:
         raise ValueError("token_count must be positive")
     if rope_theta <= 0.0:
         raise ValueError("rope_theta must be positive")
+    target = torch.device("cpu" if device is None else device)
     torch.manual_seed(seed)
-    hidden = torch.randn((1, token_count, 6144), dtype=torch.float32).bfloat16()
-    position_ids = torch.arange(token_count, dtype=torch.long).view(1, -1)
-    position_embeddings = _position_embeddings(
-        token_count, rope_theta=rope_theta
+    hidden = torch.randn((1, token_count, 6144), dtype=torch.float32).bfloat16().to(target)
+    position_ids = torch.arange(
+        token_count, dtype=torch.long, device=target
+    ).view(1, -1)
+    position_embeddings = tuple(
+        value.to(target)
+        for value in _position_embeddings(token_count, rope_theta=rope_theta)
     )
     layer = GLM5XDecoderLayerReference.from_bundle(
         bundle_path,
         layer_id=layer_id,
         cache_experts=False,
+        device=target,
+        verify_payloads=verify_bundle,
+        verify_root=verify_bundle,
     )
     result = layer(
         hidden,
@@ -189,6 +198,8 @@ def export_layer_activation(
         "hidden_size": int(layer_input.shape[-1]),
         "seed": seed,
         "rope_theta": float(rope_theta),
+        "device": str(target),
+        "bundle_verification": "full" if verify_bundle else "metadata_only",
         "input_dtype": str(layer_input.dtype),
         "output_dtype": str(layer_output.dtype),
         "layer_input": str(layer_input_path),
@@ -227,6 +238,8 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--layer", type=int, default=10)
     parser.add_argument("--rope-theta", type=float, default=8_000_000.0)
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument("--lazy-bundle", action="store_true")
     parser.add_argument("--metadata", type=Path)
     args = parser.parse_args()
     if args.boundary == "moe":
@@ -253,6 +266,8 @@ def main() -> int:
             seed=args.seed,
             layer_id=args.layer,
             rope_theta=args.rope_theta,
+            device=args.device,
+            verify_bundle=not args.lazy_bundle,
         )
     encoded = json.dumps(metadata, indent=2, sort_keys=True) + "\n"
     if args.metadata is None:

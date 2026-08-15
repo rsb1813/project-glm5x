@@ -71,6 +71,8 @@ def test_export_layer_activation_writes_full_input_and_output(monkeypatch, tmp_p
     )
 
     assert metadata["boundary"] == "decoder_layer"
+    assert metadata["device"] == "cpu"
+    assert metadata["bundle_verification"] == "full"
     assert metadata["rope_theta"] == 8_000_000.0
     assert metadata["layer_input"] == str(layer_input)
     assert metadata["layer_output"] == str(layer_output)
