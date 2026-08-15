@@ -166,6 +166,13 @@ The strict reference path is always available. Any adaptive Top-K, proxy, prunin
 - The reference benchmark exposes the instrumentation through `--expert-packed-telemetry`. It emits separate prefill/decode deltas and requires both a packed sidecar directory and packed expert precision. The flag is diagnostic and default-off because CUDA-event synchronization changes timing behavior.
 - Routing, expert selection, cache admission, tensor representation, and default benchmark fields are unchanged. The counters distinguish sidecar traffic from logical K3X artifact reads, but they are not physical NVMe device counters.
 - A real layer-10 `.pgu` expert showed that pooled pinned staging reduces warm H2D event time, but every nonresident expert still transfers `39,321,608` bytes. Therefore the next architectural boundary remains exact multi-layer residency and lookahead; transfer acceleration alone cannot establish a 10 tok/s full-model path.
+
+## 2026-08-15 -- Experimental exact N+1 transition prefetch
+
+- `RuntimeProfile::predict_next()` ranks only the immediately following layer's experts from persisted and live transition counts. Prior and live transition mass are normalized separately, mixed with the existing prior-strength schedule, and ordered deterministically by score then `(layer, expert)`.
+- The C++ deadline scheduler exposes the feature through `--transition-prefetch-candidates 1..16`. Current-layer exact tickets are submitted first. Predicted tickets use a later deadline and are reused only if the next layer's natural router selects the same `(layer, expert)` key; every miss falls back to the unchanged exact load path.
+- Telemetry records successful submissions, matches, selected misses, unused predictions, ready/late matches, submission failures, requested bytes, and useful bytes. The standard JSON/CSV benchmark path preserves these fields. Candidate count zero is the default, and nonzero candidates require deadline scheduling.
+- This is an implemented experimental L2-to-host payload schedule, not full GLM sidecar-to-VRAM lookahead. The first synthetic gate preserved token and route traces but reduced decode throughput, so no quality mode enables it. The next accepted boundary must couple high-recall prediction to pooled pinned H2D and exact multi-layer device residency.
 # 2026-08-15 performance-path update
 
 ## Implemented experimental INT4 expert path

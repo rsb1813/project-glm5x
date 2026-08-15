@@ -600,3 +600,16 @@
 - A next-layer route predictor is a separate architecture decision and is not part of this telemetry change.
 - The first direct probe failed because `build-glm5x-hf-probe/glm5x-experts-full.json` did not match the `.pgu` source fingerprint. `build-glm5x-full-k3x/glm5x-experts-full.json` matched exactly and was used for the accepted measurements.
 - Five warm paired expert-48 samples measured `3.061 ms` pageable versus `1.033 ms` pooled-pinned CUDA-event medians and `17.896 ms` versus `11.425 ms` wall medians for the same `39,321,608` H2D bytes. Tensor parity was exact; no token throughput claim follows from this boundary.
+
+## 2026-08-15 -- Exact N+1 transition prefetch start
+
+- Work continues directly without subagents on `codex/transition-prefetch`, stacked above the all-green but unmerged telemetry PR branch.
+- The first predictor is a deterministic transition table, not a learned model. It ranks only next-layer candidates and never changes natural routing, selected K, routing weights, or output.
+- Production integration is conditional on a focused API test and bounded recall/overfetch evidence. Wrong predictions may warm the host cache but must not displace the exact selected set or suppress an exact load.
+
+## 2026-08-15 -- Exact N+1 transition prefetch result
+
+- Implemented deterministic prior/live transition ranking, exact next-layer ticket reuse, CLI gating, and standard benchmark telemetry. Natural routing and output remain authoritative; candidate count zero remains the default.
+- The standard synthetic gate measured `150.141/129.338/113.328` decode tok/s for candidate counts `0/1/2`. Candidate 2 reduced exposed expert-load wait but matched only `17/36` submissions and slowed decode by about `24.5%`, so the path is retained only as an experimental hook.
+- Full verification passed CUDA CTest `27/27`, CPU CTest `15/15`, and CPU-build Python `362 passed, 124 skipped`. The two failures seen when the Python suite was pointed at a noncanonical CUDA build directory were environment-selection failures in CPU-unavailable tests, not product regressions; the proper CPU build passed them.
+- Next performance work must move from host-only ticket lookahead to exact packed expert residency plus pooled pinned sidecar-to-VRAM staging. No full-model TPS or quality claim changed.

@@ -110,6 +110,7 @@ public:
         result.routing_selected_mass_sum = routing_selected_mass_sum_;
         result.routing_boundary_confidence_sum =
             routing_boundary_confidence_sum_;
+        result.transition_prefetch = transition_prefetch_stats_;
     }
     std::uint64_t routing_decisions() const noexcept {
         return routing_decisions_;
@@ -437,6 +438,8 @@ public:
 
     Vector forward(std::uint32_t token, ModelState& state, ProfilePhase phase,
                    std::vector<Vector>* layer_outputs = nullptr) {
+        transition_prefetch_stats_.unused += pending_transition_prefetch_.size();
+        pending_transition_prefetch_.clear();
         active_forward_cycle_ = session_.acquire_forward_cycle();
         const auto& embedding = tensor("model.embeddings");
         if (token >= config_.vocab) throw std::runtime_error("token out of range");
@@ -610,21 +613,98 @@ private:
         return bytes;
     }
 
-    ExpertLoadTicket schedule_expert(std::size_t layer,
-                                     std::size_t expert_id,
-                                     bool resident,
-                                     std::chrono::nanoseconds estimate) {
+    Result<ExpertLoadTicket> submit_expert(
+        std::size_t layer, std::size_t expert_id, bool resident,
+        std::chrono::nanoseconds estimate, bool lookahead) {
         if (!expert_loader_) throw std::runtime_error("expert scheduler disabled");
         auto ticket = expert_loader_->submit(
-            {std::chrono::steady_clock::now() + estimate, estimate,
+            {std::chrono::steady_clock::now() + estimate +
+                 (lookahead ? estimate : std::chrono::nanoseconds{0}),
+             estimate,
              expert_payload_bytes(layer, expert_id),
              resident},
             [reader = &reader_, store = &expert_store_, layer, expert_id] {
                 return load_expert_result_from(
                     *reader, *store, layer, expert_id);
             });
+        return ticket;
+    }
+
+    ExpertLoadTicket schedule_expert(std::size_t layer,
+                                     std::size_t expert_id,
+                                     bool resident,
+                                     std::chrono::nanoseconds estimate) {
+        auto ticket = submit_expert(
+            layer, expert_id, resident, estimate, false);
         if (!ticket) throw std::runtime_error("expert scheduler queue failure");
         return std::move(ticket.value());
+    }
+
+    struct PendingTransitionPrefetch {
+        ExpertKey key;
+        ExpertLoadTicket ticket;
+        std::uint64_t payload_bytes{};
+    };
+
+    void claim_transition_prefetch(
+        std::size_t layer, std::span<const ExpertKey> selected,
+        std::vector<ExpertLoadTicket>& tickets,
+        std::vector<bool>& prefetched) {
+        if (session_.options().transition_prefetch_candidates == 0) return;
+        std::size_t matches = 0;
+        for (auto& pending : pending_transition_prefetch_) {
+            const auto found = std::find(selected.begin(), selected.end(),
+                                         pending.key);
+            if (found == selected.end()) {
+                ++transition_prefetch_stats_.unused;
+                continue;
+            }
+            const auto slot = static_cast<std::size_t>(
+                std::distance(selected.begin(), found));
+            if (prefetched[slot]) {
+                ++transition_prefetch_stats_.unused;
+                continue;
+            }
+            tickets[slot] = std::move(pending.ticket);
+            prefetched[slot] = true;
+            ++matches;
+            ++transition_prefetch_stats_.matches;
+            transition_prefetch_stats_.useful_bytes += pending.payload_bytes;
+        }
+        pending_transition_prefetch_.clear();
+        if (layer > 1) {
+            transition_prefetch_stats_.selected_misses +=
+                selected.size() - matches;
+        }
+    }
+
+    void schedule_transition_prefetch(
+        std::size_t layer, std::span<const ExpertKey> selected,
+        std::chrono::nanoseconds estimate) {
+        const auto requested = session_.options().transition_prefetch_candidates;
+        if (!expert_loader_ || requested == 0 || layer + 1 >= config_.layers) {
+            return;
+        }
+        const auto maximum = std::min(
+            {requested, static_cast<std::size_t>(config_.top_k),
+             std::size_t{16}});
+        const auto predicted = session_.profile().predict_next(
+            selected, layer + 1, config_.experts, maximum,
+            session_.options().profile_prior_strength);
+        for (const auto key : predicted) {
+            const auto bytes = expert_payload_bytes(key.layer, key.expert);
+            auto ticket = submit_expert(
+                key.layer, key.expert, expert_store_.contains(key), estimate,
+                true);
+            if (!ticket) {
+                ++transition_prefetch_stats_.submission_failures;
+                continue;
+            }
+            pending_transition_prefetch_.push_back(
+                {key, std::move(ticket.value()), bytes});
+            ++transition_prefetch_stats_.submissions;
+            transition_prefetch_stats_.requested_bytes += bytes;
+        }
     }
 
     Vector matvec(const std::string& name, std::size_t rows,
@@ -968,6 +1048,7 @@ private:
             }
         }
         std::vector<ExpertLoadTicket> expert_tickets;
+        std::vector<bool> transition_prefetched;
         if (expert_loader_) {
             const auto counters = reader_.counters();
             const auto estimate = counters.batch_submissions
@@ -975,20 +1056,36 @@ private:
                       counters.storage_nanoseconds / counters.batch_submissions}
                 : std::chrono::nanoseconds{0};
             expert_tickets.resize(selected_k);
+            transition_prefetched.resize(selected_k);
+            claim_transition_prefetch(
+                layer, selected, expert_tickets, transition_prefetched);
             std::vector<bool> resident(selected_k);
             for (std::size_t slot = 0; slot < selected_k; ++slot) {
+                if (transition_prefetched[slot]) continue;
                 resident[slot] = expert_store_.contains(
                     {layer, order[slot]});
             }
             for (const bool resident_pass : {true, false}) {
                 for (std::size_t slot = 0; slot < selected_k; ++slot) {
+                    if (transition_prefetched[slot]) continue;
                     if (resident[slot] == resident_pass) {
                         expert_tickets[slot] = schedule_expert(
                             layer, order[slot], resident[slot], estimate);
                     }
                 }
             }
+            schedule_transition_prefetch(layer, selected, estimate);
         }
+        const auto wait_expert_ticket = [&](std::size_t slot) {
+            if (transition_prefetched[slot]) {
+                if (expert_tickets[slot].ready()) {
+                    ++transition_prefetch_stats_.ready_before_use;
+                } else {
+                    ++transition_prefetch_stats_.late_at_use;
+                }
+            }
+            return expert_tickets[slot].wait();
+        };
         if (backend_.options().cuda_transfer ==
                 CudaTransferMode::synchronous &&
             backend_.options().cuda_boundary != CudaBoundaryMode::moe_layer) {
@@ -1007,7 +1104,7 @@ private:
             payloads.reserve(selected_k);
             for (std::size_t slot = 0; slot < selected_k; ++slot) {
                 if (expert_loader_) {
-                    auto payload = expert_tickets[slot].wait();
+                    auto payload = wait_expert_ticket(slot);
                     if (!payload) throw std::runtime_error("missing expert");
                     payloads.push_back(std::move(payload.value()));
                 } else {
@@ -1143,7 +1240,7 @@ private:
             for (std::size_t slot = 0; slot < selected_k; ++slot) {
                 Vector expert_output;
                 if (expert_loader_) {
-                    auto payload = expert_tickets[slot].wait();
+                    auto payload = wait_expert_ticket(slot);
                     if (!payload) throw std::runtime_error("missing expert");
                     expert_output = expert_payload(
                         latent, layer, payload.value(), phase);
@@ -1189,6 +1286,8 @@ private:
     double routing_boundary_confidence_sum_{};
     std::uint64_t active_forward_cycle_{};
     std::uint64_t next_prefetch_sequence_{1};
+    std::vector<PendingTransitionPrefetch> pending_transition_prefetch_;
+    TransitionPrefetchStats transition_prefetch_stats_;
 };
 
 std::uint32_t argmax(const Vector& values) {

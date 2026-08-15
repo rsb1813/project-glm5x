@@ -770,3 +770,11 @@
 - Evidence: on one real layer-10 expert-48 `.pgu`, five warm paired samples moved `39,321,608` bytes per call with bit-exact tensor parity. Pageable H2D event median was `3,060,958 ns`; pooled pinned median was `1,033,468 ns`. Wall medians were `17,895,936 ns` and `11,424,774 ns` respectively.
 - Accepted because: the counters identify the actual sidecar/H2D boundary without conflating it with logical artifact reads, while default execution and benchmark output remain unchanged.
 - Revisit: replace forced event synchronization with asynchronous completion accounting when the layer-window scheduler exists, and add independent physical NVMe sampling before interpreting file bytes as device traffic.
+
+## D-0097 -- Keep exact N+1 transition prefetch implemented but default-off
+
+- Decision: retain deterministic transition-table prediction and exact ticket reuse behind `--transition-prefetch-candidates`, with zero as the default. Predictions may schedule payload work but never change router scores, selected K, expert weights, or output; a nonmatching selection always uses the exact load path.
+- Alternatives: enable N+1 prediction by default, jump directly to an unmeasured learned/N+2 predictor, or discard lookahead entirely after the first slowdown.
+- Evidence: the five-iteration standard synthetic gate kept token IDs `[43,32,28,49,9,28]` and the full routed-expert trace identical. Candidate counts `0/1/2` measured `150.141/129.338/113.328` decode tok/s. Candidate 2 reduced median exposed load wait from `50.024 ms` to `33.962 ms`, but only `17/36` submissions matched and `19/36` were unused, so added work outweighed hidden latency.
+- Accepted because: the implementation establishes an exact, observable scheduling boundary for future real sidecar/H2D experiments while the default remains evidence-based and unchanged.
+- Revisit: when the official full-model path can retain predicted packed experts in a pooled pinned/device layer window. Require higher recall, lower bytes per useful match, physical sidecar/H2D counters, final-logit parity, and positive end-to-end decode improvement before promotion.

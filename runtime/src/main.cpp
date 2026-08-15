@@ -134,6 +134,7 @@ int main(int argc, char** argv) {
     std::string l2_queue_depth_text = "8";
     std::string l2_expert_workers_text = "8";
     std::string l2_schedule_name = "blocking";
+    std::string transition_prefetch_candidates_text = "0";
     std::string routing_mode_name = "natural";
     std::string routing_fixed_k_text = "0";
     std::string routing_mass_target_text = "0.9";
@@ -189,6 +190,9 @@ int main(int argc, char** argv) {
         else if (key == "--l2-queue-depth") l2_queue_depth_text = value;
         else if (key == "--l2-expert-workers") l2_expert_workers_text = value;
         else if (key == "--l2-schedule") l2_schedule_name = value;
+        else if (key == "--transition-prefetch-candidates") {
+            transition_prefetch_candidates_text = value;
+        }
         else if (key == "--routing-mode") routing_mode_name = value;
         else if (key == "--routing-fixed-k") routing_fixed_k_text = value;
         else if (key == "--routing-mass-target") routing_mass_target_text = value;
@@ -584,10 +588,6 @@ int main(int argc, char** argv) {
                   << profile_prior_strength_text << '\n';
         return 2;
     }
-    runtime_options.profile_observation =
-        runtime_options.l1_expert_cache == k3x::L1ExpertCacheMode::profiled ||
-        !runtime_metadata_text.empty() || !runtime_profile_in.empty() ||
-        !runtime_profile_out.empty();
     if (l2_schedule_name == "blocking") {
         runtime_options.l2_expert_schedule =
             k3x::L2ExpertScheduleMode::blocking;
@@ -599,6 +599,24 @@ int main(int argc, char** argv) {
                   << l2_schedule_name << '\n';
         return 2;
     }
+    if (!parse_size(transition_prefetch_candidates_text,
+                    runtime_options.transition_prefetch_candidates) ||
+        runtime_options.transition_prefetch_candidates > 16) {
+        std::cerr << "invalid transition prefetch candidate count: "
+                  << transition_prefetch_candidates_text << '\n';
+        return 2;
+    }
+    if (runtime_options.transition_prefetch_candidates != 0 &&
+        runtime_options.l2_expert_schedule !=
+            k3x::L2ExpertScheduleMode::deadline) {
+        std::cerr << "transition prefetch requires deadline L2 scheduling\n";
+        return 2;
+    }
+    runtime_options.profile_observation =
+        runtime_options.l1_expert_cache == k3x::L1ExpertCacheMode::profiled ||
+        !runtime_metadata_text.empty() || !runtime_profile_in.empty() ||
+        !runtime_profile_out.empty() ||
+        runtime_options.transition_prefetch_candidates != 0;
     if (l2_io_name == "pread") {
         reader_options.io_engine = k3x::L2IoEngine::pread;
     } else if (l2_io_name == "io-uring") {
@@ -1483,6 +1501,27 @@ int main(int argc, char** argv) {
            << expert_load.worker_nanoseconds
            << ",\"expert_load_exposed_wait_nanoseconds\":"
            << expert_load.exposed_wait_nanoseconds;
+    const auto& transition_prefetch = result.value().transition_prefetch;
+    output << ",\"transition_prefetch_candidates\":"
+           << runtime_options.transition_prefetch_candidates
+           << ",\"transition_prefetch_submissions\":"
+           << transition_prefetch.submissions
+           << ",\"transition_prefetch_matches\":"
+           << transition_prefetch.matches
+           << ",\"transition_prefetch_selected_misses\":"
+           << transition_prefetch.selected_misses
+           << ",\"transition_prefetch_unused\":"
+           << transition_prefetch.unused
+           << ",\"transition_prefetch_ready_before_use\":"
+           << transition_prefetch.ready_before_use
+           << ",\"transition_prefetch_late_at_use\":"
+           << transition_prefetch.late_at_use
+           << ",\"transition_prefetch_submission_failures\":"
+           << transition_prefetch.submission_failures
+           << ",\"transition_prefetch_requested_bytes\":"
+           << transition_prefetch.requested_bytes
+           << ",\"transition_prefetch_useful_bytes\":"
+           << transition_prefetch.useful_bytes;
     output << ",\"kernel_nanoseconds\":" << profile.device_nanoseconds
            << ",\"host_to_device_bytes\":" << profile.host_to_device_bytes
            << ",\"weight_h2d_bytes\":"

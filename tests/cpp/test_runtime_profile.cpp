@@ -8,6 +8,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #ifdef assert
 #undef assert
@@ -50,6 +51,25 @@ int main() {
     assert((hot[1] == ExpertKey{0, 1}));
     assert((hot[2] == ExpertKey{1, 2}));
 
+    RuntimeProfile transition_profile;
+    for (std::uint64_t cycle = 20; cycle < 24; ++cycle) {
+        transition_profile.observe(cycle, 0, std::array{ExpertKey{0, 0}});
+        transition_profile.observe(cycle, 1, std::array{ExpertKey{1, 2}});
+    }
+    transition_profile.observe(24, 0, std::array{ExpertKey{0, 0}});
+    transition_profile.observe(24, 1, std::array{ExpertKey{1, 1}});
+    const auto live_prediction = transition_profile.predict_next(
+        std::array{ExpertKey{0, 0}}, 1, 4, 2, 64);
+    assert((live_prediction ==
+            std::vector{ExpertKey{1, 2}, ExpertKey{1, 1}}));
+    assert((transition_profile.predict_next(
+                std::array{ExpertKey{0, 0}}, 1, 4, 1, 64) ==
+            std::vector{ExpertKey{1, 2}}));
+    assert(transition_profile.predict_next(
+               std::array{ExpertKey{0, 0}}, 1, 4, 0, 64).empty());
+    assert(RuntimeProfile{}.predict_next(
+               std::array{ExpertKey{0, 0}}, 1, 4, 2, 64).empty());
+
     const auto nonce = std::chrono::steady_clock::now()
                            .time_since_epoch()
                            .count();
@@ -70,6 +90,23 @@ int main() {
     assert(loaded.value().live_route_observations() == 0);
     assert(loaded.value().hot_bank(3) == hot);
     assert(loaded.value().prior_weight(64) == 1.0);
+
+    const auto transition_path = root / "transition.k3xp";
+    assert(transition_profile.save(transition_path));
+    auto mixed_profile = RuntimeProfile::load(transition_path);
+    assert(mixed_profile);
+    for (std::uint64_t cycle = 30; cycle < 34; ++cycle) {
+        mixed_profile.value().observe(
+            cycle, 0, std::array{ExpertKey{0, 0}});
+        mixed_profile.value().observe(
+            cycle, 1, std::array{ExpertKey{1, 1}});
+    }
+    assert((mixed_profile.value().predict_next(
+                std::array{ExpertKey{0, 0}}, 1, 4, 1, 1000) ==
+            std::vector{ExpertKey{1, 2}}));
+    assert((mixed_profile.value().predict_next(
+                std::array{ExpertKey{0, 0}}, 1, 4, 1, 1) ==
+            std::vector{ExpertKey{1, 1}}));
 
     loaded.value().observe(9, 0, std::array{ExpertKey{2, 7}});
     assert(loaded.value().prior_weight(1) == 0.5);

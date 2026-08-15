@@ -130,6 +130,16 @@ class BenchmarkRecord:
     expert_load_queue_high_water: int = 0
     expert_load_worker_nanoseconds: int = 0
     expert_load_exposed_wait_nanoseconds: int = 0
+    transition_prefetch_candidates: int = 0
+    transition_prefetch_submissions: int = 0
+    transition_prefetch_matches: int = 0
+    transition_prefetch_selected_misses: int = 0
+    transition_prefetch_unused: int = 0
+    transition_prefetch_ready_before_use: int = 0
+    transition_prefetch_late_at_use: int = 0
+    transition_prefetch_submission_failures: int = 0
+    transition_prefetch_requested_bytes: int = 0
+    transition_prefetch_useful_bytes: int = 0
     reader_read_calls: int = 0
     reader_requested_bytes: int = 0
     reader_completed_bytes: int = 0
@@ -317,6 +327,7 @@ def _run_process(
     l2_queue_depth: int,
     l2_expert_schedule: str,
     l2_expert_workers: int = 8,
+    transition_prefetch_candidates: int = 0,
     profile_prior_strength: int = 64,
     runtime_metadata: str = "",
     runtime_profile_in: Path | None = None,
@@ -341,6 +352,8 @@ def _run_process(
 ) -> tuple[dict, int, float]:
     if l2_expert_workers <= 0 or l2_expert_workers > 64:
         raise ValueError("l2_expert_workers must be between 1 and 64")
+    if transition_prefetch_candidates < 0 or transition_prefetch_candidates > 16:
+        raise ValueError("transition_prefetch_candidates must be between 0 and 16")
     command = [
         str(runner), "--model", str(artifact), "--prompt-ids", "1,7,3,9",
         "--generate", str(generated_tokens), "--mode", "incremental",
@@ -362,6 +375,7 @@ def _run_process(
         "--l2-queue-depth", str(l2_queue_depth),
         "--l2-expert-workers", str(l2_expert_workers),
         "--l2-schedule", l2_expert_schedule,
+        "--transition-prefetch-candidates", str(transition_prefetch_candidates),
         "--routing-mode", routing_mode,
         "--routing-fixed-k", str(routing_fixed_k),
         "--routing-mass-target", str(routing_mass_target),
@@ -488,6 +502,7 @@ def benchmark_once(
     l2_queue_depth: int = 8,
     l2_expert_schedule: str = "blocking",
     l2_expert_workers: int = 8,
+    transition_prefetch_candidates: int = 0,
     profile_prior_strength: int = 64,
     runtime_metadata: str = "",
     runtime_profile_in: Path | None = None,
@@ -546,6 +561,7 @@ def benchmark_once(
                 l2_queue_depth=l2_queue_depth,
                 l2_expert_schedule=l2_expert_schedule,
                 l2_expert_workers=l2_expert_workers,
+                transition_prefetch_candidates=transition_prefetch_candidates,
                 profile_prior_strength=profile_prior_strength,
                 runtime_metadata=runtime_metadata,
                 runtime_profile_in=runtime_profile_in,
@@ -593,6 +609,7 @@ def benchmark_once(
                 l2_queue_depth=l2_queue_depth,
                 l2_expert_schedule=l2_expert_schedule,
                 l2_expert_workers=l2_expert_workers,
+                transition_prefetch_candidates=transition_prefetch_candidates,
                 profile_prior_strength=profile_prior_strength,
                 runtime_metadata=runtime_metadata,
                 runtime_profile_in=runtime_profile_in,
@@ -998,6 +1015,13 @@ def benchmark_once(
         "expert_major_assignments",
         "expert_major_reused_assignments",
         "expert_major_payload_loads",
+        "transition_prefetch_submissions",
+        "transition_prefetch_matches",
+        "transition_prefetch_selected_misses",
+        "transition_prefetch_unused",
+        "transition_prefetch_submission_failures",
+        "transition_prefetch_requested_bytes",
+        "transition_prefetch_useful_bytes",
         "speculative_acceptance_rate",
         "token_ids",
     )
@@ -1021,6 +1045,7 @@ def benchmark_once(
         l1_expert_cache,
         l1_expert_cache_bytes,
         l2_expert_schedule,
+        transition_prefetch_candidates,
         l2_io,
         l2_cache,
         l2_queue_depth,
@@ -1059,6 +1084,7 @@ def benchmark_once(
         "l1_expert_cache_mode",
         "l1_expert_cache_bytes",
         "l2_expert_schedule",
+        "transition_prefetch_candidates",
         "l2_io_engine",
         "l2_cache_mode",
         "l2_queue_depth",
@@ -1096,6 +1122,16 @@ def benchmark_once(
         for item in samples
     ):
         raise RuntimeError("runner async readiness accounting is inconsistent")
+    if any(
+        item["transition_prefetch_matches"]
+        + item["transition_prefetch_unused"]
+        != item["transition_prefetch_submissions"]
+        or item["transition_prefetch_ready_before_use"]
+        + item["transition_prefetch_late_at_use"]
+        != item["transition_prefetch_matches"]
+        for item in samples
+    ):
+        raise RuntimeError("runner transition prefetch accounting is inconsistent")
     prefill_ns = statistics.median(item["prefill_nanoseconds"] for item in samples)
     decode_ns = statistics.median(item["decode_nanoseconds"] for item in samples)
     layer_count = len(samples[0]["per_layer_nanoseconds"])
@@ -1278,6 +1314,32 @@ def benchmark_once(
         expert_load_exposed_wait_nanoseconds=int(statistics.median(
             item["expert_load_exposed_wait_nanoseconds"] for item in samples
         )),
+        transition_prefetch_candidates=samples[0][
+            "transition_prefetch_candidates"
+        ],
+        transition_prefetch_submissions=samples[0][
+            "transition_prefetch_submissions"
+        ],
+        transition_prefetch_matches=samples[0]["transition_prefetch_matches"],
+        transition_prefetch_selected_misses=samples[0][
+            "transition_prefetch_selected_misses"
+        ],
+        transition_prefetch_unused=samples[0]["transition_prefetch_unused"],
+        transition_prefetch_ready_before_use=int(statistics.median(
+            item["transition_prefetch_ready_before_use"] for item in samples
+        )),
+        transition_prefetch_late_at_use=int(statistics.median(
+            item["transition_prefetch_late_at_use"] for item in samples
+        )),
+        transition_prefetch_submission_failures=samples[0][
+            "transition_prefetch_submission_failures"
+        ],
+        transition_prefetch_requested_bytes=samples[0][
+            "transition_prefetch_requested_bytes"
+        ],
+        transition_prefetch_useful_bytes=samples[0][
+            "transition_prefetch_useful_bytes"
+        ],
         reader_read_calls=samples[0]["reader_read_calls"],
         reader_requested_bytes=samples[0]["reader_requested_bytes"],
         reader_completed_bytes=samples[0]["reader_completed_bytes"],
@@ -1534,6 +1596,7 @@ def main() -> int:
     parser.add_argument("--l2-cache", choices=("buffered", "direct"), default="buffered")
     parser.add_argument("--l2-queue-depth", type=int, default=8)
     parser.add_argument("--l2-expert-workers", type=int, default=8)
+    parser.add_argument("--transition-prefetch-candidates", type=int, default=0)
     parser.add_argument(
         "--l2-expert-schedule", choices=("blocking", "deadline"),
         default="blocking",
@@ -1600,6 +1663,7 @@ def main() -> int:
         l2_queue_depth=args.l2_queue_depth,
         l2_expert_workers=args.l2_expert_workers,
         l2_expert_schedule=args.l2_expert_schedule,
+        transition_prefetch_candidates=args.transition_prefetch_candidates,
         routing_mode=args.routing_mode,
         routing_fixed_k=args.routing_fixed_k,
         routing_mass_target=args.routing_mass_target,
