@@ -1,5 +1,15 @@
 # GLM5X Benchmarks
 
+## 2026-08-15 -- RTX 5080 NVFP4 native scaled-GEMM and mixed-precision gate
+
+- Commit: working tree after public `d530d46`; NVFP4 implementation and documentation uncommitted at measurement time.
+- Hardware: RTX 5080 16 GB, WSL2 CUDA 13.0/PyTorch 2.13.0; model/checkpoint: official GLM-5.2 real layer-10 activation and full expert bundle; context: one candidate token, natural Top-8.
+- Kernel/storage: E2M1 FP4 payloads, per-16-value FP8 E4M3 blocked scales, FP32 global scale, CUDA `torch._scaled_mm`; `.pn4` all-projection and `.pgu` routed gate/up sidecars. The native CUDA contract matched a dequantized reference on the synthetic shape probe.
+- All-NVFP4 paired layer gate: BF16 `4.5003 s`; NVFP4 `5.2946 s`; relative L2 `0.18142111599445343`; maximum absolute error `0.00251007080078125`; route IDs equal.
+- Routed gate/up-only NVFP4 paired layer gate: BF16 `4.451283303991659 s`; NVFP4 gate/up plus BF16 shared/down `4.350357135001104 s`; relative L2 `0.12603828310966492`; maximum absolute error `0.0014079809188842773`; route IDs equal.
+- Decode tok/s, prefill tok/s, TTFT, peak VRAM, system RAM, physical NVMe GB/token, H2D GB/token, cache hit rate, speculative acceptance, and full-model quality: not applicable to this bounded one-layer gate.
+- Decision: keep both modes experimental/default-off. The measured native path is a storage/kernel correctness result, not evidence for 10--20 tok/s. Calibrated residual/outlier handling and a full-model final-logit gate remain required.
+
 ## 2026-08-15 -- Experimental MXFP4 sidecar quality/bytes gate
 
 - Commit: working tree based on public `ee186c7` with the FP4 extension uncommitted at measurement time.

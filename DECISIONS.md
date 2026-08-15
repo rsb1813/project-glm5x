@@ -673,3 +673,12 @@
 - Evidence: FP8 was not the requested final precision and its full-model gate produced no completed result. The bounded reference MXFP4 path stored eight layer-10 routed experts in `160,440,156` bytes (`26.56%` of corresponding BF16 bytes) with unchanged routes but `0.16359105706214905` relative L2 error and `17.867729659978068 s` fresh sidecar decode versus `2.79652249100036 s` BF16. Existing real-layer MXFP4 quality evidence therefore requires calibration/native kernels before promotion.
 - Accepted because: it prevents time being spent on a precision the project does not target, preserves a useful measured control, and keeps the correctness BF16 path unchanged while the FP4 storage and CUDA work proceeds.
 - Revisit: after calibrated outlier/mixed FP4 residuals, native RTX 5080 FP4 execution, full-model final-logit parity, and a fresh bytes/quality/TPS gate.
+
+## D-0085 -- Use the Blackwell NVFP4 contract for the first native FP4 path
+
+- Decision: implement NVFP4 as the first native FP4 runtime/storage path on RTX 5080, using E2M1 payloads, FP8 E4M3 per-block scales, one FP32 global scale, cuBLAS blocked-scale layout, and `torch._scaled_mm`. Keep `mxfp4/.pm4` as the portable comparison/reference path and keep all FP4 modes default-off.
+- Alternatives: continue the CPU-decoded `.pm4` path, build a local row-scaled FP8 final format, or quantize all three projections without a native Blackwell layout.
+- Evidence: the synthetic CUDA NVFP4 scaled-GEMM probe matched the dequantized reference for the tested GLM-shaped dimensions. The real layer-10 paired gate measured all-NVFP4 `5.2946 s` versus BF16 `4.5003 s` with `0.18142111599445343` relative L2 error; routed gate/up-only NVFP4 measured `4.3504 s` versus BF16 `4.4513 s` with `0.12603828310966492` relative L2 error and equal routes.
+- Accepted because: it exercises the official Blackwell hardware primitive directly and removes the CPU decode bottleneck from the FP4 experiment while preserving an exact BF16 fallback and source-bound sidecars.
+- Rejected as a default because: current uncalibrated layer drift is too high for the project quality target, and the bounded layer result is not an end-to-end throughput result.
+- Revisit: after calibrated outlier/residual storage, final-logit/coding tests, multi-layer residency, and a full-model bytes/quality/TPS gate.

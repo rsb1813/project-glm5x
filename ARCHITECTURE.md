@@ -92,15 +92,15 @@ GLM5X is the GLM-5.x product runtime. The migrated K3X code is treated as a stor
 - Shared-expert device accumulation for the raw-BF16 learned-MoE path (`--device-accumulate 1 --fuse-shared 1`).
 - Python reference expert-major batching (`execution_mode="expert_major"`). It is parity-tested but default-off because the real four-token direct MoE sample improved `21.67 ms` to `18.65 ms`, while one-token decode worsened `5.58 ms` to `7.36 ms`; the grouped path also allocated about `1.97 GB` of temporary VRAM for stacked weights on the four-token probe.
 - TurboQuant 2.5/3.5-bit KV schedules, UltraQuant-style asymmetric K/V and block-scale variants.
-- Reference-only native MXFP4 encoding from BF16/FP32 matrices with E2M1 nibbles, E8M0 group scales, and `max_abs` or calibration-style `mse` scale selection. It is not converter-integrated or a runtime default because the first real layer-10 expert probe measured 19.86% FFN relative L2 error for `max_abs` and 19.07% for `mse`.
+- Reference-only native MXFP4 encoding from BF16/FP32 matrices with E2M1 nibbles, E8M0 group scales, and `max_abs` or calibration-style `mse` scale selection. The new NVFP4 CUDA path shares the FP4 values but uses blocked FP8 E4M3 scales and `torch._scaled_mm`; neither representation is converter-integrated or a runtime default because current real-layer drift remains too high.
 - Mixed weight quantization, outlier residuals, and CUDA fusion.
 
 ### Proposed
 
 - GLM-5.3 checkpoint descriptor and calibration swap.
-- Full RTX 5080 native CUDA kernels beyond the current scalar MXFP4 grid path.
+- Full RTX 5080 native CUDA kernels beyond the current NVFP4 scaled-GEMM reference path and scalar MXFP4 grid path.
 - Making dequantized BF16 the default, or storing all GLM experts in BF16, is rejected until VRAM pressure and quality are measured with real shards.
-- Promoting direct BF16-to-MXFP4 conversion to a QUALITY or BALANCED default is rejected until calibrated outlier/mixed-precision storage brings the real-layer quality error down.
+- Promoting direct BF16-to-MXFP4/NVFP4 conversion to a QUALITY or BALANCED default is rejected until calibrated outlier/mixed-precision storage brings the real-layer quality error down.
 - Cloud-side shard conversion through the existing SKYFORGE concept.
 
 ## Runtime data flow
@@ -125,7 +125,15 @@ K3-specific KDA, Attention Residual, Stable LatentMoE, 896-way Top-16 assumption
 
 The controls are useful for measuring the trade-off between expert admission and output drift, but they are not enabled by any quality mode. On the real layer-10 four-token activation, natural Top-8 used `12.43729756900575 s` and 31 unique routed experts. The shared Top-4 proxy used `5.043440291978186 s` and 16 unique experts, but its relative L2 difference against the natural Top-8 output was `0.8120684623718262`. This is an experimental/rejected default path, not a quality-preserving speed claim.
 
-The fingerprinted expert sidecar supports CUDA TinyGEMM INT4 (`.pi4`), comparison-only row-scaled E4M3 FP8 (`.pf8`), and experimental reference MXFP4 (`.pm4`) records. FP8 is not the project target; it is retained only as a measured midpoint and an interoperability comparison for any official GLM FP8 artifact. The FP4 path uses the existing E2M1/E8M0 reference encoder, stores packed nibbles and group scales, and currently decodes to BF16 before the reference MLP. On the real layer-10 one-token gate, eight selected experts occupied `160,440,156` sidecar bytes (`26.56%` of the corresponding BF16 role bytes), route IDs were unchanged, and MXFP4-vs-BF16 relative L2 error was `0.16359105706214905` with `0.001750946044921875` maximum absolute error. Native Blackwell FP4 kernels, calibrated outlier residuals, and full-model quality gates remain proposed/open.
+The fingerprinted expert sidecar supports CUDA TinyGEMM INT4 (`.pi4`), comparison-only row-scaled E4M3 FP8 (`.pf8`), and experimental reference MXFP4 (`.pm4`) records. FP8 is not the project target; it is retained only as a measured midpoint and an interoperability comparison for any official GLM FP8 artifact. The original `.pm4` path uses the E2M1/E8M0 reference encoder and decodes to BF16 before the reference MLP. On the real layer-10 one-token gate, eight selected experts occupied `160,440,156` sidecar bytes (`26.56%` of the corresponding BF16 role bytes), route IDs were unchanged, and MXFP4-vs-BF16 relative L2 error was `0.16359105706214905` with `0.001750946044921875` maximum absolute error.
+
+## Implemented experimental Blackwell NVFP4 path
+
+- `reference/glm5x_ref/nvfp4.py` implements the RTX 5080 NVFP4 contract used by the reference runtime: E2M1 FP4 values, per-16-value FP8 E4M3 block scales, one FP32 global scale, and the cuBLAS blocked scale layout. The CUDA GEMM path uses `torch._scaled_mm`; its B operand intentionally preserves the column-major transpose stride required by the Blackwell kernel. CPU/reference execution decodes the same payload for parity.
+- The fingerprinted cache adds `.pn4` all-projection records and `.pgu` mixed records. `expert_precision=nvfp4` quantizes gate/up/down; `expert_precision=nvfp4_gate_up` quantizes only routed gate/up and keeps the shared expert and down projection in BF16. Both modes preserve the official router and natural Top-8 route IDs.
+- Focused NVFP4/layer/cache/model tests pass (`21 passed` in the latest selected group). A synthetic CUDA scaled-GEMM parity probe matched the dequantized reference exactly for the tested shapes. This validates the storage/layout/kernel contract, not full-model quality or throughput.
+- Real layer-10 one-token paired measurements on the RTX 5080: all-NVFP4 measured `5.2946 s` versus BF16 `4.5003 s` with `0.18142111599445343` relative L2 error; routed gate/up NVFP4 with shared/down BF16 measured `4.3504 s` versus BF16 `4.4513 s` with `0.12603828310966492` relative L2 error and unchanged routes. These are bounded layer measurements, not tok/s.
+- NVFP4 remains experimental and default-off. Promotion requires calibrated outlier/residual handling, final-logit and coding-quality parity, and a fresh full-model traffic/throughput gate. FP8 remains comparison-only and is not a reason to maintain a competing local final format.
 
 ## Quality modes
 

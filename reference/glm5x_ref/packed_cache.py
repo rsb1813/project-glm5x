@@ -15,12 +15,13 @@ import torch
 
 from k3x_ref.mxfp4 import decode_mxfp4, encode_mxfp4
 from .int4 import GLM5XInt4Weight
+from .nvfp4 import GLM5XNVFP4Weight
 
 
 _MAGIC = b"GLM5XPI4"
 _VERSION = 1
 _HEADER = struct.Struct("<8sII")
-_PRECISIONS = {"int4", "fp8", "mxfp4"}
+_PRECISIONS = {"int4", "fp8", "mxfp4", "nvfp4", "nvfp4_gate_up"}
 
 
 @dataclass(frozen=True)
@@ -48,12 +49,18 @@ class GLM5XPackedExpertCache:
         layer_id, expert_id = (int(value) for value in key)
         if layer_id < 0 or expert_id < 0:
             raise ValueError("GLM5X_PACKED_CACHE_KEY")
-        suffix = {"int4": "pi4", "fp8": "pf8", "mxfp4": "pm4"}[precision]
+        suffix = {
+            "int4": "pi4",
+            "fp8": "pf8",
+            "mxfp4": "pm4",
+            "nvfp4": "pn4",
+            "nvfp4_gate_up": "pgu",
+        }[precision]
         return root / f"layer-{layer_id:04d}-expert-{expert_id:04d}.{suffix}"
 
     @staticmethod
     def _weight_payload(
-        weight: GLM5XInt4Weight | torch.Tensor,
+        weight: GLM5XInt4Weight | GLM5XNVFP4Weight | torch.Tensor,
         scale: torch.Tensor | None,
         precision: str,
     ) -> tuple[dict[str, Any], bytes, bytes]:
@@ -83,7 +90,7 @@ class GLM5XPackedExpertCache:
             group_size = 0
             inner_k_tiles = 0
             qparams_dtype = "float32"
-        else:
+        elif precision == "mxfp4":
             if (
                 not isinstance(weight, torch.Tensor)
                 or weight.ndim != 2
@@ -100,6 +107,60 @@ class GLM5XPackedExpertCache:
             group_size = 32
             inner_k_tiles = 0
             qparams_dtype = "uint8"
+        else:
+            if precision == "nvfp4_gate_up" and isinstance(weight, torch.Tensor):
+                packed = weight.detach().to(device="cpu", dtype=torch.bfloat16).contiguous()
+                packed_bytes = packed.view(torch.int16).numpy().tobytes(order="C")
+                return (
+                    {
+                        "representation": "bf16",
+                        "shape": list(weight.shape),
+                        "group_size": 0,
+                        "inner_k_tiles": 0,
+                        "packed_shape": list(packed.shape),
+                        "qparams_shape": [],
+                        "qparams_dtype": "none",
+                        "packed_bytes": len(packed_bytes),
+                        "qparams_bytes": 0,
+                        "packed_crc32c": int(google_crc32c.value(packed_bytes)),
+                        "qparams_crc32c": int(google_crc32c.value(b"")),
+                    },
+                    packed_bytes,
+                    b"",
+                )
+            if not isinstance(weight, GLM5XNVFP4Weight) or scale is not None:
+                raise ValueError("GLM5X_PACKED_CACHE_REQUIRES_NVFP4")
+            packed = weight.packed.detach().to(device="cpu").contiguous()
+            scales = weight.scales.detach().to(device="cpu").contiguous()
+            global_scale = weight.global_scale.detach().to(device="cpu", dtype=torch.float32).contiguous()
+            packed_bytes = packed.numpy().tobytes(order="C")
+            scale_bytes = scales.view(torch.uint8).numpy().tobytes(order="C")
+            qparam_bytes = scale_bytes + global_scale.numpy().tobytes(order="C")
+            shape = list(weight.shape)
+            packed_shape = packed.shape
+            qparams_shape = scales.shape
+            group_size = 16
+            inner_k_tiles = 0
+            qparams_dtype = "float8_e4m3fn"
+            return (
+                {
+                    "representation": "nvfp4",
+                    "shape": shape,
+                    "group_size": group_size,
+                    "inner_k_tiles": inner_k_tiles,
+                    "packed_shape": list(packed_shape),
+                    "qparams_shape": list(qparams_shape),
+                    "qparams_dtype": qparams_dtype,
+                    "packed_bytes": len(packed_bytes),
+                    "qparams_bytes": len(qparam_bytes),
+                    "scale_bytes": len(scale_bytes),
+                    "global_scale_bytes": 4,
+                    "packed_crc32c": int(google_crc32c.value(packed_bytes)),
+                    "qparams_crc32c": int(google_crc32c.value(qparam_bytes)),
+                },
+                packed_bytes,
+                qparam_bytes,
+            )
         return (
             {
                 "shape": shape,
@@ -138,6 +199,14 @@ class GLM5XPackedExpertCache:
             scales = (expert.gate_scale, expert.up_scale, expert.down_scale)
             if not expert.is_fp8:
                 raise ValueError("GLM5X_PACKED_CACHE_REQUIRES_FP8")
+        elif precision == "nvfp4":
+            if not all(isinstance(weight, GLM5XNVFP4Weight) for weight in weights):
+                raise ValueError("GLM5X_PACKED_CACHE_REQUIRES_NVFP4")
+        elif precision == "nvfp4_gate_up":
+            if not all(isinstance(weight, GLM5XNVFP4Weight) for weight in weights[:2]):
+                raise ValueError("GLM5X_PACKED_CACHE_REQUIRES_NVFP4")
+            if not isinstance(weights[2], torch.Tensor):
+                raise ValueError("GLM5X_PACKED_CACHE_REQUIRES_BF16_DOWN")
         records: list[dict[str, Any]] = []
         payload = bytearray()
         for weight, scale in zip(weights, scales):
@@ -184,7 +253,7 @@ class GLM5XPackedExpertCache:
     def _decode_role(
         metadata: dict[str, Any], payload: bytes, *, device: torch.device,
         precision: str,
-    ) -> GLM5XInt4Weight | tuple[torch.Tensor, torch.Tensor]:
+    ) -> GLM5XInt4Weight | GLM5XNVFP4Weight | tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         shape = tuple(int(value) for value in metadata["shape"])
         packed_shape = tuple(int(value) for value in metadata["packed_shape"])
         qparams_shape = tuple(int(value) for value in metadata["qparams_shape"])
@@ -200,6 +269,12 @@ class GLM5XPackedExpertCache:
             raise ValueError("GLM5X_PACKED_CACHE_PACKED_CRC")
         if google_crc32c.value(qparams_data) != int(metadata["qparams_crc32c"]):
             raise ValueError("GLM5X_PACKED_CACHE_QPARAM_CRC")
+        if precision == "nvfp4_gate_up" and metadata.get("representation") == "bf16":
+            if qparams_bytes != 0:
+                raise ValueError("GLM5X_PACKED_CACHE_BF16_QPARAM_EXTENT")
+            return torch.frombuffer(bytearray(packed_data), dtype=torch.int16).view(
+                torch.bfloat16
+            ).reshape(packed_shape).to(device=device)
         if precision == "int4":
             packed = torch.frombuffer(bytearray(packed_data), dtype=torch.int32).reshape(
                 packed_shape
@@ -221,6 +296,26 @@ class GLM5XPackedExpertCache:
             return packed.to(device=device), torch.frombuffer(
                 bytearray(qparams_data), dtype=torch.float32
             ).reshape(qparams_shape).to(device=device)
+        if precision in {"nvfp4", "nvfp4_gate_up"}:
+            scale_bytes = int(metadata["scale_bytes"])
+            global_scale_bytes = int(metadata["global_scale_bytes"])
+            if scale_bytes + global_scale_bytes != qparams_bytes:
+                raise ValueError("GLM5X_PACKED_CACHE_NVFP4_QPARAM_EXTENT")
+            packed = torch.frombuffer(bytearray(packed_data), dtype=torch.uint8).reshape(
+                packed_shape
+            )
+            scales = torch.frombuffer(
+                bytearray(qparams_data[:scale_bytes]), dtype=torch.uint8
+            ).view(torch.float8_e4m3fn).reshape(qparams_shape)
+            global_scale = torch.frombuffer(
+                bytearray(qparams_data[scale_bytes:]), dtype=torch.float32
+            ).reshape(())
+            return GLM5XNVFP4Weight(
+                packed=packed.to(device=device),
+                scales=scales.to(device=device),
+                global_scale=global_scale.to(device=device),
+                shape=shape,
+            )
         decoded = decode_mxfp4(
             packed_data,
             qparams_data,
@@ -285,6 +380,12 @@ class GLM5XPackedExpertCache:
                         down_scale=down_scale,
                     )
                 if precision == "mxfp4":
+                    return GLM5XExpertWeights(
+                        gate_proj=decoded[0],
+                        up_proj=decoded[1],
+                        down_proj=decoded[2],
+                    )
+                if precision in {"nvfp4", "nvfp4_gate_up"}:
                     return GLM5XExpertWeights(
                         gate_proj=decoded[0],
                         up_proj=decoded[1],

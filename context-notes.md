@@ -556,3 +556,13 @@
 - Added `expert_precision="mxfp4"` and `.pm4` sidecars using the existing E2M1/E8M0 reference codec. The current loader decodes to BF16, so this is storage/correctness plumbing, not a native FP4 speed path.
 - Bounded real layer-10 one-token evidence: eight routed experts, `160,440,156` sidecar bytes versus `603,979,776` BF16 bytes, unchanged routes, `0.16359105706214905` relative L2 error, and `17.867729659978068 s` fresh sidecar decode versus `2.79652249100036 s` BF16.
 - Next decision gate is calibrated FP4 (outlier residual or mixed precision) plus a native RTX 5080 kernel. Do not claim full-model TPS from this layer result.
+
+## 2026-08-15 -- NVFP4 Blackwell path
+
+- The final precision direction is FP4. FP8 remains a comparison/interoperability baseline because an official GLM FP8 artifact may be available and local FP8 is not the requested final format.
+- Implemented `GLM5XNVFP4Weight` with E2M1 values, per-16-value FP8 E4M3 scales, a FP32 global scale, blocked cuBLAS scale layout, CPU decode fallback, and CUDA `torch._scaled_mm`. The weight B operand must retain the transposed column-major stride; making it contiguous produces `CUBLAS_STATUS_NOT_SUPPORTED` on the RTX 5080 path.
+- Added `.pn4` all-projection and `.pgu` gate/up-only sidecars. The latter keeps shared/down BF16 to limit drift while preserving exact routing.
+- Focused NVFP4/layer/cache/model verification is `21 passed`. Real layer-10 paired results are all-NVFP4 `5.2946 s` versus BF16 `4.5003 s` with `18.14%` relative L2 drift, and gate/up-only NVFP4 `4.3504 s` versus BF16 `4.4513 s` with `12.60%` drift and equal routes.
+- This is the first native Blackwell FP4 contract, not a full-model performance result. Calibration, residual/outlier storage, multi-layer residency, and final-logit quality remain the next gates.
+
+- Verification after the NVFP4 integration completed with `340 passed, 124 skipped` in `196.52 s`; no full-model quality or 10--20 tok/s claim changed.

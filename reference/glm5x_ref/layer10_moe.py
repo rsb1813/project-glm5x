@@ -17,6 +17,7 @@ from k3x_converter.reader import K3XReader
 from glm5x_converter.bundle import GLM5XExpertBundle
 
 from .int4 import GLM5XInt4Weight, linear, quantize_int4_weight, weight_shape
+from .nvfp4 import GLM5XNVFP4Weight, linear_nvfp4, quantize_nvfp4_weight
 from k3x_ref.mxfp4 import decode_mxfp4, encode_mxfp4
 from .packed_cache import GLM5XPackedExpertCache
 
@@ -31,9 +32,9 @@ def _tensor_from_readonly_buffer(data: bytes, dtype: torch.dtype) -> torch.Tenso
 class GLM5XExpertWeights:
     """한 routed/shared expert의 gate, up, down projection입니다."""
 
-    gate_proj: torch.Tensor | GLM5XInt4Weight
-    up_proj: torch.Tensor | GLM5XInt4Weight
-    down_proj: torch.Tensor | GLM5XInt4Weight
+    gate_proj: torch.Tensor | GLM5XInt4Weight | GLM5XNVFP4Weight
+    up_proj: torch.Tensor | GLM5XInt4Weight | GLM5XNVFP4Weight
+    down_proj: torch.Tensor | GLM5XInt4Weight | GLM5XNVFP4Weight
     gate_scale: torch.Tensor | None = None
     up_scale: torch.Tensor | None = None
     down_scale: torch.Tensor | None = None
@@ -74,6 +75,13 @@ class GLM5XExpertWeights:
             and self.down_scale is not None
         )
 
+    @property
+    def is_nvfp4(self) -> bool:
+        return all(
+            isinstance(weight, GLM5XNVFP4Weight)
+            for weight in (self.gate_proj, self.up_proj, self.down_proj)
+        )
+
 
 @dataclass(frozen=True)
 class GLM5XExpertTensorCacheStats:
@@ -109,7 +117,7 @@ class GLM5XExpertTensorCache:
     def _size(expert: GLM5XExpertWeights) -> int:
         return sum(
             tensor.num_bytes()
-            if isinstance(tensor, GLM5XInt4Weight)
+            if isinstance(tensor, (GLM5XInt4Weight, GLM5XNVFP4Weight))
             else int(tensor.numel()) * int(tensor.element_size())
             for tensor in (expert.gate_proj, expert.up_proj, expert.down_proj)
         )
@@ -328,7 +336,7 @@ class GLM5XLayer10MoEReference:
             raise ValueError("GLM5X_INVALID_EXPERT_CACHE_FLAG")
         if execution_mode not in {"loop", "expert_major"}:
             raise ValueError("GLM5X_INVALID_EXECUTION_MODE")
-        if expert_precision not in {"bf16", "fp8", "int4", "mxfp4"}:
+        if expert_precision not in {"bf16", "fp8", "int4", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
         if proxy_mode not in {"none", "shared"}:
             raise ValueError("GLM5X_INVALID_PROXY_MODE")
@@ -365,6 +373,8 @@ class GLM5XLayer10MoEReference:
             if expert_precision == "int4"
             else self._quantize_expert_mxfp4(shared_expert)
             if expert_precision == "mxfp4"
+            else self._quantize_expert_nvfp4(shared_expert)
+            if expert_precision == "nvfp4"
             else shared_expert
         )
         self.top_k = top_k
@@ -402,6 +412,14 @@ class GLM5XLayer10MoEReference:
             expert = self._quantize_expert_int4(expert, device=self._device_for_expert(expert))
         elif self.expert_precision == "mxfp4":
             expert = self._quantize_expert_mxfp4(
+                expert, device=self._device_for_expert(expert)
+            )
+        elif self.expert_precision == "nvfp4":
+            expert = self._quantize_expert_nvfp4(
+                expert, device=self._device_for_expert(expert)
+            )
+        elif self.expert_precision == "nvfp4_gate_up":
+            expert = self._quantize_expert_nvfp4_gate_up(
                 expert, device=self._device_for_expert(expert)
             )
         if expert.gate_proj.shape[1] != self.hidden_size:
@@ -445,6 +463,14 @@ class GLM5XLayer10MoEReference:
                 )
             elif self.expert_precision == "mxfp4":
                 expert = self._quantize_expert_mxfp4(
+                    expert, device=self._device_for_expert(expert)
+                )
+            elif self.expert_precision == "nvfp4":
+                expert = self._quantize_expert_nvfp4(
+                    expert, device=self._device_for_expert(expert)
+                )
+            elif self.expert_precision == "nvfp4_gate_up":
+                expert = self._quantize_expert_nvfp4_gate_up(
                     expert, device=self._device_for_expert(expert)
                 )
             if expert.gate_proj.shape[1] != self.hidden_size:
@@ -510,9 +536,54 @@ class GLM5XLayer10MoEReference:
         )
 
     @staticmethod
+    def _quantize_expert_nvfp4(
+        expert: GLM5XExpertWeights,
+        *,
+        device: torch.device | str | None = None,
+    ) -> GLM5XExpertWeights:
+        """Pack all three projections for Blackwell native NVFP4 GEMM."""
+        weights = (expert.gate_proj, expert.up_proj, expert.down_proj)
+        if all(isinstance(weight, GLM5XNVFP4Weight) for weight in weights):
+            return expert
+        if any(isinstance(weight, (GLM5XInt4Weight, GLM5XNVFP4Weight)) for weight in weights):
+            raise ValueError("GLM5X_NVFP4_REQUIRES_FLOAT_WEIGHTS")
+        target = None if device is None else torch.device(device)
+        return GLM5XExpertWeights(
+            gate_proj=quantize_nvfp4_weight(torch.as_tensor(weights[0]), device=target),
+            up_proj=quantize_nvfp4_weight(torch.as_tensor(weights[1]), device=target),
+            down_proj=quantize_nvfp4_weight(torch.as_tensor(weights[2]), device=target),
+        )
+
+    @staticmethod
+    def _quantize_expert_nvfp4_gate_up(
+        expert: GLM5XExpertWeights,
+        *,
+        device: torch.device | str | None = None,
+    ) -> GLM5XExpertWeights:
+        """Keep the sensitive down projection in BF16 while packing gate/up in NVFP4."""
+        weights = (expert.gate_proj, expert.up_proj, expert.down_proj)
+        if isinstance(weights[0], GLM5XNVFP4Weight) and isinstance(
+            weights[1], GLM5XNVFP4Weight
+        ) and not isinstance(weights[2], (GLM5XInt4Weight, GLM5XNVFP4Weight)):
+            return expert
+        if any(isinstance(weight, GLM5XInt4Weight) for weight in weights):
+            raise ValueError("GLM5X_NVFP4_REQUIRES_FLOAT_WEIGHTS")
+        target = None if device is None else torch.device(device)
+        down = torch.as_tensor(weights[2])
+        if target is not None:
+            down = down.to(device=target)
+        return GLM5XExpertWeights(
+            gate_proj=quantize_nvfp4_weight(torch.as_tensor(weights[0]), device=target),
+            up_proj=quantize_nvfp4_weight(torch.as_tensor(weights[1]), device=target),
+            down_proj=down,
+        )
+
+    @staticmethod
     def _device_for_expert(expert: GLM5XExpertWeights) -> torch.device | None:
         for weight in (expert.gate_proj, expert.up_proj, expert.down_proj):
             if isinstance(weight, GLM5XInt4Weight):
+                return weight.device
+            if isinstance(weight, GLM5XNVFP4Weight):
                 return weight.device
             if isinstance(weight, torch.Tensor) and weight.device.type == "cuda":
                 return weight.device
@@ -583,6 +654,13 @@ class GLM5XLayer10MoEReference:
             return GLM5XLayer10MoEReference._fp8_linear(
                 F.silu(gate) * up, expert.down_proj, expert.down_scale
             )
+        if expert.is_nvfp4:
+            assert isinstance(expert.gate_proj, GLM5XNVFP4Weight)
+            assert isinstance(expert.up_proj, GLM5XNVFP4Weight)
+            assert isinstance(expert.down_proj, GLM5XNVFP4Weight)
+            gate = linear_nvfp4(hidden, expert.gate_proj)
+            up = linear_nvfp4(hidden, expert.up_proj)
+            return linear_nvfp4(F.silu(gate) * up, expert.down_proj)
         gate = linear(hidden, expert.gate_proj)
         up = linear(hidden, expert.up_proj)
         return linear(F.silu(gate) * up, expert.down_proj)
@@ -665,6 +743,9 @@ class GLM5XLayer10MoEReference:
             isinstance(expert.gate_proj, GLM5XInt4Weight)
             or isinstance(expert.up_proj, GLM5XInt4Weight)
             or isinstance(expert.down_proj, GLM5XInt4Weight)
+            or isinstance(expert.gate_proj, GLM5XNVFP4Weight)
+            or isinstance(expert.up_proj, GLM5XNVFP4Weight)
+            or isinstance(expert.down_proj, GLM5XNVFP4Weight)
             for _, expert, _, _ in assignments
         ):
             for _, expert, token_indices, slots in assignments:
@@ -843,7 +924,7 @@ class GLM5XLayer10MoEReference:
 
         prefix = f"model.layers.{layer_id}.mlp"
         target = None if device is None else torch.device(device)
-        if expert_precision not in {"bf16", "fp8", "int4", "mxfp4"}:
+        if expert_precision not in {"bf16", "fp8", "int4", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
         if trunk_precision not in {"bf16", "int4"}:
             raise ValueError("GLM5X_INVALID_TRUNK_PRECISION")
@@ -876,8 +957,10 @@ class GLM5XLayer10MoEReference:
             shared = cls._quantize_expert_int4(shared, device=target)
         elif expert_precision == "mxfp4":
             shared = cls._quantize_expert_mxfp4(shared, device=target)
+        elif expert_precision == "nvfp4":
+            shared = cls._quantize_expert_nvfp4(shared, device=target)
         if target is not None:
-            if not isinstance(shared.gate_proj, GLM5XInt4Weight):
+            if not isinstance(shared.gate_proj, (GLM5XInt4Weight, GLM5XNVFP4Weight)):
                 shared = GLM5XExpertWeights(
                     gate_proj=shared.gate_proj.to(device=target),
                     up_proj=shared.up_proj.to(device=target),
@@ -906,7 +989,7 @@ class GLM5XLayer10MoEReference:
                 if cached is not None:
                     return cached
             source_digest = None
-            if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4"}:
+            if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
                 source_digest = bundle.expert_source_digest(layer_id, expert_id)
                 cached = packed_expert_cache.get(
                     cache_key,
@@ -929,7 +1012,7 @@ class GLM5XLayer10MoEReference:
                 device=target,
                 precision=expert_precision,
             )
-            if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4"}:
+            if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
                 assert source_digest is not None
                 packed_expert_cache.put(
                     cache_key, source_digest, expert, precision=expert_precision
@@ -957,7 +1040,7 @@ class GLM5XLayer10MoEReference:
                 payload_pending: list[int] = []
                 source_digests: dict[int, str] = {}
                 for expert_id in pending:
-                    if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4"}:
+                    if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
                         digest = bundle.expert_source_digest(layer_id, expert_id)
                         cached = packed_expert_cache.get(
                             (layer_id, expert_id),
@@ -990,7 +1073,7 @@ class GLM5XLayer10MoEReference:
                     device=target,
                     precision=expert_precision,
                 )
-                if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4"}:
+                if packed_expert_cache is not None and expert_precision in {"int4", "fp8", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
                     packed_expert_cache.put(
                         (layer_id, expert_id),
                         source_digests[expert_id],
@@ -1127,7 +1210,7 @@ class GLM5XLayer10MoEReference:
         precision: str = "bf16",
     ) -> GLM5XExpertWeights:
         target = None if device is None else torch.device(device)
-        if precision not in {"bf16", "fp8", "int4", "mxfp4"}:
+        if precision not in {"bf16", "fp8", "int4", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
 
         def decode(role: str, shape: tuple[int, int]) -> torch.Tensor:
@@ -1149,7 +1232,13 @@ class GLM5XLayer10MoEReference:
             return cls._quantize_expert_int4(expert, device=target)
         elif precision == "mxfp4":
             expert = cls._quantize_expert_mxfp4(expert, device=target)
-        if target is None:
+        elif precision == "nvfp4":
+            expert = cls._quantize_expert_nvfp4(expert, device=target)
+        elif precision == "nvfp4_gate_up":
+            expert = cls._quantize_expert_nvfp4_gate_up(expert, device=target)
+        if target is None or isinstance(
+            expert.gate_proj, (GLM5XInt4Weight, GLM5XNVFP4Weight)
+        ):
             return expert
         return GLM5XExpertWeights(
             gate_proj=expert.gate_proj.to(device=target),

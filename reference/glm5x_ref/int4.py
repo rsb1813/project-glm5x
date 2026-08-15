@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
 
+from .nvfp4 import GLM5XNVFP4Weight, linear_nvfp4
+
 
 @dataclass(frozen=True)
 class GLM5XInt4Weight:
@@ -135,10 +137,15 @@ def quantize_int4_weight(
 
 def linear(
     values: torch.Tensor,
-    weight: torch.Tensor | GLM5XInt4Weight,
+    weight: torch.Tensor | GLM5XInt4Weight | GLM5XNVFP4Weight,
     bias: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Run BF16 TinyGEMM linear or the exact eager fallback for normal tensors."""
+    if isinstance(weight, GLM5XNVFP4Weight):
+        output = linear_nvfp4(values, weight)
+        if bias is not None:
+            output = output + torch.as_tensor(bias, device=output.device, dtype=output.dtype)
+        return output
     if isinstance(weight, GLM5XInt4Weight):
         if values.device != weight.device:
             raise ValueError("GLM5X_INT4_VALUE_DEVICE")
@@ -161,7 +168,9 @@ def linear(
     return F.linear(values, tensor, bias)
 
 
-def weight_shape(weight: torch.Tensor | GLM5XInt4Weight) -> tuple[int, ...]:
-    if isinstance(weight, GLM5XInt4Weight):
+def weight_shape(
+    weight: torch.Tensor | GLM5XInt4Weight | GLM5XNVFP4Weight,
+) -> tuple[int, ...]:
+    if isinstance(weight, (GLM5XInt4Weight, GLM5XNVFP4Weight)):
         return weight.shape
     return tuple(torch.as_tensor(weight).shape)

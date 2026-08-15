@@ -6,6 +6,7 @@ import torch
 
 from glm5x_ref.int4 import GLM5XInt4Weight, quantize_int4_weight
 from glm5x_ref.layer10_moe import GLM5XExpertWeights
+from glm5x_ref.nvfp4 import GLM5XNVFP4Weight, quantize_nvfp4_weight
 from glm5x_ref.packed_cache import GLM5XPackedExpertCache
 
 
@@ -80,3 +81,44 @@ def test_packed_expert_cache_round_trip_mxfp4(tmp_path) -> None:
         (loaded.gate_proj.float() - expert.gate_proj.float()).norm()
         / expert.gate_proj.float().norm()
     ) < 0.25
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_packed_expert_cache_round_trip_nvfp4(tmp_path) -> None:
+    torch.manual_seed(47)
+    expert = GLM5XExpertWeights(
+        gate_proj=quantize_nvfp4_weight(torch.randn(128, 256, device="cuda"), device="cuda"),
+        up_proj=quantize_nvfp4_weight(torch.randn(128, 256, device="cuda"), device="cuda"),
+        down_proj=quantize_nvfp4_weight(torch.randn(256, 128, device="cuda"), device="cuda"),
+    )
+    cache = GLM5XPackedExpertCache(tmp_path)
+    digest = "source-digest-nvfp4-000000000000000000000000000000000"
+    cache.put((4, 10), digest, expert, precision="nvfp4")
+    loaded = cache.get((4, 10), digest, device="cuda", precision="nvfp4")
+    assert loaded is not None
+    assert isinstance(loaded.gate_proj, GLM5XNVFP4Weight)
+    assert (tmp_path / "layer-0004-expert-0010.pn4").exists()
+    torch.testing.assert_close(loaded.gate_proj.packed, expert.gate_proj.packed)
+    torch.testing.assert_close(loaded.gate_proj.scales, expert.gate_proj.scales)
+    torch.testing.assert_close(loaded.gate_proj.global_scale, expert.gate_proj.global_scale)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_packed_expert_cache_round_trip_nvfp4_gate_up(tmp_path) -> None:
+    torch.manual_seed(53)
+    expert = GLM5XExpertWeights(
+        gate_proj=quantize_nvfp4_weight(torch.randn(128, 256, device="cuda"), device="cuda"),
+        up_proj=quantize_nvfp4_weight(torch.randn(128, 256, device="cuda"), device="cuda"),
+        down_proj=torch.randn(256, 128, dtype=torch.bfloat16, device="cuda"),
+    )
+    cache = GLM5XPackedExpertCache(tmp_path)
+    digest = "source-digest-nvfp4-gate-up-000000000000000000000000000"
+    cache.put((4, 11), digest, expert, precision="nvfp4_gate_up")
+    loaded = cache.get((4, 11), digest, device="cuda", precision="nvfp4_gate_up")
+    assert loaded is not None
+    assert isinstance(loaded.gate_proj, GLM5XNVFP4Weight)
+    assert isinstance(loaded.down_proj, torch.Tensor)
+    assert (tmp_path / "layer-0004-expert-0011.pgu").exists()
+    torch.testing.assert_close(loaded.gate_proj.packed, expert.gate_proj.packed)
+    torch.testing.assert_close(loaded.up_proj.scales, expert.up_proj.scales)
+    torch.testing.assert_close(loaded.down_proj, expert.down_proj)

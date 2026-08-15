@@ -92,4 +92,5 @@
 - [ ] Add exact route-stable multi-layer residency policy that materially lowers full-model logical expert bytes/token.
 - [ ] Re-run a fresh full-model quality/throughput gate after packed sidecar/residency work; do not claim 10--20 tok/s before this gate.
 - [x] Add an experimental fingerprinted MXFP4 `.pm4` sidecar and reference-only pack/decode path; keep FP4 default-off pending calibration/native CUDA execution.
-- [ ] Add calibrated FP4 residual metadata and native RTX 5080 FP4 execution; do not promote the current uncalibrated reference path.
+- [x] Add the experimental RTX 5080 NVFP4 blocked-scale CUDA path and `.pn4`/`.pgu` sidecars; keep both modes default-off pending calibration and final-logit quality.
+- [ ] Add calibrated FP4 residual metadata and promote only after native RTX 5080 FP4 full-model quality/traffic gates; do not promote the current uncalibrated path.
