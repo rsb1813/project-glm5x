@@ -92,5 +92,5 @@
 
 - [x] Record implemented/proposed boundaries and B-0005 measurements.
 - [x] Verify raw hashes, JSON/CSV parity, compile/tests, and `git diff --check`.
-- [ ] Commit evidence and update `PROJECT_STATE.md` last.
+- [x] Commit evidence and update `PROJECT_STATE.md` last.
 - [ ] Push the branch outside the sandbox and open a stacked draft PR.
