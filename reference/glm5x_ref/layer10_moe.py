@@ -1127,6 +1127,7 @@ class GLM5XLayer10MoEReference:
                     source_digest,
                     device=target if target is not None else "cuda",
                     precision=expert_precision,
+                    non_blocking=packed_expert_cache.non_blocking,
                 )
                 if cached is not None:
                     if expert_device_cache is not None:
@@ -1190,6 +1191,7 @@ class GLM5XLayer10MoEReference:
                         device=target if target is not None else "cuda",
                         precision=expert_precision,
                         workers=expert_load_workers,
+                        non_blocking=packed_expert_cache.non_blocking,
                     )
                     for (cached_layer, expert_id), cached in cached_many.items():
                         if cached_layer != layer_id:

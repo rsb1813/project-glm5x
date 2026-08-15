@@ -2,8 +2,11 @@
 #include "resident_weights.cuh"
 
 #include <algorithm>
+#include <iterator>
+#include <list>
 #include <limits>
 #include <map>
+#include <set>
 #include <tuple>
 #include <utility>
 
@@ -64,6 +67,7 @@ struct ResidentWeightTable::Impl {
 
         DeviceAllocation primary;
         DeviceAllocation secondary;
+        std::list<ResidentWeightKey>::iterator lru_position;
     };
 
     Impl(std::uint64_t capacity_value, BackendMemoryStats* memory_value,
@@ -89,12 +93,43 @@ struct ResidentWeightTable::Impl {
                 is_dense(key.representation));
     }
 
+    void touch(ResidentWeightKey key) {
+        const auto found = entries.find(key);
+        if (found == entries.end()) return;
+        lru.erase(found->second->lru_position);
+        lru.push_back(key);
+        found->second->lru_position = std::prev(lru.end());
+    }
+
+    bool evict_one() {
+        for (const auto key : lru) {
+            if (protected_keys.contains(key)) continue;
+            const auto found = entries.find(key);
+            if (found == entries.end()) continue;
+            const auto bytes = found->second->primary.bytes() +
+                               found->second->secondary.bytes();
+            if (runtime->resident_weight_bytes >= bytes) {
+                runtime->resident_weight_bytes -= bytes;
+            } else {
+                runtime->resident_weight_bytes = 0;
+            }
+            lru.erase(found->second->lru_position);
+            entries.erase(found);
+            return true;
+        }
+        return false;
+    }
+
     std::uint64_t capacity;
     BackendMemoryStats* memory;
     BackendRuntimeStats* runtime;
     cudaStream_t stream;
     std::map<ResidentWeightKey, std::unique_ptr<Entry>, KeyLess> entries;
     std::map<std::uint64_t, TensorMetadata> metadata;
+    std::list<ResidentWeightKey> lru;
+    std::set<ResidentWeightKey, KeyLess> protected_keys;
+    std::uint64_t active_cycle{};
+    bool access_set_active{};
 };
 
 ResidentWeightTable::ResidentWeightTable(
@@ -114,6 +149,10 @@ Result<ResidentAcquisition> ResidentWeightTable::acquire(
     if (const auto found = impl_->entries.find(key);
         found != impl_->entries.end()) {
         ++impl_->runtime->weight_cache_hits;
+        if (impl_->access_set_active) {
+            impl_->protected_keys.insert(key);
+        }
+        impl_->touch(key);
         return Result<ResidentAcquisition>::success(
             {ResidentDisposition::hit, found->second->primary.get(),
              found->second->secondary.get(), 0});
@@ -125,11 +164,27 @@ Result<ResidentAcquisition> ResidentWeightTable::acquire(
         return Result<ResidentAcquisition>::failure(ErrorCode::invalid_extent);
     }
     const auto required = primary.size() + secondary.size();
-    if (required > impl_->capacity ||
-        impl_->runtime->resident_weight_bytes > impl_->capacity - required) {
+    if (required > impl_->capacity) {
         ++impl_->runtime->weight_cache_bypasses;
         return Result<ResidentAcquisition>::success(
             {ResidentDisposition::bypass, nullptr, nullptr, 0});
+    }
+
+    if (impl_->runtime->resident_weight_bytes >
+        impl_->capacity - required) {
+        if (!impl_->access_set_active) {
+            ++impl_->runtime->weight_cache_bypasses;
+            return Result<ResidentAcquisition>::success(
+                {ResidentDisposition::bypass, nullptr, nullptr, 0});
+        }
+        while (impl_->runtime->resident_weight_bytes >
+               impl_->capacity - required) {
+            if (!impl_->evict_one()) {
+                ++impl_->runtime->weight_cache_bypasses;
+                return Result<ResidentAcquisition>::success(
+                    {ResidentDisposition::bypass, nullptr, nullptr, 0});
+            }
+        }
     }
 
     auto entry = std::make_unique<Impl::Entry>(impl_->memory, impl_->runtime);
@@ -159,9 +214,31 @@ Result<ResidentAcquisition> ResidentWeightTable::acquire(
         key.tensor_id,
         TensorMetadata{key.representation, key.rows, key.cols, key.group_size});
     impl_->entries.emplace(key, std::move(entry));
+    impl_->lru.push_back(key);
+    impl_->entries.find(key)->second->lru_position =
+        std::prev(impl_->lru.end());
+    if (impl_->access_set_active) {
+        impl_->protected_keys.insert(key);
+    }
     return Result<ResidentAcquisition>::success(
         {ResidentDisposition::admitted, primary_pointer, secondary_pointer,
          required});
+}
+
+void ResidentWeightTable::begin_access_set(
+    std::uint64_t forward_cycle,
+    std::span<const ResidentWeightKey> protected_keys) {
+    impl_->active_cycle = forward_cycle;
+    impl_->access_set_active = true;
+    impl_->protected_keys.clear();
+    impl_->protected_keys.insert(protected_keys.begin(), protected_keys.end());
+}
+
+void ResidentWeightTable::access(ResidentWeightKey key) {
+    if (impl_->access_set_active) {
+        impl_->protected_keys.insert(key);
+    }
+    impl_->touch(key);
 }
 
 bool ResidentWeightTable::contains(ResidentWeightKey key) const {

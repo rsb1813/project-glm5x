@@ -166,3 +166,53 @@ def test_packed_expert_cache_reuses_verified_host_payload(tmp_path) -> None:
     torch.testing.assert_close(second.gate_proj.packed, first.gate_proj.packed)
     assert cache.stats.host_hits == 1
     assert cache.stats.host_resident_bytes > 0
+
+
+def test_packed_expert_cache_rejects_invalid_pinned_capacity(tmp_path) -> None:
+    with pytest.raises(ValueError, match="PINNED_CAPACITY"):
+        GLM5XPackedExpertCache(tmp_path, pinned_staging_capacity_bytes=-1)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_packed_expert_cache_non_blocking_pinned_nvfp4_round_trip(tmp_path) -> None:
+    torch.manual_seed(67)
+    expert = GLM5XExpertWeights(
+        gate_proj=quantize_nvfp4_weight(
+            torch.randn(64, 128, device="cuda"), device="cuda"
+        ),
+        up_proj=quantize_nvfp4_weight(
+            torch.randn(64, 128, device="cuda"), device="cuda"
+        ),
+        down_proj=quantize_nvfp4_weight(
+            torch.randn(128, 64, device="cuda"), device="cuda"
+        ),
+    )
+    cache = GLM5XPackedExpertCache(
+        tmp_path, pinned_staging_capacity_bytes=1 << 20
+    )
+    digest = "digest-pinned-nvfp4-000000000000000000000000"
+    cache.put((4, 15), digest, expert, precision="nvfp4")
+    loaded = cache.get(
+        (4, 15),
+        digest,
+        device="cuda",
+        precision="nvfp4",
+        non_blocking=True,
+    )
+    assert loaded is not None
+    torch.cuda.synchronize()
+    torch.testing.assert_close(loaded.gate_proj.packed, expert.gate_proj.packed)
+    torch.testing.assert_close(loaded.up_proj.scales, expert.up_proj.scales)
+    torch.testing.assert_close(loaded.down_proj.global_scale, expert.down_proj.global_scale)
+    assert cache.stats.pinned_staging_bytes > 0
+    assert cache.stats.pinned_staging_hits == 0
+    second = cache.get(
+        (4, 15),
+        digest,
+        device="cuda",
+        precision="nvfp4",
+        non_blocking=True,
+    )
+    assert second is not None
+    torch.cuda.synchronize()
+    assert cache.stats.pinned_staging_hits == 1

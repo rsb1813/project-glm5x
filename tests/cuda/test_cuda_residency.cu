@@ -42,6 +42,94 @@ int test_representation_identity() {
     return 0;
 }
 
+int test_lru_access_set_eviction() {
+    k3x::BackendMemoryStats memory;
+    k3x::BackendRuntimeStats runtime;
+    k3x::cuda::ResidentWeightTable table(16, &memory, &runtime, nullptr);
+    const std::array<float, 2> first{1.0F, 2.0F};
+    const std::array<float, 2> second{3.0F, 4.0F};
+    const std::array<float, 2> third{5.0F, 6.0F};
+    const k3x::cuda::ResidentWeightKey first_key{
+        301, k3x::cuda::WeightRepresentation::dense_fp32, 1, 2, 0};
+    const k3x::cuda::ResidentWeightKey second_key{
+        302, k3x::cuda::WeightRepresentation::dense_fp32, 1, 2, 0};
+    const k3x::cuda::ResidentWeightKey third_key{
+        303, k3x::cuda::WeightRepresentation::dense_fp32, 1, 2, 0};
+
+    const std::array protected_keys{first_key, second_key};
+    table.begin_access_set(1, protected_keys);
+    if (!table.acquire(first_key, std::as_bytes(std::span(first)), {}) ||
+        !table.acquire(second_key, std::as_bytes(std::span(second)), {})) {
+        return 40;
+    }
+    table.begin_access_set(2, std::array{first_key});
+    const auto first_hit = table.acquire(
+        first_key, std::as_bytes(std::span(first)), {});
+    const auto third_admission = table.acquire(
+        third_key, std::as_bytes(std::span(third)), {});
+    if (!first_hit || first_hit.value().disposition !=
+                           k3x::cuda::ResidentDisposition::hit ||
+        !third_admission || third_admission.value().disposition !=
+                                k3x::cuda::ResidentDisposition::admitted ||
+        !table.contains(first_key) || table.contains(second_key) ||
+        !table.contains(third_key) || runtime.resident_weight_bytes != 16 ||
+        runtime.weight_cache_misses != 3 || runtime.weight_cache_hits != 1 ||
+        runtime.device_free_count != 1) {
+        return 41;
+    }
+
+    k3x::BackendMemoryStats protected_memory;
+    k3x::BackendRuntimeStats protected_runtime;
+    k3x::cuda::ResidentWeightTable protected_table(
+        16, &protected_memory, &protected_runtime, nullptr);
+    protected_table.begin_access_set(1, protected_keys);
+    if (!protected_table.acquire(
+             first_key, std::as_bytes(std::span(first)), {}) ||
+        !protected_table.acquire(
+             second_key, std::as_bytes(std::span(second)), {})) {
+        return 42;
+    }
+    protected_table.begin_access_set(2, protected_keys);
+    const auto protected_admission = protected_table.acquire(
+        third_key, std::as_bytes(std::span(third)), {});
+    if (!protected_admission ||
+        protected_admission.value().disposition !=
+            k3x::cuda::ResidentDisposition::bypass ||
+        protected_runtime.resident_weight_bytes != 16 ||
+        protected_table.contains(third_key) ||
+        !protected_table.contains(first_key) ||
+        !protected_table.contains(second_key)) {
+        return 43;
+    }
+
+    k3x::BackendMemoryStats access_memory;
+    k3x::BackendRuntimeStats access_runtime;
+    k3x::cuda::ResidentWeightTable access_table(
+        16, &access_memory, &access_runtime, nullptr);
+    const std::array<k3x::cuda::ResidentWeightKey, 0> no_protection{};
+    access_table.begin_access_set(1, no_protection);
+    if (!access_table.acquire(
+             first_key, std::as_bytes(std::span(first)), {}) ||
+        !access_table.acquire(
+             second_key, std::as_bytes(std::span(second)), {})) {
+        return 44;
+    }
+    access_table.begin_access_set(2, no_protection);
+    access_table.access(first_key);
+    const auto accessed_admission = access_table.acquire(
+        third_key, std::as_bytes(std::span(third)), {});
+    if (!accessed_admission ||
+        accessed_admission.value().disposition !=
+            k3x::cuda::ResidentDisposition::admitted ||
+        !access_table.contains(first_key) ||
+        access_table.contains(second_key) ||
+        !access_table.contains(third_key) ||
+        access_runtime.resident_weight_bytes != 16) {
+        return 45;
+    }
+    return 0;
+}
+
 int test_dense_backend_residency() {
     k3x::BackendOptions options;
     options.kind = k3x::BackendKind::cuda_dense;
@@ -191,6 +279,8 @@ int test_mxfp4_backend_residency() {
 int main() {
     const auto identity = test_representation_identity();
     if (identity != 0) return identity;
+    const auto lru = test_lru_access_set_eviction();
+    if (lru != 0) return lru;
     const auto dense = test_dense_backend_residency();
     if (dense != 0) return dense;
     return test_mxfp4_backend_residency();

@@ -107,6 +107,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="bounded RAM cache for verified packed sidecar payloads; 0 disables it",
     )
     parser.add_argument(
+        "--expert-packed-pinned-staging-bytes",
+        type=int,
+        default=0,
+        help="opt-in pinned sidecar staging capacity; requires expert-load-workers=1",
+    )
+    parser.add_argument(
         "--trunk-cache-bytes",
         type=int,
         default=0,
@@ -154,6 +160,20 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         raise ValueError("expert-device-cache-bytes must be non-negative")
     if arguments.expert_packed_host_cache_bytes < 0:
         raise ValueError("expert-packed-host-cache-bytes must be non-negative")
+    if arguments.expert_packed_pinned_staging_bytes < 0:
+        raise ValueError("expert-packed-pinned-staging-bytes must be non-negative")
+    if (
+        arguments.expert_packed_pinned_staging_bytes > 0
+        and arguments.expert_precision == "bf16"
+    ):
+        raise ValueError(
+            "expert-packed-pinned-staging-bytes requires a packed expert precision"
+        )
+    if (
+        arguments.expert_packed_pinned_staging_bytes > 0
+        and arguments.expert_load_workers != 1
+    ):
+        raise ValueError("expert-packed-pinned-staging-bytes requires expert-load-workers=1")
     if arguments.expert_device_cache_protected_entries_per_layer < 0:
         raise ValueError("expert-device-cache-protected-entries-per-layer must be non-negative")
     if (
@@ -193,6 +213,12 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         packed_expert_cache_path=arguments.expert_packed_cache_dir,
         packed_expert_host_cache_capacity_bytes=(
             arguments.expert_packed_host_cache_bytes
+        ),
+        packed_expert_pinned_staging_capacity_bytes=(
+            arguments.expert_packed_pinned_staging_bytes
+        ),
+        packed_expert_non_blocking=(
+            arguments.expert_packed_pinned_staging_bytes > 0
         ),
         routing_top_k=arguments.routing_top_k,
         proxy_mode=arguments.proxy_mode,
@@ -292,6 +318,9 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             if arguments.expert_packed_cache_dir is None
             else str(arguments.expert_packed_cache_dir)
         ),
+        "expert_packed_pinned_staging_bytes": (
+            arguments.expert_packed_pinned_staging_bytes
+        ),
         "trunk_cache_bytes": arguments.trunk_cache_bytes,
         "expert_precision": arguments.expert_precision,
         "trunk_precision": arguments.trunk_precision,
@@ -360,6 +389,15 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             "packed_expert_host_cache_capacity_bytes": 0
             if packed_stats is None
             else packed_stats.host_capacity_bytes,
+            "packed_expert_pinned_staging_bytes": 0
+            if packed_stats is None
+            else packed_stats.pinned_staging_bytes,
+            "packed_expert_pinned_staging_capacity_bytes": 0
+            if packed_stats is None
+            else packed_stats.pinned_staging_capacity_bytes,
+            "packed_expert_pinned_staging_hits": 0
+            if packed_stats is None
+            else packed_stats.pinned_staging_hits,
         }
     )
     if device.type == "cuda":

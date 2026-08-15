@@ -45,6 +45,10 @@ public:
     Result<ResidentAcquisition> acquire(
         ResidentWeightKey key, std::span<const std::byte> primary,
         std::span<const std::byte> secondary);
+    void begin_access_set(
+        std::uint64_t forward_cycle,
+        std::span<const ResidentWeightKey> protected_keys);
+    void access(ResidentWeightKey key);
     bool contains(ResidentWeightKey key) const;
 
 private:

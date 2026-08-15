@@ -234,6 +234,8 @@ class GLM5XDecoderModelReference:
         trunk_cache_capacity_bytes: int = 0,
         packed_expert_cache_path: str | Path | None = None,
         packed_expert_host_cache_capacity_bytes: int = 0,
+        packed_expert_pinned_staging_capacity_bytes: int = 0,
+        packed_expert_non_blocking: bool = False,
         routing_top_k: int | None = None,
         proxy_mode: str = "none",
         proxy_top_k: int | None = None,
@@ -283,14 +285,39 @@ class GLM5XDecoderModelReference:
         ):
             raise ValueError("GLM5X_BUNDLE_PACKED_HOST_CACHE_CAPACITY")
         if (
+            not isinstance(packed_expert_pinned_staging_capacity_bytes, int)
+            or isinstance(packed_expert_pinned_staging_capacity_bytes, bool)
+            or packed_expert_pinned_staging_capacity_bytes < 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_PINNED_CAPACITY")
+        if not isinstance(packed_expert_non_blocking, bool):
+            raise ValueError("GLM5X_BUNDLE_PACKED_NON_BLOCKING")
+        if (
             packed_expert_host_cache_capacity_bytes > 0
             and packed_expert_cache_path is None
         ):
             raise ValueError("GLM5X_BUNDLE_PACKED_HOST_CACHE_REQUIRES_PATH")
+        if (
+            packed_expert_pinned_staging_capacity_bytes > 0
+            and packed_expert_cache_path is None
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_PINNED_REQUIRES_PATH")
+        if (
+            packed_expert_non_blocking
+            and packed_expert_pinned_staging_capacity_bytes == 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_PINNED_CAPACITY_REQUIRED")
+        if packed_expert_non_blocking and expert_load_workers != 1:
+            raise ValueError("GLM5X_BUNDLE_PACKED_NON_BLOCKING_WORKERS")
         if trunk_precision not in {"bf16", "int4"}:
             raise ValueError("GLM5X_INVALID_TRUNK_PRECISION")
         if expert_precision not in {"bf16", "fp8", "int4", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
+        if (
+            packed_expert_pinned_staging_capacity_bytes > 0
+            and expert_precision == "bf16"
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_PINNED_REQUIRES_PACKED_PRECISION")
         if routing_top_k is not None and (
             not isinstance(routing_top_k, int)
             or isinstance(routing_top_k, bool)
@@ -368,6 +395,10 @@ class GLM5XDecoderModelReference:
             GLM5XPackedExpertCache(
                 packed_expert_cache_path,
                 host_cache_capacity_bytes=packed_expert_host_cache_capacity_bytes,
+                pinned_staging_capacity_bytes=(
+                    packed_expert_pinned_staging_capacity_bytes
+                ),
+                non_blocking=packed_expert_non_blocking,
             )
             if packed_expert_cache_path is not None
             and expert_precision in {"int4", "fp8", "mxfp4", "nvfp4", "nvfp4_gate_up"}
