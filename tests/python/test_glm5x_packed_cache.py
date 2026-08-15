@@ -145,3 +145,24 @@ def test_packed_expert_cache_get_many_reads_independent_sidecars(tmp_path) -> No
     assert set(loaded) == set(digests)
     assert cache.stats.hits == 2
     assert cache.stats.misses == 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_packed_expert_cache_reuses_verified_host_payload(tmp_path) -> None:
+    torch.manual_seed(61)
+    expert = GLM5XExpertWeights(
+        gate_proj=quantize_nvfp4_weight(torch.randn(64, 128, device="cuda"), device="cuda"),
+        up_proj=quantize_nvfp4_weight(torch.randn(64, 128, device="cuda"), device="cuda"),
+        down_proj=torch.randn(128, 64, dtype=torch.bfloat16, device="cuda"),
+    )
+    cache = GLM5XPackedExpertCache(tmp_path, host_cache_capacity_bytes=1 << 20)
+    digest = "digest-host-cache-000000000000"
+    cache.put((4, 14), digest, expert, precision="nvfp4_gate_up")
+    first = cache.get((4, 14), digest, device="cuda", precision="nvfp4_gate_up")
+    assert first is not None
+    (tmp_path / "layer-0004-expert-0014.pgu").unlink()
+    second = cache.get((4, 14), digest, device="cuda", precision="nvfp4_gate_up")
+    assert second is not None
+    torch.testing.assert_close(second.gate_proj.packed, first.gate_proj.packed)
+    assert cache.stats.host_hits == 1
+    assert cache.stats.host_resident_bytes > 0

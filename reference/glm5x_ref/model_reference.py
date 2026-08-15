@@ -233,6 +233,7 @@ class GLM5XDecoderModelReference:
         expert_device_cache_protected_entries_per_layer: int = 0,
         trunk_cache_capacity_bytes: int = 0,
         packed_expert_cache_path: str | Path | None = None,
+        packed_expert_host_cache_capacity_bytes: int = 0,
         routing_top_k: int | None = None,
         proxy_mode: str = "none",
         proxy_top_k: int | None = None,
@@ -275,6 +276,17 @@ class GLM5XDecoderModelReference:
             or trunk_cache_capacity_bytes < 0
         ):
             raise ValueError("GLM5X_BUNDLE_TRUNK_CACHE_CAPACITY")
+        if (
+            not isinstance(packed_expert_host_cache_capacity_bytes, int)
+            or isinstance(packed_expert_host_cache_capacity_bytes, bool)
+            or packed_expert_host_cache_capacity_bytes < 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_HOST_CACHE_CAPACITY")
+        if (
+            packed_expert_host_cache_capacity_bytes > 0
+            and packed_expert_cache_path is None
+        ):
+            raise ValueError("GLM5X_BUNDLE_PACKED_HOST_CACHE_REQUIRES_PATH")
         if trunk_precision not in {"bf16", "int4"}:
             raise ValueError("GLM5X_INVALID_TRUNK_PRECISION")
         if expert_precision not in {"bf16", "fp8", "int4", "mxfp4", "nvfp4", "nvfp4_gate_up"}:
@@ -353,7 +365,10 @@ class GLM5XDecoderModelReference:
             else None
         )
         packed_expert_cache = (
-            GLM5XPackedExpertCache(packed_expert_cache_path)
+            GLM5XPackedExpertCache(
+                packed_expert_cache_path,
+                host_cache_capacity_bytes=packed_expert_host_cache_capacity_bytes,
+            )
             if packed_expert_cache_path is not None
             and expert_precision in {"int4", "fp8", "mxfp4", "nvfp4", "nvfp4_gate_up"}
             else None

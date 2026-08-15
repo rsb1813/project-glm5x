@@ -101,6 +101,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="optional persistent CUDA INT4 expert sidecar directory",
     )
     parser.add_argument(
+        "--expert-packed-host-cache-bytes",
+        type=int,
+        default=0,
+        help="bounded RAM cache for verified packed sidecar payloads; 0 disables it",
+    )
+    parser.add_argument(
         "--trunk-cache-bytes",
         type=int,
         default=0,
@@ -146,6 +152,8 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         raise ValueError("expert-cache-bytes must be non-negative")
     if arguments.expert_device_cache_bytes < 0:
         raise ValueError("expert-device-cache-bytes must be non-negative")
+    if arguments.expert_packed_host_cache_bytes < 0:
+        raise ValueError("expert-packed-host-cache-bytes must be non-negative")
     if arguments.expert_device_cache_protected_entries_per_layer < 0:
         raise ValueError("expert-device-cache-protected-entries-per-layer must be non-negative")
     if (
@@ -183,6 +191,9 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         ),
         trunk_cache_capacity_bytes=arguments.trunk_cache_bytes,
         packed_expert_cache_path=arguments.expert_packed_cache_dir,
+        packed_expert_host_cache_capacity_bytes=(
+            arguments.expert_packed_host_cache_bytes
+        ),
         routing_top_k=arguments.routing_top_k,
         proxy_mode=arguments.proxy_mode,
         proxy_top_k=arguments.proxy_top_k,
@@ -337,6 +348,18 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             "packed_expert_cache_writes": 0
             if packed_stats is None
             else packed_stats.writes,
+            "packed_expert_host_cache_hits": 0
+            if packed_stats is None
+            else packed_stats.host_hits,
+            "packed_expert_host_cache_misses": 0
+            if packed_stats is None
+            else packed_stats.host_misses,
+            "packed_expert_host_cache_resident_bytes": 0
+            if packed_stats is None
+            else packed_stats.host_resident_bytes,
+            "packed_expert_host_cache_capacity_bytes": 0
+            if packed_stats is None
+            else packed_stats.host_capacity_bytes,
         }
     )
     if device.type == "cuda":

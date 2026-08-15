@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import struct
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,18 +31,70 @@ class GLM5XPackedExpertCacheStats:
     hits: int
     misses: int
     writes: int
+    host_hits: int = 0
+    host_misses: int = 0
+    host_resident_bytes: int = 0
+    host_capacity_bytes: int = 0
+
+
+@dataclass(frozen=True)
+class _HostPayload:
+    metadata: dict[str, Any]
+    payload: bytes
 
 
 class GLM5XPackedExpertCache:
     """Persistent, fingerprint-bound packed expert cache."""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, host_cache_capacity_bytes: int = 0) -> None:
+        if (
+            not isinstance(host_cache_capacity_bytes, int)
+            or isinstance(host_cache_capacity_bytes, bool)
+            or host_cache_capacity_bytes < 0
+        ):
+            raise ValueError("GLM5X_PACKED_CACHE_HOST_CAPACITY")
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self._hits = 0
         self._misses = 0
         self._writes = 0
+        self._host_capacity_bytes = host_cache_capacity_bytes
+        self._host_resident_bytes = 0
+        self._host_hits = 0
+        self._host_misses = 0
+        self._host_payloads: OrderedDict[Path, _HostPayload] = OrderedDict()
         self._lock = Lock()
+
+    def _host_get(self, path: Path) -> _HostPayload | None:
+        if self._host_capacity_bytes == 0:
+            return None
+        with self._lock:
+            cached = self._host_payloads.pop(path, None)
+            if cached is None:
+                self._host_misses += 1
+                return None
+            self._host_payloads[path] = cached
+            self._host_hits += 1
+            return cached
+
+    def _host_put(self, path: Path, metadata: dict[str, Any], payload: bytes) -> None:
+        if self._host_capacity_bytes == 0:
+            return
+        size = len(payload)
+        if size > self._host_capacity_bytes:
+            return
+        with self._lock:
+            previous = self._host_payloads.pop(path, None)
+            if previous is not None:
+                self._host_resident_bytes -= len(previous.payload)
+            while (
+                self._host_payloads
+                and self._host_resident_bytes + size > self._host_capacity_bytes
+            ):
+                _, evicted = self._host_payloads.popitem(last=False)
+                self._host_resident_bytes -= len(evicted.payload)
+            self._host_payloads[path] = _HostPayload(metadata, payload)
+            self._host_resident_bytes += size
 
     @staticmethod
     def _path(root: Path, key: tuple[int, int], precision: str = "int4") -> Path:
@@ -248,6 +301,9 @@ class GLM5XPackedExpertCache:
                     temporary_path.unlink(missing_ok=True)
                     raise
             os.replace(temporary_path, destination)
+            previous = self._host_payloads.pop(destination, None)
+            if previous is not None:
+                self._host_resident_bytes -= len(previous.payload)
             self._writes += 1
 
     @staticmethod
@@ -341,29 +397,43 @@ class GLM5XPackedExpertCache:
             raise ValueError("GLM5X_PACKED_CACHE_PRECISION")
         path = self._path(self.root, key, precision)
         try:
-            data = path.read_bytes()
-            if len(data) < _HEADER.size:
-                raise ValueError("GLM5X_PACKED_CACHE_HEADER")
-            magic, version, metadata_length = _HEADER.unpack_from(data)
-            if magic != _MAGIC or version != _VERSION:
-                raise ValueError("GLM5X_PACKED_CACHE_FORMAT")
-            metadata_start = _HEADER.size
-            metadata_end = metadata_start + metadata_length
-            metadata = json.loads(data[metadata_start:metadata_end].decode("utf-8"))
-            if metadata.get("format") != f"glm5x-{precision}-expert-v1":
-                raise ValueError("GLM5X_PACKED_CACHE_FORMAT")
-            if metadata.get("source_digest") != source_digest:
-                raise ValueError("GLM5X_PACKED_CACHE_SOURCE_MISMATCH")
-            roles = metadata.get("roles")
-            if not isinstance(roles, list) or len(roles) != 3:
-                raise ValueError("GLM5X_PACKED_CACHE_ROLES")
-            payload = data[metadata_end:]
-            if len(payload) != int(metadata.get("payload_bytes", -1)):
-                raise ValueError("GLM5X_PACKED_CACHE_PAYLOAD_EXTENT")
+            cached = self._host_get(path)
+            if cached is None:
+                data = path.read_bytes()
+                if len(data) < _HEADER.size:
+                    raise ValueError("GLM5X_PACKED_CACHE_HEADER")
+                magic, version, metadata_length = _HEADER.unpack_from(data)
+                if magic != _MAGIC or version != _VERSION:
+                    raise ValueError("GLM5X_PACKED_CACHE_FORMAT")
+                metadata_start = _HEADER.size
+                metadata_end = metadata_start + metadata_length
+                metadata = json.loads(data[metadata_start:metadata_end].decode("utf-8"))
+                if metadata.get("format") != f"glm5x-{precision}-expert-v1":
+                    raise ValueError("GLM5X_PACKED_CACHE_FORMAT")
+                if metadata.get("source_digest") != source_digest:
+                    raise ValueError("GLM5X_PACKED_CACHE_SOURCE_MISMATCH")
+                roles = metadata.get("roles")
+                if not isinstance(roles, list) or len(roles) != 3:
+                    raise ValueError("GLM5X_PACKED_CACHE_ROLES")
+                payload = data[metadata_end:]
+                if len(payload) != int(metadata.get("payload_bytes", -1)):
+                    raise ValueError("GLM5X_PACKED_CACHE_PAYLOAD_EXTENT")
+            else:
+                metadata = cached.metadata
+                payload = cached.payload
+                roles = metadata.get("roles")
+                if not isinstance(roles, list) or len(roles) != 3:
+                    raise ValueError("GLM5X_PACKED_CACHE_ROLES")
+                if metadata.get("format") != f"glm5x-{precision}-expert-v1":
+                    raise ValueError("GLM5X_PACKED_CACHE_FORMAT")
+                if metadata.get("source_digest") != source_digest:
+                    raise ValueError("GLM5X_PACKED_CACHE_SOURCE_MISMATCH")
             decoded = tuple(
                 self._decode_role(role, payload, device=target, precision=precision)
                 for role in roles
             )
+            if cached is None:
+                self._host_put(path, metadata, payload)
             from .layer10_moe import GLM5XExpertWeights
 
             with self._lock:
@@ -433,5 +503,11 @@ class GLM5XPackedExpertCache:
     def stats(self) -> GLM5XPackedExpertCacheStats:
         with self._lock:
             return GLM5XPackedExpertCacheStats(
-                hits=self._hits, misses=self._misses, writes=self._writes
+                hits=self._hits,
+                misses=self._misses,
+                writes=self._writes,
+                host_hits=self._host_hits,
+                host_misses=self._host_misses,
+                host_resident_bytes=self._host_resident_bytes,
+                host_capacity_bytes=self._host_capacity_bytes,
             )
