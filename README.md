@@ -8,6 +8,8 @@ GLM5X is a correctness-first runtime and storage project for running GLM-5.x on 
 
 The current precision decision is explicit: official FP8, if supplied, is consumed as an interoperability/comparison artifact; the project’s optimization target is native Blackwell FP4. The new NVFP4 path is implemented and bounded-tested, but remains experimental/default-off until calibration and full-model quality gates pass.
 
+The latest exact storage optimization is an opt-in verified packed-sidecar RAM cache. It avoids repeating sidecar file reads, JSON parsing, and CRC checks across token forwards; it is bounded by `--expert-packed-host-cache-bytes` and must be budgeted together with the trunk cache. It is a storage warm-path optimization, not a full-model 10--20 tok/s result.
+
 ## What is here now
 
 - K3X-compatible aligned checkpoint extents, checksums, and resumable streaming conversion core.
@@ -56,6 +58,7 @@ The current precision decision is explicit: official FP8, if supplied, is consum
 - The reference benchmark now also exposes experimental Blackwell `--expert-precision nvfp4` and `--expert-precision nvfp4_gate_up` paths. NVFP4 stores E2M1 values with blocked FP8 E4M3 scales and uses the RTX 5080 `torch._scaled_mm` contract; `.pn4` and `.pgu` sidecars preserve the same source digest/CRC discipline. On the real layer-10 one-token gate, all-NVFP4 measured `5.2946 s` versus BF16 `4.5003 s` with `18.14%` relative L2 error, while routed gate/up-only NVFP4 measured `4.3504 s` versus BF16 `4.4513 s` with `12.60%` relative L2 error and equal routes. These are bounded layer measurements, not full-model tok/s; FP4 remains default-off pending calibration and final-logit quality.
 - The reference benchmark also exposes an experimental CUDA TinyGEMM `--expert-precision int4` path. It packs BF16 expert projections on the GPU and can retain them in `--expert-device-cache-bytes`; cold packing is not a throughput claim and the exact BF16 path remains the default.
 - The same INT4 path accepts `--expert-packed-cache-dir` for an optional fingerprint-bound `.pi4` sidecar. A layer-10 repeat probe fell from `18.1128 s` on sidecar creation to `1.1524 s` on a fresh process with `0` bundle-read bytes; this is a warm sublayer/storage result, not full-model tok/s.
+- `--expert-packed-host-cache-bytes N` optionally retains already verified packed sidecar payloads in bounded system RAM. On 16 real `.pgu` sidecars (RTX 5080, 2 GiB host capacity), the first 16-expert admission measured `1.715 s` and the second pass `0.282 s`; host-cache hits were `16`, with `629,145,728` resident payload bytes. Capacity `0` preserves the previous disk-backed behavior.
 - Exact expert reads now group the three co-located role extents under one K3X artifact open. A bounded layer-10 cold sample with four readers improved from `2.752 s` to `2.184 s`; this is not an end-to-end TPS result.
 - `--expert-cache-bytes N` enables an exact host payload cache across layer loads and token forwards; `0` disables it. The monitor records both a cold run and an 8 GiB cached run without changing router decisions or quantization.
 - `--expert-device-cache-bytes N` optionally retains decoded exact expert tensors on the target GPU; `0` disables it. The monitor uses 4 GiB only in the cached comparison and records residency/hit telemetry.
@@ -69,6 +72,7 @@ The current precision decision is explicit: official FP8, if supplied, is consum
 - A CUDA-only grouped NVFP4 prototype is available at `reference/glm5x_ref/nvfp4_batched.py`. It is parity-tested and supports gate/up expert-row batching, but remains an opt-in ablation because one-token measurements are variable and sidecar-to-GPU transfer dominates the full gate.
 - The reference benchmark exposes this experiment as `--nvfp4-grouped`; the default remains the exact per-expert loop, and the flag is meaningful only for one-token CUDA NVFP4 forwards.
 - The layer-balanced device cache now keeps an explicit protected key per layer instead of relying on a count-only eviction heuristic. This fixes policy correctness; it is not by itself an end-to-end throughput claim.
+- A 40 GiB packed-sidecar host cache combined with a 40 GiB trunk cache was not accepted as a default: a bounded full-gate attempt reached approximately 72 GiB WSL RSS before producing a result and was stopped safely. The project records no TPS or quality value from that incomplete run.
 - The stream also supports disjoint local workers with `--shard-start`, `--shard-end`, and `--no-assemble`; workers can convert separate ranges concurrently, followed by one final bundle assembly.
 - Stream completion reuses each shard's strict conversion gate for bundle indexing, so final assembly does not rescan every payload. Strict bundle admission is still the runtime default.
 - A GLM-5.2-shaped CUDA expert benchmark for hidden size 6144 and expert intermediate size 2048, including 1/2/4/8-token expert-major batching.

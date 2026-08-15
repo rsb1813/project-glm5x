@@ -1,6 +1,6 @@
 # GLM5X Project State
 
-Latest verified complete Python regression: `352 passed, 124 skipped` in `75.19 s` from WSL2 CUDA environment. The prior milestone text below retains historical counts for context.
+Latest verified complete Python regression: `354 passed, 124 skipped` in `79.53 s` from WSL2 CUDA environment. The prior milestone text below retains historical counts for context.
 
 ## Current milestone
 
@@ -15,8 +15,9 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 - Storage: the source manifest totals `1,506,659,919,872` bytes. The raw-BF16 artifact set is therefore approximately `1.507 TB` decimal before any future derived/quantized copy. Free-space headroom must be checked before any second representation is created.
 - Full-gate result: exact cold one-token run took `306.933 s` prefill plus `302.688 s` decode, with `79.763 GB` of logical artifact reads per token and `8.083 GB` peak allocated VRAM. The cached two-token run took `303.585 s` prefill and `611.386 s` decode, with zero expert-cache hits because the configured cache capacity evicted the working set.
 - Current bottleneck: the exact reference is still limited by storage/reload, while the first NVFP4 full gate exposes additional sidecar I/O/native FP4 overhead and final-token divergence. A 4 GiB plain LRU device cache had `0` hits and `1,691` evictions, so the next target is layer-aware protected residency and explicit sidecar-to-VRAM prefetch, followed by calibrated FP4 residual handling and final-logit parity.
+- New host packed tier: `--expert-packed-host-cache-bytes` is implemented as an opt-in bounded RAM LRU for validated `.pi4/.pf8/.pm4/.pn4/.pgu` payloads. A real 16-sidecar probe improved `1.715 s` first admission to `0.282 s` on reuse with `629,145,728` resident bytes. A 40 GiB host tier combined with a 40 GiB trunk tier reached approximately `72 GiB` WSL RSS without a completed full gate, so large capacities are unsafe without a joint memory budget.
 - Reduced-routing/proxy gate: the real layer-10 four-token shared Top-4 proxy measured `5.043440291978186 s` versus natural Top-8 `12.43729756900575 s`, but relative L2 drift was `0.8120684623718262`; the proxy is default-off and does not count toward the TPS target.
-- Verification: the latest complete WSL Python suite passed `352 passed, 124 skipped` in `75.19 s`; the focused NVFP4/layer/cache/model/grouped suite passed `38` before the full run. These are current local results; no full-model speed claim changed.
+- Verification: the latest complete WSL Python suite passed `354 passed, 124 skipped` in `79.53 s`; the focused packed-cache/benchmark regression passed `8` selected tests. These are current local results; no full-model speed claim changed.
 - GitHub: public head `bb85223` contains the native NVFP4 path, full-gate measurements, and documentation. The latest local verification is `341 passed, 124 skipped`; the recurring red `correctness / Linux (push)` notification is stale run `31795400168` on `b94c8b8`, where 50 historical evidence files were absent; it is not an active failure on `main`.
 - Dependency status: Dependabot update PRs `#1`--`#4` are closed and no open Dependabot PR exists. The repository security-alert endpoints are disabled (`403`/`404`), so the visible alarm cannot be converted into a verified CVE count.
 
@@ -287,3 +288,12 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 - Measured: grouped NVFP4 projection samples were variable (`0.783x` to `2.138x` versus sequential depending on expert count). The real sidecar admission/H2D probe measured roughly `89.505--102.677 ms` GPU-event time per expert, while gate/up projection itself was about `0.131 ms`; transfer/residency is the current dominant boundary.
 - Verification complete: full WSL Python regression passed `352 passed, 124 skipped` in `75.19 s` after the focused `38 passed` result.
 - Known blocker: the current full NVFP4 gate remains `0.0144835562212668` decode tok/s with final-token divergence from exact BF16. Ten tok/s is not achieved; the next concrete task is pinned asynchronous staging plus route-stable layer-window residency and separate sidecar/H2D telemetry.
+
+## 2026-08-15 -- Verified packed-sidecar host tier
+
+- Implemented `GLM5XPackedExpertCache(host_cache_capacity_bytes=...)` and the CLI flag `--expert-packed-host-cache-bytes`. The tier retains only validated metadata/payload pairs in a bounded RAM LRU; capacity `0` is the exact previous behavior, and decoded CUDA residency remains a separate cache.
+- TDD evidence: the host-reuse regression failed on the missing constructor option, then passed after implementation. The full WSL Python suite passed `354 passed, 124 skipped` in `79.53 s`; changed modules compile successfully.
+- Real sidecar probe: 16 `.pgu` entries, 16 readers, RTX 5080. Host cache disabled measured `2.022659/1.954926 s` for two passes; 2 GiB host cache measured `1.714678/0.281999 s`, with 16 host hits and `629,145,728` resident payload bytes. This is not full-model tok/s.
+- A 40 GiB host sidecar cache plus a 40 GiB trunk cache was safely interrupted at approximately `72 GiB` WSL RSS before producing a full-gate result. Do not maximize both capacities independently on the 96 GB host.
+- Fixed the synthetic benchmark's existing `l2_expert_workers` forwarding omission. The requested CUDA prefetch smoke completed at `55.250838` synthetic decode tok/s versus `49.563953` synchronous; this is synthetic-only evidence.
+- Next bottleneck: integrate host-side sidecar reuse with route-stable layer-window admission and pinned/nonblocking H2D, then run a bounded full-layer quality gate before attempting another full 78-layer run.

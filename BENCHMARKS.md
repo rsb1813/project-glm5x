@@ -1,5 +1,20 @@
 # GLM5X Benchmarks
 
+## 2026-08-15 -- Verified packed-sidecar host-cache boundary
+
+- Commit: `ad3b033`; hardware: RTX 5080 16 GB, WSL2 CUDA 13.0, PyTorch 2.13.0; model/checkpoint: official GLM-5.2 `.pgu` sidecars; context: 16 distinct real `(layer, expert)` entries, `expert_load_workers=16`, CUDA target, two sequential admissions.
+- Mode A, host cache disabled: first pass `2.022659 s`, second pass `1.954926 s`, host hits `0`, host resident bytes `0`.
+- Mode B, bounded verified host cache `2,147,483,648` bytes: first pass `1.714678 s`, second pass `0.281999 s`, host hits `16`, host misses `16`, host resident bytes `629,145,728` bytes. The packed cache still performs exact role decoding and H2D on each pass; the measured reduction is file/JSON/CRC work only.
+- Decode tok/s, prefill tok/s, TTFT, full-model VRAM/RAM, physical NVMe GB/token, H2D GB/token, speculative acceptance, and final-token quality: not applicable to this 16-sidecar boundary. No 10--20 tok/s claim is made.
+- Safety note: a separate full-gate attempt with `40 GiB` packed host capacity plus `40 GiB` trunk capacity reached approximately `72 GiB` WSL RSS before a result and was stopped; it is not a benchmark record.
+
+## 2026-08-15 -- Synthetic CUDA prefetch forwarding smoke
+
+- Commit: `ad3b033`; hardware: RTX 5080 16 GB, WSL2 CUDA 13.0; model/checkpoint: synthetic K3X fixture; context: four prompt tokens and six generated tokens, two measured iterations, grouped CUDA FFN boundary.
+- Synchronous transfer: decode `49.563953 tok/s`, prefill `19.685733 tok/s`, zero async calls.
+- Pinned asynchronous transfer: decode `55.250838 tok/s`, prefill `24.460513 tok/s`, `27` async prefetch calls, `27` ready-before-use, `0` late-at-use. The paired synthetic output/token and numerical-error checks passed.
+- This is only a synthetic runtime smoke result and exercises the existing C++ async pipeline; it is not an official GLM-5.2 full-model throughput result. The benchmark's `l2_expert_workers` forwarding regression is included in the same commit.
+
 ## 2026-08-15 -- RTX 5080 NVFP4 native scaled-GEMM and mixed-precision gate
 
 - Commit: `1db2e0a` (the implementation and documentation were committed after the layer gate; the full gate below was rerun from this commit).

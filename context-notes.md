@@ -578,3 +578,7 @@
 - Added `linear_nvfp4_pair` and routed both all-NVFP4 and gate/up-only NVFP4 MLPs through it. The shared hidden activation is quantized once for gate/up. The pair parity test passed; the full suite is now `341 passed, 124 skipped` in `173.77 s`.
 - Resident GLM-shaped CUDA microbenchmark: independent gate/up calls `1.4070075005292893 ms`; paired call `0.7789301977027208 ms`; `1.8063x` speedup.
 - A full two-token 4 GiB NVFP4 device-cache gate recorded `0` device-cache hits and `1,691` evictions. The full-model working set is too large for plain LRU; the next design is layer-aware protected residency and explicit sidecar-I/O counters.
+## 2026-08-15 -- Host packed tier and benchmark repair
+
+- Repeated `.pgu` reads spent more time in file/JSON/CRC work than the gate/up CUDA projection. `--expert-packed-host-cache-bytes` therefore caches only validated metadata/payload pairs in RAM, with zero as the exact reference default. A 2 GiB real-sidecar probe reduced the second 16-entry pass to `0.282 s`; a 40 GiB sidecar tier plus a 40 GiB trunk tier reached about `72 GiB` WSL RSS and was stopped before a full-model result.
+- The existing `l2_expert_workers` CLI argument was not threaded through `benchmark_once()`. The RED regression reproduced the TypeError, the forwarding fix passed, and the synthetic CUDA prefetch smoke completed. Synthetic TPS remains separate from GLM full-model evidence.

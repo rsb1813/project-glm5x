@@ -722,3 +722,19 @@
 - Evidence: the RED regression reproduced eviction of `(0,0)` after `(0,0)`, `(0,1)`, `(1,0)`, and `(0,2)` were admitted with one protected entry per layer. A larger synthetic multi-layer trace also produced zero second-pass hits under the old heuristic.
 - Accepted because: it fixes the stated policy invariant without changing LRU behavior or natural routing. It does not claim that a 4 GiB cache can hold the full expert working set.
 - Revisit: after route-stable hot-bank selection and a full-model trace show how many protected entries per layer fit the 16 GiB VRAM budget.
+
+## D-0091 -- Add a bounded verified packed-sidecar host tier
+
+- Decision: add `--expert-packed-host-cache-bytes` as an opt-in RAM LRU for already validated packed sidecar payloads. Keep the default at zero, keep decoded GPU residency separate, and reject capacities that are not explicitly budgeted with the trunk cache.
+- Alternatives: reread and CRC-check every sidecar request, cache all packed sidecars without a bound, or implement pinned H2D before eliminating repeated file/CRC work.
+- Evidence: on 16 real `.pgu` sidecars with 16 readers and an RTX 5080, the first 2 GiB host-cache pass took `1.715 s` and the second pass `0.282 s`; `16` host hits retained `629,145,728` payload bytes. A 40 GiB host tier plus a 40 GiB trunk tier reached approximately `72 GiB` WSL RSS before a two-token full gate produced a result and was stopped safely.
+- Accepted because: the cache preserves source digest, role metadata, CRC validation on first admission, exact decoder output, and a zero-capacity reference mode while removing repeated NVMe/JSON/CRC work for warm sessions.
+- Revisit: after a route-stable multi-layer trace reports host hit rate, physical NVMe bytes, H2D bytes, RSS, and final-token parity. Do not treat the bounded sidecar result as full-model tok/s.
+
+## D-0092 -- Repair the synthetic benchmark worker-option forwarding
+
+- Decision: thread `l2_expert_workers` through `benchmark_once()` and every reference/diagnostic invocation so the CLI option no longer fails before running.
+- Alternatives: remove the CLI option, silently ignore it, or leave the benchmark runner broken and rely on direct binary calls.
+- Evidence: the CLI previously raised `TypeError: benchmark_once() got an unexpected keyword argument 'l2_expert_workers'`; the RED regression reproduced it, the focused test passed after the one-parameter forwarding fix, and the CUDA synthetic prefetch benchmark completed with its requested worker count.
+- Accepted because: it restores an existing benchmark contract without changing runtime semantics. The synthetic prefetch measurement is recorded separately and is not a GLM full-model claim.
+- Revisit: if benchmark schema generation changes again, add a direct CLI smoke test rather than relying only on function-level coverage.
