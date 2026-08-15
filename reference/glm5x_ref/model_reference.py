@@ -334,7 +334,8 @@ class GLM5XDecoderModelReference:
         )
         packed_expert_cache = (
             GLM5XPackedExpertCache(packed_expert_cache_path)
-            if packed_expert_cache_path is not None and expert_precision == "int4"
+            if packed_expert_cache_path is not None
+            and expert_precision in {"int4", "fp8"}
             else None
         )
         read = lambda name: GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)  # noqa: E731

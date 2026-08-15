@@ -125,6 +125,8 @@ K3-specific KDA, Attention Residual, Stable LatentMoE, 896-way Top-16 assumption
 
 The controls are useful for measuring the trade-off between expert admission and output drift, but they are not enabled by any quality mode. On the real layer-10 four-token activation, natural Top-8 used `12.43729756900575 s` and 31 unique routed experts. The shared Top-4 proxy used `5.043440291978186 s` and 16 unique experts, but its relative L2 difference against the natural Top-8 output was `0.8120684623718262`. This is an experimental/rejected default path, not a quality-preserving speed claim.
 
+The fingerprinted expert sidecar now supports both CUDA TinyGEMM INT4 (`.pi4`) and row-scaled E4M3 FP8 (`.pf8`) records. FP8 preserves the exact route and stores the quantized role tensors plus their row scales, so a fresh process can avoid raw-BF16 decode and host quantization after the first population. On the same bounded layer-10 input, FP8 sidecar reuse measured `4.820426017016871 s` versus BF16 `11.759381022013258 s`, with `5.696592479944229%` relative L2 drift and `0.0007408261299133301` maximum absolute error. It remains opt-in until full-model logits and coding-quality gates are measured.
+
 ## Quality modes
 
 The strict reference path is always available. Any adaptive Top-K, proxy, pruning, or verifier-budget mode is opt-in and must report quality divergence. SHADOW and PHOENIX-style escalation are policy layers and cannot silently change the natural routing contract.

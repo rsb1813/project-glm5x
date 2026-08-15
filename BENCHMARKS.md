@@ -8,6 +8,15 @@
 - Decode/prefill tok/s, TTFT, physical NVMe GB/token, H2D GB/token, and full-model quality are not applicable to this bounded layer experiment. No speculative acceptance or adaptive policy was enabled.
 - Decision: keep the proxy and reduced-routing controls experimental and default-off. The result is not a full-model throughput claim.
 
+## 2026-08-15 -- Fingerprinted FP8 sidecar reuse
+
+- Hardware: RTX 5080 16 GB, WSL2 CUDA 13.0/PyTorch 2.13.0; model/checkpoint: official GLM-5.2 layer-10 real activation and five-shard expert bundle; context: four candidate tokens.
+- Exact BF16 reference: natural Top-8, 31 unique routed experts, `11.759381022013258 s` for the measured block.
+- First FP8 sidecar population: row-scaled E4M3 FP8 roles, 31 `.pf8` entries, `21.40642180899158 s`. This includes source reads, quantization, and atomic sidecar writes.
+- Fresh-process FP8 sidecar reuse: `4.820426017016871 s`, identical route IDs, relative L2 drift `0.05696592479944229`, maximum absolute error `0.0007408261299133301` against BF16, and 31 unique experts.
+- Decode/prefill tok/s, TTFT, physical NVMe GB/token, H2D GB/token, and full-model quality are not applicable to this bounded layer experiment. The sidecar is opt-in and no adaptive Top-K or proxy was enabled.
+- Decision: retain the FP8 sidecar as an experimental warm-path candidate. It is not a 10--20 tok/s or quality-mode result.
+
 No end-to-end GLM-5.2 throughput or quality benchmark has been run yet. The bounded CUDA records below are kernel/layer evidence only and must not be reported as model tok/s.
 
 The first benchmark record must include the commit, hardware, model/checkpoint identity, mode, context length, decode and prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, quality result, and enabled optimizations.

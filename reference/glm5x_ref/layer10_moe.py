@@ -862,12 +862,13 @@ class GLM5XLayer10MoEReference:
                 if cached is not None:
                     return cached
             source_digest = None
-            if packed_expert_cache is not None and expert_precision == "int4":
+            if packed_expert_cache is not None and expert_precision in {"int4", "fp8"}:
                 source_digest = bundle.expert_source_digest(layer_id, expert_id)
                 cached = packed_expert_cache.get(
                     cache_key,
                     source_digest,
                     device=target if target is not None else "cuda",
+                    precision=expert_precision,
                 )
                 if cached is not None:
                     if expert_device_cache is not None:
@@ -884,9 +885,11 @@ class GLM5XLayer10MoEReference:
                 device=target,
                 precision=expert_precision,
             )
-            if packed_expert_cache is not None and expert_precision == "int4":
+            if packed_expert_cache is not None and expert_precision in {"int4", "fp8"}:
                 assert source_digest is not None
-                packed_expert_cache.put(cache_key, source_digest, expert)
+                packed_expert_cache.put(
+                    cache_key, source_digest, expert, precision=expert_precision
+                )
             if expert_device_cache is not None:
                 expert_device_cache.put(cache_key, expert)
             return expert
@@ -910,12 +913,13 @@ class GLM5XLayer10MoEReference:
                 payload_pending: list[int] = []
                 source_digests: dict[int, str] = {}
                 for expert_id in pending:
-                    if packed_expert_cache is not None and expert_precision == "int4":
+                    if packed_expert_cache is not None and expert_precision in {"int4", "fp8"}:
                         digest = bundle.expert_source_digest(layer_id, expert_id)
                         cached = packed_expert_cache.get(
                             (layer_id, expert_id),
                             digest,
                             device=target if target is not None else "cuda",
+                            precision=expert_precision,
                         )
                         if cached is not None:
                             result[expert_id] = cached
@@ -942,9 +946,12 @@ class GLM5XLayer10MoEReference:
                     device=target,
                     precision=expert_precision,
                 )
-                if packed_expert_cache is not None and expert_precision == "int4":
+                if packed_expert_cache is not None and expert_precision in {"int4", "fp8"}:
                     packed_expert_cache.put(
-                        (layer_id, expert_id), source_digests[expert_id], expert
+                        (layer_id, expert_id),
+                        source_digests[expert_id],
+                        expert,
+                        precision=expert_precision,
                     )
                 if expert_device_cache is not None:
                     expert_device_cache.put((layer_id, expert_id), expert)

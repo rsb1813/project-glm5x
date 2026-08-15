@@ -657,3 +657,11 @@
 - Evidence: on the real layer-10 four-token activation, natural Top-8 took `12.43729756900575 s` with 31 unique experts. The shared Top-4 proxy took `5.043440291978186 s` with 16 unique experts, but relative L2 drift was `0.8120684623718262` and maximum absolute error was `0.01171150803565979`.
 - Rejected as a default because: the measured quality drift is far outside the current coding-quality budget even though expert admission and wall time improve. The route metadata remains available for diagnosis, and the exact path is unchanged.
 - Revisit: only after a calibrated proxy, outlier residual, or task-specific quality gate demonstrates materially lower drift on real GLM layers and full-model logits.
+
+## D-0083 -- Extend fingerprinted sidecars to row-scaled FP8, but keep them opt-in
+
+- Decision: allow the existing fingerprint-bound sidecar container to persist either CUDA INT4 (`.pi4`) or row-scaled E4M3 FP8 (`.pf8`) expert roles. Keep BF16 exact loading as the default and require an explicit `expert_precision="fp8"` selection.
+- Alternatives: quantize FP8 on every source read, make FP8 the default expert representation, or store only the already-tested INT4 sidecar.
+- Evidence: on the real layer-10 four-token activation, a fresh FP8 sidecar process measured `4.820426017016871 s` versus BF16 `11.759381022013258 s`, with identical route IDs, `5.696592479944229%` relative L2 drift, and `0.0007408261299133301` maximum absolute error. First population was slower at `21.40642180899158 s` because it read BF16 roles, quantized, and wrote 31 sidecars.
+- Accepted as experimental because: sidecar reuse removes repeated source decode/quantization and the quality drift is materially lower than the measured MXFP4/Top-K proxy paths, but no full-model logits or coding benchmark has passed.
+- Revisit: after a full-model cold/warm gate records FP8 bytes/token, VRAM/RAM pressure, final-token quality, and task-level regression.

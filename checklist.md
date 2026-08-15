@@ -87,6 +87,7 @@
 - [ ] Implement exact resident non-expert trunk reuse and layer-aware pinned/asynchronous staging; re-run full parity and throughput gates.
 - [x] Add experimental CUDA TinyGEMM INT4 expert/shared projection path, GPU-side packing, and bounded packed device-cache accounting; focused tests and layer-10 cache probe are green.
 - [x] Add an opt-in fingerprint-bound on-disk packed INT4 expert sidecar with atomic writes, CRC checks, and bundle-read telemetry; bounded layer-10 reuse is measured.
+- [x] Extend fingerprint-bound expert sidecars to row-scaled FP8 and measure warm reuse/quality; keep FP8 default-off.
 - [x] Add explicit reduced-routing and shared cold-expert proxy controls with a real-layer quality gate; keep the measured high-drift proxy default-off.
 - [ ] Add exact route-stable multi-layer residency policy that materially lowers full-model logical expert bytes/token.
 - [ ] Re-run a fresh full-model quality/throughput gate after packed sidecar/residency work; do not claim 10--20 tok/s before this gate.

@@ -30,3 +30,30 @@ def test_packed_expert_cache_round_trip(tmp_path) -> None:
     )
     assert cache.stats.hits == 1
     assert cache.stats.misses == 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_packed_expert_cache_round_trip_fp8(tmp_path) -> None:
+    torch.manual_seed(29)
+    weights = tuple(
+        torch.randn(256, 256, dtype=torch.float32).to(torch.float8_e4m3fn)
+        for _ in range(3)
+    )
+    scales = tuple(torch.rand(256, 1, dtype=torch.float32) + 0.25 for _ in range(3))
+    expert = GLM5XExpertWeights(
+        gate_proj=weights[0],
+        up_proj=weights[1],
+        down_proj=weights[2],
+        gate_scale=scales[0],
+        up_scale=scales[1],
+        down_scale=scales[2],
+    )
+    cache = GLM5XPackedExpertCache(tmp_path)
+    digest = "source-digest-fp8-000000000000000000000000000000000000"
+    cache.put((4, 8), digest, expert, precision="fp8")
+    loaded = cache.get((4, 8), digest, device="cuda", precision="fp8")
+    assert loaded is not None
+    assert loaded.is_fp8
+    torch.testing.assert_close(loaded.gate_proj, expert.gate_proj.cuda())
+    torch.testing.assert_close(loaded.gate_scale, expert.gate_scale.cuda())
+    assert (tmp_path / "layer-0004-expert-0008.pf8").exists()

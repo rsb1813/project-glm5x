@@ -9,6 +9,7 @@ from pathlib import Path
 import torch
 
 from glm5x_ref.layer10_moe import GLM5XLayer10MoEReference
+from glm5x_ref.packed_cache import GLM5XPackedExpertCache
 
 
 def _read_activation(path: Path) -> torch.Tensor:
@@ -24,6 +25,7 @@ def _run(
     expert_precision: str,
     proxy_mode: str,
     proxy_top_k: int | None,
+    packed_cache_dir: Path | None,
 ) -> tuple[torch.Tensor, dict[str, object]]:
     layer = GLM5XLayer10MoEReference.from_bundle(
         bundle,
@@ -35,6 +37,11 @@ def _run(
         expert_load_workers=16,
         expert_cache_capacity_bytes=8 * 1024 * 1024 * 1024,
         expert_precision=expert_precision,
+        packed_expert_cache=(
+            GLM5XPackedExpertCache(packed_cache_dir)
+            if packed_cache_dir is not None
+            else None
+        ),
         proxy_mode=proxy_mode,
         proxy_top_k=proxy_top_k,
     )
@@ -62,7 +69,10 @@ def main() -> int:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--activation", type=Path, required=True)
     parser.add_argument("--top-k", type=int, nargs="+", default=[8, 6, 4, 2])
-    parser.add_argument("--expert-precision", choices=("bf16", "int4"), default="bf16")
+    parser.add_argument(
+        "--expert-precision", choices=("bf16", "fp8", "int4"), default="bf16"
+    )
+    parser.add_argument("--packed-cache-dir", type=Path, default=None)
     parser.add_argument("--proxy-mode", choices=("none", "shared"), default="none")
     parser.add_argument("--proxy-top-k", type=int, default=None)
     args = parser.parse_args()
@@ -79,6 +89,7 @@ def main() -> int:
             args.expert_precision,
             "none",
             None,
+            args.packed_cache_dir,
         )
     for top_k in args.top_k:
         output, row = _run(
@@ -88,6 +99,7 @@ def main() -> int:
             args.expert_precision,
             args.proxy_mode,
             args.proxy_top_k,
+            args.packed_cache_dir,
         )
         if reference is None:
             reference = output

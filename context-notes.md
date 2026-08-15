@@ -543,3 +543,9 @@
 - Added explicit `routing_top_k`, `proxy_mode`, and `proxy_top_k` controls through the model/layer reference and benchmark CLI. Natural route metadata remains visible; only the selected exact expert work is reduced in the proxy path.
 - Added a focused admission regression. The real layer-10 four-token measurement showed `5.0434 s` for shared Top-4 versus `12.4373 s` for natural Top-8, but relative L2 drift was `0.8121`; the proxy is therefore documented as experimental and default-off.
 - Next bottleneck remains storage-side residency and calibrated FP4/mixed-precision expert artifacts, not another unqualified Top-K reduction.
+
+## 2026-08-15 -- FP8 sidecar reuse gate
+
+- Generalized the fingerprint-bound sidecar to `.pi4` INT4 and `.pf8` row-scaled E4M3 FP8 records. FP8 stores the quantized role bytes and row scales, while the source digest and per-section CRC checks remain mandatory.
+- Real layer-10 four-token results: first FP8 population `21.4064 s`; fresh-process reuse `4.8204 s` versus BF16 `11.7594 s`, identical routes, and `5.6966%` relative L2 drift. The warm improvement is real but bounded to one MoE layer.
+- FP8 is experimental/default-off until final logits, coding quality, and full-model traffic are measured. The next performance work is still multi-layer residency and asynchronous staging.
