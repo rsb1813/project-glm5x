@@ -1,0 +1,121 @@
+{
+  "benchmark_id": "B-0004",
+  "date": "2026-08-16",
+  "implementation_commit": "3e0be9f",
+  "hardware": {
+    "cpu": "AMD Ryzen 7 9800X3D",
+    "gpu": "NVIDIA GeForce RTX 5080 16 GB",
+    "environment": "WSL2 Ubuntu-24.04, PyTorch 2.13.0+cu130"
+  },
+  "bounded_real_sidecar": {
+    "model": "official GLM-5.2 K3X bundle with digest-matched .pgu sidecars",
+    "configuration": {
+      "layers": 16,
+      "experts_per_layer": 8,
+      "accesses_per_pass": 128,
+      "cold_passes": 1,
+      "warm_passes": 3,
+      "device_cache_bytes": 805306368,
+      "host_cache_bytes": 8589934592,
+      "protected_entries_per_layer": 1
+    },
+    "stable_hot_bank": {
+      "warm_median_seconds": 3.268563048,
+      "steady_hits": 16,
+      "steady_misses": 112,
+      "steady_h2d_bytes": 4404020096,
+      "resident_entries": 16,
+      "resident_bytes": 629145728,
+      "peak_cuda_allocated_bytes": 668484608,
+      "raw": "stable.json",
+      "raw_sha256": "572f8196baf9c4009d2858c41917643bc5626b5e39dd52907df56d8fdb2a741e"
+    },
+    "adaptive_hot_bank": {
+      "warm_median_seconds": 3.431929617,
+      "steady_hits": 20,
+      "steady_misses": 108,
+      "steady_h2d_bytes": 4246733664,
+      "resident_entries": 20,
+      "resident_bytes": 786432160,
+      "peak_cuda_allocated_bytes": 825775104,
+      "promotions_after_second_pass": 4,
+      "raw": "adaptive.json",
+      "raw_sha256": "8a1883bdfb78114b354a1035a1d164a7d83a7817098901c1bd7e15f75c2c4f5f"
+    },
+    "comparison": {
+      "steady_hit_delta": 4,
+      "steady_h2d_reduction_percent": 3.57142857142857,
+      "warm_median_wall_change_percent": 4.99811588765169,
+      "wall_result": "adaptive slower"
+    },
+    "quality": "Exact packed payload identity only; no logits or token throughput were measured."
+  },
+  "full_model": {
+    "configuration": {
+      "layers": 78,
+      "prompt": [0],
+      "decode_tokens": 2,
+      "routing": "natural-top-8",
+      "expert_precision": "nvfp4_gate_up",
+      "trunk_precision": "bf16",
+      "trunk_cache_bytes": 42949672960,
+      "device_cache_bytes": 4294967296,
+      "expert_load_workers": 16,
+      "packed_sidecars_warm": true
+    },
+    "ancestor_stable_control": {
+      "commit": "0be39c8",
+      "decode_tok_s": 0.013321270279236509,
+      "decode_seconds": 150.13583224997274,
+      "device_cache_hits": 21,
+      "device_cache_misses": 1779,
+      "device_cache_entries": 75,
+      "device_cache_resident_bytes": 2949120600,
+      "peak_vram_bytes": 11034244608,
+      "generated_tokens": [154820, 474],
+      "raw": "../b0003-full-stable-hot-bank-rtx5080/stable-warm.log",
+      "raw_sha256": "8f06f3548ccde32cd39e5b20017cb4b6f82a3fa873773e064fb805aa8af95840"
+    },
+    "adaptive_hot_bank": {
+      "commit": "3e0be9f",
+      "decode_tok_s": 0.013392177382960129,
+      "decode_seconds": 149.3409131919616,
+      "decode_step_seconds": [77.64968573098304, 71.69122746097855],
+      "prefill_tok_s": 0.003311144508864774,
+      "prefill_seconds": 302.0103765700187,
+      "ttft_seconds": 379.66006230100174,
+      "device_cache_hits": 27,
+      "device_cache_misses": 1773,
+      "device_cache_hit_rate": 0.015,
+      "device_cache_entries": 109,
+      "device_cache_evictions": 0,
+      "device_cache_bypasses": 1664,
+      "device_cache_promotions": 34,
+      "device_cache_resident_bytes": 4286055272,
+      "peak_vram_bytes": 11642743296,
+      "generated_tokens": [154820, 474],
+      "raw": "full-adaptive-warm.log",
+      "raw_sha256": "330c3db8709d6d4683acded4be8d4e9f487675af02fcc0504a0e00e5b0018545"
+    },
+    "comparison": {
+      "decode_tok_s_change_percent": 0.532284851499054,
+      "decode_time_reduction_percent": 0.529466581094129,
+      "device_cache_hit_delta": 6,
+      "peak_vram_change_bytes": 608498688,
+      "evidence_strength": "single cross-run comparison against an unchanged ancestor control; within run-noise range"
+    },
+    "quality": {
+      "token_parity_between_cache_policies": true,
+      "quality_status": "rejected-mixed-nvfp4",
+      "reason": "Cache-policy tokens match, but this mixed-NVFP4 path already diverges from the exact BF16 gate."
+    }
+  },
+  "unmeasured": [
+    "physical NVMe GB/token",
+    "full-model H2D GB/token",
+    "system RAM peak",
+    "coding quality benchmark",
+    "speculative acceptance"
+  ],
+  "decision": "Keep adaptive_hot_bank experimental and default-off. It increased exact residency and hits, but did not produce a material or repeatable end-to-end gain. Stop extending Python cache heuristics and move to the official full-model C++ runtime plus pooled asynchronous sidecar/H2D scheduling."
+}

@@ -1,0 +1,5 @@
+scope,policy,decode_tok_s,decode_seconds,prefill_tok_s,prefill_seconds,ttft_seconds,device_cache_hits,device_cache_misses,device_cache_entries,device_cache_resident_bytes,h2d_bytes,warm_median_seconds,peak_vram_bytes,generated_tokens,quality_status
+bounded,stable_hot_bank,,,,,,16,112,16,629145728,4404020096,3.268563048,668484608,,payload-identity-only
+bounded,adaptive_hot_bank,,,,,,20,108,20,786432160,4246733664,3.431929617,825775104,,payload-identity-only
+full,stable_hot_bank,0.013321270279236509,150.13583224997274,,,,21,1779,75,2949120600,,,11034244608,"154820 474",rejected-mixed-nvfp4
+full,adaptive_hot_bank,0.013392177382960129,149.3409131919616,0.003311144508864774,302.0103765700187,379.66006230100174,27,1773,109,4286055272,,,11642743296,"154820 474",rejected-mixed-nvfp4

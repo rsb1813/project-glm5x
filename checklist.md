@@ -106,4 +106,4 @@
 - [ ] Measure pooled next-layer prefetch with sidecar/H2D/physical-NVMe telemetry and final-logit parity.
 - [x] Add and measure an exact per-layer stable hot-bank policy that bypasses transient device-cache admissions without changing routing or expert values.
 - [x] Run the 78-layer natural-routing stable hot-bank gate and compare it with a same-HEAD 4 GiB layer-balanced result before designing asynchronous replay prefetch.
-- [ ] Add an exact adaptive hot-bank tier that preserves one base expert per layer and fills spare VRAM only with repeatedly observed experts.
+- [x] Add an exact adaptive hot-bank tier that preserves one base expert per layer and fills spare VRAM only with repeatedly observed experts.

@@ -21,10 +21,10 @@
 
 ## Checklist
 
-- [ ] Write and run RED tests for first-observation bypass, second-observation admission, base protection, and colder-extra replacement.
-- [ ] Implement the minimal adaptive policy inside `GLM5XExpertTensorCache`.
-- [ ] Add model and CLI validation/telemetry wiring.
-- [ ] Run focused cache/model/schema regression.
-- [ ] Measure a deterministic repeated real-sidecar trace before any full-model rerun.
-- [ ] Run the 78-layer full gate only if the bounded trace increases hits while preserving payload identity.
-- [ ] Update persistent documents and project state last.
+- [x] Write and run RED tests for first-observation bypass, second-observation admission, base protection, and colder-extra replacement.
+- [x] Implement the minimal adaptive policy inside `GLM5XExpertTensorCache`.
+- [x] Add model and CLI validation/telemetry wiring.
+- [x] Run focused cache/model/schema regression.
+- [x] Measure a deterministic repeated real-sidecar trace before any full-model rerun.
+- [x] Run the 78-layer full gate only if the bounded trace increases hits while preserving payload identity.
+- [x] Update persistent documents and project state last.

@@ -183,6 +183,13 @@ The strict reference path is always available. Any adaptive Top-K, proxy, prunin
 - The next architecture step is to combine retained banks with pooled pinned N+1 sidecar staging and stream/event completion that does not force per-expert synchronization. Only then should the 78-layer exact gate be rerun.
 - The first same-HEAD 78-layer natural-routing A/B changed this priority. Stable retention measured `21/1800` hits and `0.013321` mixed-NVFP4 decode tok/s versus `18/1800` and `0.013164` for layer-balanced, while occupying only `2,949,120,600` of `4,294,967,296` cache bytes. The gain is too small for promotion, but the unused `1,345,846,696` bytes create a lower-risk next boundary: preserve one base expert per layer and admit only repeatedly observed extra experts into the remaining exact device budget.
 - Async replay prefetch remains proposed rather than implemented. It will be reconsidered only after the adaptive extra tier measures natural-route hit growth, because a stream/ticket implementation adds session state and CUDA lifetime complexity without reducing bytes when prediction recall is poor.
+
+## 2026-08-16 -- Implemented adaptive exact hot bank
+
+- `GLM5XExpertTensorCache(policy="adaptive_hot_bank")` preserves the configured per-layer base entries and adds a global exact extra tier. A non-base expert bypasses its first observation, may enter on its second observation if bytes are available, and may replace only a strictly colder extra when the tier is full. Base entries are never victims.
+- The policy acts after natural routing and does not change router scores, Top-K, expert values, or execution order. It is opt-in through `--expert-device-cache-policy adaptive_hot_bank`; existing LRU, layer-balanced, and stable policies retain their prior behavior.
+- The 16-layer real-sidecar gate increased steady hits from `16/128` to `20/128` and reduced H2D payload by `3.571%`, but its three-pass wall median increased from `3.268563048 s` to `3.431929617 s`. The 78-layer gate increased total hits from the ancestor stable control's `21` to `27`, filled `4,286,055,272` device-cache bytes, and measured only a `0.532%` directional decode change.
+- Adaptive admission therefore remains experimental/default-off. The Python cache-policy design is no longer the primary performance boundary. The next accepted architecture work is the official 282-shard C++ full-model execution path with pooled pinned sidecar staging, asynchronous H2D, bounded per-session ownership, and phase-separated physical I/O telemetry.
 # 2026-08-15 performance-path update
 
 ## Implemented experimental INT4 expert path
