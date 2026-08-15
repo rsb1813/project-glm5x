@@ -31,6 +31,7 @@ add_library(k3x_runtime
     runtime/src/host_expert_store.cpp
     runtime/src/storage_slice.cpp
     runtime/src/glm5x_bundle.cpp
+    runtime/src/glm5x_runtime_index.cpp
     runtime/src/glm5x_activation.cpp
 )
 if(K3X_ENABLE_CUDA)
@@ -220,6 +221,9 @@ add_test(NAME glm5x_activation COMMAND test_glm5x_activation)
 
 add_executable(test_glm5x_bf16_bundle tests/cpp/test_glm5x_bf16_bundle.cpp)
 target_link_libraries(test_glm5x_bf16_bundle PRIVATE k3x_runtime)
+
+add_executable(test_glm5x_runtime_index tests/cpp/test_glm5x_runtime_index.cpp)
+target_link_libraries(test_glm5x_runtime_index PRIVATE k3x_runtime)
 
 add_executable(test_io_completion tests/cpp/test_io_completion.cpp)
 target_include_directories(test_io_completion PRIVATE runtime/src)

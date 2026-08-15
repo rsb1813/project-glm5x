@@ -1,13 +1,16 @@
 # GLM5X C++ runtime index의 고정 레코드와 무결성 계약을 검증합니다.
 
 import hashlib
+import json
 import struct
+import subprocess
 
 import google_crc32c
 import torch
 from safetensors.torch import save_file
 
-from glm5x_converter.bundle import assemble_glm5x_expert_bundle
+from conftest import cpp_binary
+from glm5x_converter.bundle import GLM5XExpertBundle, assemble_glm5x_expert_bundle
 from glm5x_converter.runtime_index import build_glm5x_runtime_index
 from glm5x_converter.shard import convert_glm5x_shard
 from glm5x_ref.manifest import GLM5XTensorManifest
@@ -50,7 +53,7 @@ def _make_bundle(tmp_path):
         str(source_dir / shard_names[0]),
     )
     save_file(
-        {names[2]: torch.ones((2, 4), dtype=torch.bfloat16)},
+        {names[2]: torch.ones((4, 2), dtype=torch.bfloat16)},
         str(source_dir / shard_names[2]),
     )
     total_size = sum(path.stat().st_size for path in source_dir.glob("*.safetensors"))
@@ -168,3 +171,58 @@ def test_runtime_index_has_deterministic_validated_tensor_owners(tmp_path) -> No
     assert report.tensor_count == 3
     assert report.file_bytes == len(data)
 
+
+def test_cpp_runtime_index_reads_exact_cross_shard_expert(tmp_path) -> None:
+    artifact_dir, bundle_path = _make_bundle(tmp_path)
+    output = artifact_dir / "model.gxi"
+    build_glm5x_runtime_index(bundle_path, output)
+    runner = cpp_binary("test_glm5x_runtime_index")
+    assert runner.exists(), "build test_glm5x_runtime_index before the parity test"
+
+    result = subprocess.run(
+        [str(runner), str(output), "0", "0", "4", "2"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    measured = json.loads(result.stdout)
+    payload = GLM5XExpertBundle.open(bundle_path).read_expert(0, 0)
+    assert measured["artifact_count"] == 2
+    assert measured["tensor_count"] == 3
+    assert measured["payload_bytes"] == 48
+    assert measured["role_sha256"] == [
+        hashlib.sha256(payload[role]).hexdigest()
+        for role in ("gate_proj", "up_proj", "down_proj")
+    ]
+    assert measured["reader_read_calls"] == 3
+    assert measured["reader_completed_bytes"] == 48
+
+
+def test_cpp_runtime_index_rejects_index_and_payload_corruption(tmp_path) -> None:
+    artifact_dir, bundle_path = _make_bundle(tmp_path)
+    output = artifact_dir / "model.gxi"
+    build_glm5x_runtime_index(bundle_path, output)
+    runner = cpp_binary("test_glm5x_runtime_index")
+    arguments = [str(runner), str(output), "0", "0", "4", "2"]
+
+    index_bytes = bytearray(output.read_bytes())
+    index_bytes[-1] ^= 1
+    output.write_bytes(index_bytes)
+    corrupted_index = subprocess.run(arguments, capture_output=True, text=True)
+    assert corrupted_index.returncode == 3
+    assert "DIRECTORY_SHA256_MISMATCH" in corrupted_index.stderr
+
+    build_glm5x_runtime_index(bundle_path, output)
+    artifact = artifact_dir / "a.k3x"
+    record = K3XReader.open(
+        artifact, verify_payloads=False, verify_root=False
+    ).tensor_records[0]
+    with artifact.open("r+b") as stream:
+        stream.seek(record.data_offset)
+        value = stream.read(1)
+        stream.seek(record.data_offset)
+        stream.write(bytes([value[0] ^ 1]))
+    corrupted_payload = subprocess.run(arguments, capture_output=True, text=True)
+    assert corrupted_payload.returncode == 4
+    assert "DATA_CRC_MISMATCH" in corrupted_payload.stderr
