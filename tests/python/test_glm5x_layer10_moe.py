@@ -291,6 +291,46 @@ def test_glm5x_layer_balanced_cache_keeps_the_layer_protected_entry() -> None:
     assert cache.get((1, 0)) is not None
 
 
+def test_glm5x_stable_hot_bank_promotes_only_repeated_expert() -> None:
+    cache = GLM5XExpertTensorCache(
+        144, policy="stable_hot_bank", protected_entries_per_layer=1
+    )
+    first = _weights(0)
+    repeated = _weights(1)
+
+    assert cache.get((0, 0)) is None
+    cache.put((0, 0), first)
+    assert cache.get((0, 1)) is None
+    cache.put((0, 1), repeated)
+    assert cache.get((0, 1)) is None
+    cache.put((0, 1), repeated)
+
+    assert cache.get((0, 1)) is repeated
+    assert cache.get((0, 0)) is None
+    assert cache.stats.bypasses == 1
+    assert cache.stats.promotions == 1
+
+
+def test_glm5x_stable_hot_bank_preserves_one_entry_per_layer() -> None:
+    cache = GLM5XExpertTensorCache(
+        144, policy="stable_hot_bank", protected_entries_per_layer=1
+    )
+    layer_zero = _weights(0)
+    layer_one = _weights(1)
+    cache.get((0, 0))
+    cache.put((0, 0), layer_zero)
+    cache.get((1, 0))
+    cache.put((1, 0), layer_one)
+    cache.get((0, 1))
+    cache.put((0, 1), _weights(2))
+
+    assert cache.get((0, 0)) is layer_zero
+    assert cache.get((1, 0)) is layer_one
+    assert cache.get((0, 1)) is None
+    assert cache.stats.resident_bytes == 144
+    assert cache.stats.entries == 2
+
+
 def test_glm5x_fp8_expert_mlp_has_bounded_cpu_error() -> None:
     expert = _weights(0)
     quantized = GLM5XLayer10MoEReference._quantize_expert_fp8(expert)

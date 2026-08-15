@@ -104,3 +104,4 @@
 - [x] Add opt-in packed-sidecar file/decode/H2D telemetry and record one bounded RTX 5080 measurement.
 - [x] Add deterministic exact N+1 transition prefetch with recall/overfetch/stall telemetry and route parity; retain it default-off after the synthetic slowdown.
 - [ ] Measure pooled next-layer prefetch with sidecar/H2D/physical-NVMe telemetry and final-logit parity.
+- [x] Add and measure an exact per-layer stable hot-bank policy that bypasses transient device-cache admissions without changing routing or expert values.

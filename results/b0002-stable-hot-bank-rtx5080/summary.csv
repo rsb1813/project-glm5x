@@ -1,0 +1,3 @@
+policy,protected_entries_per_layer,cold_elapsed_nanoseconds,warm_median_elapsed_nanoseconds,warm_device_cache_hits,warm_device_cache_misses,warm_hit_rate,warm_h2d_bytes,warm_h2d_event_median_nanoseconds,resident_bytes,peak_cuda_allocated_bytes
+lru,0,29795967729,3656221967,0,128,0.0,5033165824,572164194,786432160,825775104
+stable_hot_bank,1,30084442793,3289269276,16,112,0.125,4404020096,562860753,629145728,668484608

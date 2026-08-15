@@ -84,9 +84,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--expert-device-cache-policy",
-        choices=("lru", "layer_balanced"),
+        choices=("lru", "layer_balanced", "stable_hot_bank"),
         default="lru",
-        help="expert device-cache admission policy; layer_balanced protects per-layer entries",
+        help="expert device-cache policy; stable_hot_bank admits only repeated per-layer entries",
     )
     parser.add_argument(
         "--expert-device-cache-protected-entries-per-layer",
@@ -192,11 +192,11 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
     if arguments.expert_device_cache_protected_entries_per_layer < 0:
         raise ValueError("expert-device-cache-protected-entries-per-layer must be non-negative")
     if (
-        arguments.expert_device_cache_policy == "layer_balanced"
+        arguments.expert_device_cache_policy in {"layer_balanced", "stable_hot_bank"}
         and arguments.expert_device_cache_protected_entries_per_layer <= 0
     ):
         raise ValueError(
-            "layer-balanced expert-device-cache policy requires protected entries per layer"
+            "selected expert-device-cache policy requires protected entries per layer"
         )
     if arguments.trunk_cache_bytes < 0:
         raise ValueError("trunk-cache-bytes must be non-negative")
@@ -383,6 +383,8 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
             "expert_device_cache_hits": device_cache_stats.hits,
             "expert_device_cache_misses": device_cache_stats.misses,
             "expert_device_cache_evictions": device_cache_stats.evictions,
+            "expert_device_cache_bypasses": device_cache_stats.bypasses,
+            "expert_device_cache_promotions": device_cache_stats.promotions,
             "expert_device_cache_hit_rate": (
                 device_cache_stats.hits / device_cache_lookups
                 if device_cache_lookups
