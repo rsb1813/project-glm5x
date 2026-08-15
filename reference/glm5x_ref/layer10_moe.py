@@ -671,6 +671,10 @@ class GLM5XLayer10MoEReference:
                 if isinstance(weight, torch.Tensor) and weight.device.type == "cuda":
                     target = weight.device
                     break
+        if target is not None and target.type != "cuda":
+            raise ValueError("GLM5X_INT4_CUDA_REQUIRED")
+        if not torch.cuda.is_available():
+            raise ValueError("GLM5X_INT4_CUDA_REQUIRED")
         return GLM5XExpertWeights(
             gate_proj=quantize_int4_weight(torch.as_tensor(weights[0]), device=target),
             up_proj=quantize_int4_weight(torch.as_tensor(weights[1]), device=target),
