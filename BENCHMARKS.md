@@ -1080,3 +1080,17 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Artifacts: `results/b0004-adaptive-hot-bank-rtx5080/{stable.json,adaptive.json,full-adaptive-warm.log,summary.json,summary.csv}`. Raw SHA-256 values are `572f8196baf9c4009d2858c41917643bc5626b5e39dd52907df56d8fdb2a741e`, `8a1883bdfb78114b354a1035a1d164a7d83a7817098901c1bd7e15f75c2c4f5f`, and `330c3db8709d6d4683acded4be8d4e9f487675af02fcc0504a0e00e5b0018545`.
 - Decision: retain adaptive as experimental/default-off and stop adding Python-only cache heuristics. The next bottleneck is the official full-model C++ runtime with pooled pinned asynchronous sidecar/H2D scheduling and exact parity/traffic telemetry.
 - Verification: focused cache/model/schema regression `39 passed, 6 skipped`; complete WSL Python regression `369 passed, 124 skipped` in `108.40 s`; changed-module compile and artifact/hash parity are checked separately.
+
+## 2026-08-16 -- B-0005 official 282-shard C++ runtime-index gate
+
+- Date/implementation: 2026-08-16; runtime-index writer commits `6284ba5` and `5511cca`, MTP compatibility commit `3c21eb4` on `codex/cpp-runtime-index`.
+- Hardware/environment: AMD Ryzen 7 9800X3D, NVIDIA GeForce RTX 5080 16 GB installed but unused by this host/storage gate, WSL2 Ubuntu-24.04. No cloud or paid resource was used.
+- Model/checkpoint: official GLM-5.2 local K3X bundle with 282 artifacts and 59,585 tensors. Weight payloads remained out-of-core; the index build read bundle/artifact metadata only.
+- Index build: `1,454,984` bytes, SHA-256 `c69cd3a4ab22f1424c201a87f014dedff9bd3b78e90d8690b0f97efb72561485`, `5.29 s` wall, `660,416 KiB` maximum RSS.
+- C++ bounded gate: opened all 282 referenced artifact metadata records and read layer 10 expert 48. Wall time was `3.31 s`, maximum RSS `86,784 KiB`, payload reads were 3 calls and `75,497,472` completed bytes.
+- Python comparison: lazy metadata admission plus the same expert read took `3.36 s`, maximum RSS `210,184 KiB`, one grouped artifact read, and `75,497,472` completed bytes.
+- Correctness: gate/up/down SHA-256 values matched exactly: `a348f071772f56ee8292e7b57c87a8ba6f4b5f07d76b211b8111d6a3b5e79562`, `1ad06eb65169032296b4d42a1a802f6e8ee63bf853ef1975dbdfc0d8131c259f`, and `e510e23742dcc3eaf73ad71a4141d6cd9c4d1ee7456bbf2ead944297b9f7a0de`. Header/body, artifact-root, tensor locator, and payload CRC checks remained enabled at their respective boundaries.
+- MTP compatibility: official shards 270 and 271 contain layer-78 MTP tensors while the main layer directory has 78 entries indexed `0..77`. The focused regression now covers both MTP non-expert and expert tensor records, bounded by `hidden_layers + mtp_layers`.
+- Metrics not measured: decode/prefill tok/s, TTFT, VRAM, full-inference host RAM, NVMe GB/token, H2D GB/token, cache hit rate, Top-K, speculative acceptance, and quality. This is startup/direct-payload evidence only; the best exact full-model result remains `0.010559 tok/s`.
+- Artifacts: `results/b0005-cpp-runtime-index-rtx5080/{build-index.log,cpp-layer10-expert48.log,python-layer10-expert48.log,summary.json,summary.csv}`. Raw log SHA-256 values are `9bb0d2a8cc442bd8b4c076ae19bfea4f96c72575d81646fda362afdbebd545ad`, `f281d46c4a06ebd0a6e6302dbd71f151e56e2cd032bb183cd906da962fe94de5`, and `e5c26db5665ecc6aa7461ebb87f68400b8c8b055aa98b40b5cbb0519c57778cb`.
+- Decision: accept `.gxi` as the official C++ metadata ingress. Next connect exact decoder-layer tensor loading and final-logit parity; do not infer token throughput from this gate.

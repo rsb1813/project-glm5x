@@ -190,6 +190,14 @@ The strict reference path is always available. Any adaptive Top-K, proxy, prunin
 - The policy acts after natural routing and does not change router scores, Top-K, expert values, or execution order. It is opt-in through `--expert-device-cache-policy adaptive_hot_bank`; existing LRU, layer-balanced, and stable policies retain their prior behavior.
 - The 16-layer real-sidecar gate increased steady hits from `16/128` to `20/128` and reduced H2D payload by `3.571%`, but its three-pass wall median increased from `3.268563048 s` to `3.431929617 s`. The 78-layer gate increased total hits from the ancestor stable control's `21` to `27`, filled `4,286,055,272` device-cache bytes, and measured only a `0.532%` directional decode change.
 - Adaptive admission therefore remains experimental/default-off. The Python cache-policy design is no longer the primary performance boundary. The next accepted architecture work is the official 282-shard C++ full-model execution path with pooled pinned sidecar staging, asynchronous H2D, bounded per-session ownership, and phase-separated physical I/O telemetry.
+
+## 2026-08-16 -- Implemented official C++ runtime index
+
+- `glm5x-convert build-runtime-index` emits a deterministic `.gxi` from the verified JSON bundle without rereading model payloads or recomputing artifact roots. The format uses a 128-byte versioned header, 64-byte artifact records, 24-byte tensor locators sorted by tensor ID, concatenated relative paths, a header CRC32C, and a body SHA-256.
+- `Glm5xRuntimeIndex` keeps only this metadata resident. It rejects path traversal, malformed ranges, duplicate or unsorted tensor IDs, reserved bytes, root/count/record/ID/CRC metadata mismatches, and then reads exact payload extents through the existing K3X `Reader`.
+- GLM MTP tensors use layer IDs after the 78 main decoder layers. The reader therefore admits tensor layer IDs below `hidden_layers + mtp_layers`, while `LAYR` and `EXPT` directory records remain strictly scoped to the main transformer-layer directory. This matches official shards 270 and 271 without weakening payload CRC or artifact identity checks.
+- B-0005 generated a `1,454,984`-byte index for 282 artifacts and 59,585 tensors in `5.29 s`. C++ opened all referenced metadata and read layer 10 expert 48 in `3.31 s`; its `75,497,472` payload bytes and three role SHA-256 values matched the Python bundle path exactly.
+- This is implemented storage/runtime ingress, not a full GLM decoder. C++ layer construction, natural routing, MLA/DSA state, final logits, resident FP4/BF16 placement, and asynchronous H2D scheduling are still separate integration steps. No decode tok/s follows from the index gate.
 # 2026-08-15 performance-path update
 
 ## Implemented experimental INT4 expert path

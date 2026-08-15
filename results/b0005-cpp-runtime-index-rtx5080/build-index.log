@@ -1,0 +1,24 @@
+{"artifact_count":282,"completed":true,"file_bytes":1454984,"output":"build-glm5x-full-k3x/glm5x-runtime.gxi","tensor_count":59585}
+	Command being timed: "env PYTHONPATH=.:reference:converter python -m glm5x_converter.cli build-runtime-index build-glm5x-full-k3x/glm5x-experts-full.json build-glm5x-full-k3x/glm5x-runtime.gxi"
+	User time (seconds): 2.40
+	System time (seconds): 0.81
+	Percent of CPU this job got: 60%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:05.29
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 660416
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 1
+	Minor (reclaiming a frame) page faults: 122253
+	Voluntary context switches: 18653
+	Involuntary context switches: 33
+	Swaps: 0
+	File system inputs: 68522
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

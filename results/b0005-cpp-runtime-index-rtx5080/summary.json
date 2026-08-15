@@ -1,0 +1,64 @@
+{
+  "benchmark_id": "B-0005",
+  "date": "2026-08-16",
+  "implementation_commit": "3c21eb4",
+  "hardware": {
+    "cpu": "AMD Ryzen 7 9800X3D",
+    "gpu": "NVIDIA GeForce RTX 5080 16 GB",
+    "environment": "WSL2 Ubuntu-24.04"
+  },
+  "model": "official GLM-5.2 local 282-shard K3X expert bundle",
+  "runtime_index_build": {
+    "artifact_count": 282,
+    "tensor_count": 59585,
+    "file_bytes": 1454984,
+    "file_sha256": "c69cd3a4ab22f1424c201a87f014dedff9bd3b78e90d8690b0f97efb72561485",
+    "wall_seconds": 5.29,
+    "max_rss_kb": 660416,
+    "raw": "build-index.log",
+    "raw_sha256": "9bb0d2a8cc442bd8b4c076ae19bfea4f96c72575d81646fda362afdbebd545ad"
+  },
+  "layer10_expert48_parity": {
+    "payload_bytes": 75497472,
+    "role_sha256": [
+      "a348f071772f56ee8292e7b57c87a8ba6f4b5f07d76b211b8111d6a3b5e79562",
+      "1ad06eb65169032296b4d42a1a802f6e8ee63bf853ef1975dbdfc0d8131c259f",
+      "e510e23742dcc3eaf73ad71a4141d6cd9c4d1ee7456bbf2ead944297b9f7a0de"
+    ],
+    "payload_identity": true,
+    "cpp": {
+      "wall_seconds": 3.31,
+      "max_rss_kb": 86784,
+      "read_calls": 3,
+      "completed_bytes": 75497472,
+      "raw": "cpp-layer10-expert48.log",
+      "raw_sha256": "f281d46c4a06ebd0a6e6302dbd71f151e56e2cd032bb183cd906da962fe94de5"
+    },
+    "python": {
+      "wall_seconds": 3.36,
+      "max_rss_kb": 210184,
+      "read_calls": 1,
+      "completed_bytes": 75497472,
+      "raw": "python-layer10-expert48.log",
+      "raw_sha256": "e5c26db5665ecc6aa7461ebb87f68400b8c8b055aa98b40b5cbb0519c57778cb"
+    }
+  },
+  "correctness": {
+    "mtp_tensor_layers": "accepted within hidden_layers + mtp_layers",
+    "expert_directory_scope": "main transformer layers remain strictly validated",
+    "index_body_sha256": "validated",
+    "artifact_root_sha256": "validated",
+    "payload_crc32c": "validated on direct extent read"
+  },
+  "unmeasured": [
+    "decode tok/s",
+    "prefill tok/s",
+    "TTFT",
+    "VRAM",
+    "system RAM peak for full inference",
+    "NVMe GB/token",
+    "H2D GB/token",
+    "quality benchmark"
+  ],
+  "decision": "Accept the .gxi boundary as the C++ metadata ingress for the official 282-shard bundle. This benchmark is startup and exact payload lookup evidence, not full-model token throughput."
+}

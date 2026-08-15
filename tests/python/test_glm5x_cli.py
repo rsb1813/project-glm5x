@@ -43,3 +43,12 @@ def test_cli_exposes_cross_shard_expert_bundle_command() -> None:
     args = _parser().parse_args(["assemble-experts", "artifacts", "experts.json"])
     assert args.command == "assemble-experts"
     assert args.dry_run is False
+
+
+def test_cli_exposes_cpp_runtime_index_command() -> None:
+    args = _parser().parse_args(
+        ["build-runtime-index", "experts.json", "model.gxi"]
+    )
+    assert args.command == "build-runtime-index"
+    assert args.bundle.name == "experts.json"
+    assert args.output.name == "model.gxi"

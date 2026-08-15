@@ -567,8 +567,13 @@ Result<Reader> Reader::open(const std::filesystem::path& path,
         reader.tensors_.push_back(record);
     }
     const auto configured_experts = little<std::uint32_t>(config.value(), 48);
+    const auto configured_mtp_layers = little<std::uint32_t>(config.value(), 20);
+    const auto tensor_layer_count =
+        static_cast<std::uint64_t>(*layer_count) + configured_mtp_layers;
     for (const auto& tensor : reader.tensors_) {
-        if (tensor.layer_id < -1 || tensor.layer_id >= static_cast<std::int32_t>(*layer_count) ||
+        if (tensor.layer_id < -1 ||
+            (tensor.layer_id >= 0 &&
+             static_cast<std::uint64_t>(tensor.layer_id) >= tensor_layer_count) ||
             tensor.expert_id < -1 || tensor.expert_id >= static_cast<std::int32_t>(configured_experts) ||
             (tensor.expert_id >= 0 && tensor.layer_id < 0)) {
             return Result<Reader>::failure(ErrorCode::invalid_directory);

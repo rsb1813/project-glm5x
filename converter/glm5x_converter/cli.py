@@ -12,6 +12,7 @@ from k3x_converter.reader import K3XReader
 from k3x_converter.writer import convert
 
 from .multi import convert_glm5x_shards
+from .runtime_index import build_glm5x_runtime_index
 from .shard import convert_glm5x_shard
 from .bundle import assemble_glm5x_expert_bundle
 
@@ -49,6 +50,9 @@ def _parser() -> argparse.ArgumentParser:
     bundle.add_argument("artifact_dir", type=Path)
     bundle.add_argument("output", type=Path)
     bundle.add_argument("--dry-run", action="store_true")
+    runtime_index = subcommands.add_parser("build-runtime-index")
+    runtime_index.add_argument("bundle", type=Path)
+    runtime_index.add_argument("output", type=Path)
     validation = subcommands.add_parser("validate")
     validation.add_argument("artifact", type=Path)
     return parser
@@ -148,6 +152,22 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     "complete_expert_count": report.complete_expert_count,
                     "dry_run": args.dry_run,
                     "incomplete_expert_count": report.incomplete_expert_count,
+                    "output": str(report.output_path),
+                    "tensor_count": report.tensor_count,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 0
+    if args.command == "build-runtime-index":
+        report = build_glm5x_runtime_index(args.bundle, args.output)
+        print(
+            json.dumps(
+                {
+                    "artifact_count": report.artifact_count,
+                    "completed": report.completed,
+                    "file_bytes": report.file_bytes,
                     "output": str(report.output_path),
                     "tensor_count": report.tensor_count,
                 },
