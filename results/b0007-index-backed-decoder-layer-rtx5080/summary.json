@@ -1,0 +1,80 @@
+{
+  "benchmark_id": "B-0007",
+  "date": "2026-08-16",
+  "implementation_commit": "902f551",
+  "hardware": {
+    "cpu": "AMD Ryzen 7 9800X3D",
+    "gpu": "NVIDIA GeForce RTX 5080 16 GB",
+    "environment": "WSL2 Ubuntu-24.04, CUDA 13"
+  },
+  "model": "official GLM-5.2 layer-10 complete decoder-layer boundary",
+  "runtime_index_sha256": "c69cd3a4ab22f1424c201a87f014dedff9bd3b78e90d8690b0f97efb72561485",
+  "runner_sha256": "17a2dde27227021d0129bc3b3ef06bb270b5e722709ac69b4093ee13edfe12ac",
+  "oracle": {
+    "layer_input_sha256": "35f7562d0f82299439bd84a9dd1e918584452e9b8facec3de67b281382acdc01",
+    "layer_output_sha256": "6c3fa144f74057b5a8d52127ef9965ae425e6e7763a77dc927eae505783358ba",
+    "metadata_sha256": "629ad68646c8cf5c2a3715568f96d968a391f1e0860e2982c500ae8cfffdf2cb",
+    "bundle_verification": "metadata_only",
+    "device": "cuda"
+  },
+  "configuration": {
+    "tokens": 2,
+    "routing": "natural-top-8",
+    "precision": "bf16-rounded",
+    "output": "fp32",
+    "device_expert_accumulate": true,
+    "fused_shared": true,
+    "resident_budget_bytes": 2147483648,
+    "cublas_workspace_bytes": 67108864,
+    "warmup": 3,
+    "iterations": 7
+  },
+  "measurement": {
+    "source_artifact_count": 282,
+    "source_read_calls": 67,
+    "source_read_bytes": 1635416576,
+    "host_load_nanoseconds": 13562852242,
+    "decoder_prepare_nanoseconds": 3868464681,
+    "cold_latency_nanoseconds": 1116432256,
+    "warm_latency_nanoseconds_median": 475927299,
+    "warm_milliseconds_per_token": 237.9636495,
+    "bounded_layer_tokens_per_second": 4.202322691,
+    "cold_weight_h2d_bytes": 1283457024,
+    "warm_weight_h2d_bytes": 0,
+    "resident_weight_bytes": 1632239616,
+    "decoder_trunk_payload_bytes": 348812800,
+    "host_expert_payload_bytes": 1207959552,
+    "router_payload_bytes": 3146752,
+    "shared_payload_bytes": 75497472,
+    "unique_routed_experts": 16,
+    "average_top_k": 8
+  },
+  "parity": {
+    "dsa_topk_equal": true,
+    "expert_set_equal": true,
+    "route_order_equal": false,
+    "maximum_contribution_absolute_delta_by_expert": 0.000188678503223738,
+    "mla_state_length": 2,
+    "dsa_state_length": 2,
+    "gpu_cpu_max_absolute_error": 0.0078125,
+    "gpu_cpu_max_relative_error": 0.00210084044375,
+    "expected_max_absolute_error": 0.015625,
+    "expected_max_relative_error": 0.00420168088749
+  },
+  "raw": "full-layer.json",
+  "raw_sha256": "6d4052f9e25775888dd8030ddb1d1b8f2d938c0fd96bbc1ec5c474a017ee5763",
+  "unmeasured": [
+    "full-model decode tok/s",
+    "prefill tok/s",
+    "TTFT",
+    "process peak VRAM",
+    "system RAM peak",
+    "physical NVMe GB/token",
+    "full-model H2D GB/token",
+    "kernel time",
+    "I/O stall time",
+    "coding quality",
+    "speculative acceptance"
+  ],
+  "decision": "Accept the official index-backed complete layer-10 path as a bounded BF16 numerical integration gate. Route order is not bitwise-identical, so this is not strict trace parity or full-model throughput evidence. Next move the benchmark-local per-token projections into a production batched resident decoder path before multi-layer and final-logit gates."
+}

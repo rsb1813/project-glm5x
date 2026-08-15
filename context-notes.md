@@ -694,3 +694,11 @@
 - The minimum accepted next boundary is official layer 10 from full-layer BF16 input through its full DSA indexer, MLA, both residuals, natural Top-8 learned MoE, and full-layer BF16 output.
 - The first implementation reuses the existing validated `.gxi`, `GLM5XACT`, and resident raw-BF16 CUDA MoE path. A new general device-resident attention API is deferred until this complete correctness gate passes.
 - The first oracle uses two tokens and empty recurrent state. Incremental MLA/DSA state serialization remains the immediate follow-up, not an unverified claim in this milestone.
+
+## 2026-08-16 -- Index-backed decoder-layer result
+
+- Commit `902f551` adds the separate full-layer oracle export mode and the benchmark-local `.gxi` decoder path. It loads 14 trunk/indexer tensors, computes the full two-token DSA/MLA attention boundary, and hands its post-attention norm into the existing learned routed/shared CUDA MoE.
+- B-0007 matched Python DSA Top-K and both selected expert sets. Route ordering was not bitwise-identical because near-tied BF16 router scores crossed within the selected set; paired contribution values differed by at most `0.0001886785`. Final BF16-boundary error was `0.015625` absolute and `0.0042016809` relative.
+- The warm two-token layer median was `475.927299 ms`, with zero warm weight H2D and `1,632,239,616` resident weight bytes. This is much slower than the per-layer budget required for 10 tok/s and is not full-model throughput.
+- The current path intentionally favors a complete correctness boundary over a premature public API: CUDA matvec calls are token-by-token, normalization/softmax remain host-side, and state ends with the invocation. The next implementation target is batched/fused resident trunk execution across multiple layers, then final-logit parity.
+- Final verification passed CUDA CTest `27/27`, CPU CTest `15/15`, focused Python `5 passed`, and full CPU-build Python `375 passed, 126 skipped`. The earlier two failures under a CUDA `K3X_BUILD_DIR` were test-environment selection errors and disappeared under the standard CPU build.

@@ -61,8 +61,8 @@
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.
 - [ ] Add MTP/DSpark expert-major verification to the GLM path.
 - [ ] Run real GLM-5.2 quality and throughput benchmarks.
-- [ ] Feed the exact layer-10 GLM router/MLA/DSA output into the CUDA expert-major plan and verify nonzero full-layer parity.
-- [ ] Feed the exact layer-10 MLA/DSA hidden state into the learned router benchmark and compare complete layer output against Python reference.
+- [x] Feed the exact layer-10 GLM router/MLA/DSA output into the CUDA expert-major plan and verify nonzero full-layer parity.
+- [x] Feed the exact layer-10 MLA/DSA hidden state into the learned router benchmark and compare complete layer output against Python reference.
 - [x] Evaluate prepared expert-major packed-bucket reuse; paired RTX 5080 medians showed no stable speedup, so it is not enabled by default.
 - [x] Add an opt-in parity-tested device-side expert-major accumulation path and measure it against the `f07d78c` baseline; keep default-off pending full-layer quality evidence.
 - [x] Add opt-in shared-expert device accumulation for the learned MoE path and benchmark it on the exact GLM5XACT handoff; keep default-off pending full-layer quality evidence.
@@ -93,9 +93,9 @@
 - [x] Add a validated C++ `.gxi` runtime index for constant-time official 282-shard tensor ownership and exact payload reads.
 - [ ] Connect exact decoder-layer trunk/expert construction and bounded final-logit parity to the official `.gxi` index.
 - [x] Run the existing learned layer-10 CUDA MoE/GLM5XACT parity gate directly through `.gxi` before full decoder integration.
-- [ ] Export one official layer-10 full-layer GLM5XACT input/output oracle without changing the existing MoE oracle.
-- [ ] Run the complete C++ layer-10 DSA/MLA/residual/MoE path from the official `.gxi` and close BF16 output parity.
-- [ ] Record bounded layer traffic/latency and keep it separate from full-model TPS.
+- [x] Export one official layer-10 full-layer GLM5XACT input/output oracle without changing the existing MoE oracle.
+- [x] Run the complete C++ layer-10 DSA/MLA/residual/MoE path from the official `.gxi` and close bounded BF16 numerical parity.
+- [x] Record bounded layer traffic/latency and keep it separate from full-model TPS.
 - [x] Re-run a fresh full-model quality/throughput gate after packed sidecar/residency work; record the mixed-NVFP4 token divergence and keep it default-off.
 - [x] Add an experimental fingerprinted MXFP4 `.pm4` sidecar and reference-only pack/decode path; keep FP4 default-off pending calibration/native CUDA execution.
 - [x] Add the experimental RTX 5080 NVFP4 blocked-scale CUDA path and `.pn4`/`.pgu` sidecars; keep both modes default-off pending calibration and final-logit quality.
