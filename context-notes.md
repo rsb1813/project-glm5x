@@ -467,3 +467,8 @@
 
 - All three role refs for a complete expert are co-located in one shard in the real probe bundle. `GLM5XExpertBundle.read_expert()` now groups them and calls `read_tensor_extents_many()` once, preserving per-record CRC validation.
 - Focused bundle/reader/layer/model tests passed `20` with `4` capability skips. The real one-token layer-10 cold sample improved to `2.184 s` with four readers; one reader measured `4.979 s`. This is a bounded I/O result, not full-model TPS.
+
+## 2026-08-15 -- Reject physical-offset sorting for grouped reads
+
+- Tested sorting the three grouped role reads by `.k3x` physical offset to avoid a possible backward seek. On the same RTX 5080 five-shard layer-10 probe, four paired two-token samples were `4.565814 s` median in the existing request order versus `4.745335 s` sorted, so the proposed variant was `3.93%` slower.
+- The sort and its RED/GREEN probe were reverted. `read_tensor_extents_many()` retains exact request order, while the previously accepted one-open-per-artifact grouping remains. Focused reader/bundle/CPP tests are green at `24 passed, 4 skipped`.

@@ -537,3 +537,11 @@
 - Evidence: the real five-shard layer-10 bundle places all three roles of every complete expert in the same shard. Focused bundle/reader/layer/model tests passed `20` cases (`4` capability skips). With four exact payload readers, the one-token real layer-10 cold sample fell from the earlier `2.752 s` baseline to `2.184 s`; one worker measured `4.979 s`, so parallel reads remain the larger knob. No output or route difference was observed.
 - Accepted because: it is format-compatible, preserves exact bytes and validation, and reduces per-expert file-open overhead without changing cache policy or routing.
 - Revisit: after the full 78-layer gate records NVMe GB/token, open/read latency, and I/O queue pressure. Replace with mmap or descriptor reuse only if the measured filesystem overhead remains material.
+
+## D-0068 -- Reject physical-offset sorting inside grouped role reads
+
+- Decision: keep `read_tensor_extents_many()` in caller/request order. Do not sort the three role records by physical offset unless a future storage benchmark proves a stable benefit.
+- Alternatives: sort every grouped read by `data_offset`, use an artifact-specific descriptor/mmap cache, or leave the grouped-open optimization unchanged.
+- Evidence: on the RTX 5080 WSL2 five-shard GLM-5.2 layer-10 probe with two input tokens, 16 selected experts, four payload readers, lazy bundle admission, and no expert caches, four paired samples measured a sorted median of `4.745335 s` versus `4.565814 s` in the existing request order. The sorted variant was `3.93%` slower; route count and output shape were unchanged. Focused reader/bundle/CPP tests passed `24` cases with `4` capability skips after reverting the experiment.
+- Accepted because: the proposed seek optimization did not improve measured end-to-end sublayer time. The existing one-open-per-artifact grouping remains accepted; no speculative physical-order behavior is added.
+- Revisit: only with controlled direct-I/O or a full 78-layer NVMe trace showing seek latency as a dominant component.
