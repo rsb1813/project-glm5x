@@ -25,4 +25,4 @@
 - [x] Extract token IDs, per-step seconds/TPS, cache hits/misses/bypasses/promotions, resident bytes, and VRAM.
 - [x] Compare only like-for-like fields against a current-HEAD layer-balanced gate.
 - [x] Update benchmarks, decisions, architecture if warranted, and project state last.
-- [ ] Commit and publish the evidence before selecting the next code boundary.
+- [x] Commit and publish the evidence before selecting the next code boundary.
