@@ -767,3 +767,11 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Timing: four paired samples produced `4.565814 s` median for the existing order and `4.745335 s` for sorted order; sorted order was `3.93%` slower. This is a bounded sublayer measurement and does not represent full-model tok/s.
 - Correctness: both variants selected 16 experts and returned `(1, 2, 6144)` outputs. The production sort was reverted; focused reader/bundle/CPP tests passed `24` with `4` capability skips.
 - Decision: reject the optimization. Filesystem cache, thread scheduling, and Python decode variance remain uncontrolled; do not infer a benefit from the physical layout alone.
+
+## 2026-08-15 -- Rejected artifact-wide expert batch reads
+
+- Hardware/model: RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.0, official GLM-5.2 five-shard layer-10 probe, two-token BF16 activation, 16 selected experts, four workers, lazy bundle admission, no host/device expert cache.
+- Comparison: existing concurrent per-expert `read_expert()` tasks versus an unshipped artifact-grouped `read_experts()` variant with one sequential task per artifact.
+- Timing: existing per-expert tasks measured `4.175182 s` median; artifact-grouped tasks measured `4.976070 s` median, `16.09%` slower. This is a bounded layer-10 measurement, not full-model tok/s.
+- Correctness: both variants selected 16 experts and returned the same `(1, 2, 6144)` output shape. The batch API and layer integration were reverted; the focused MoE/layer/model tests remain green at `13 passed`.
+- Decision: reject artifact-wide batching for the current WSL/NTFS storage path. Keep parallel expert tasks until a full-model I/O trace justifies a different queue granularity.

@@ -472,3 +472,8 @@
 
 - Tested sorting the three grouped role reads by `.k3x` physical offset to avoid a possible backward seek. On the same RTX 5080 five-shard layer-10 probe, four paired two-token samples were `4.565814 s` median in the existing request order versus `4.745335 s` sorted, so the proposed variant was `3.93%` slower.
 - The sort and its RED/GREEN probe were reverted. `read_tensor_extents_many()` retains exact request order, while the previously accepted one-open-per-artifact grouping remains. Focused reader/bundle/CPP tests are green at `24 passed, 4 skipped`.
+
+## 2026-08-15 -- Reject artifact-wide expert batching
+
+- Tried grouping all selected role records by `.k3x` artifact so each artifact had one sequential reader task. The same 16-expert, two-token layer-10 RTX 5080 probe measured `4.175182 s` median for the existing four concurrent per-expert tasks versus `4.976070 s` for artifact grouping, a `16.09%` regression.
+- The new batch API and layer integration were reverted. The current path keeps multiple outstanding expert reads; only the already accepted per-expert three-role grouped open remains in production. Focused MoE/layer/model tests passed `13/13` after the revert.

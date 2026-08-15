@@ -538,6 +538,14 @@
 - Accepted because: it is format-compatible, preserves exact bytes and validation, and reduces per-expert file-open overhead without changing cache policy or routing.
 - Revisit: after the full 78-layer gate records NVMe GB/token, open/read latency, and I/O queue pressure. Replace with mmap or descriptor reuse only if the measured filesystem overhead remains material.
 
+## D-0069 -- Reject artifact-wide expert batch reads for the current NVMe path
+
+- Decision: keep `expert_load_workers` at the expert-task granularity. Do not replace concurrent per-expert reads with one sequential batch task per artifact.
+- Alternatives: group all selected role records by artifact and read each artifact once, serialize all selected experts, or implement a direct-I/O queue before changing task granularity.
+- Evidence: on the RTX 5080 WSL2 five-shard GLM-5.2 layer-10 probe with two tokens, 16 selected experts, four workers, lazy bundle admission, and no caches, the existing per-expert task path measured `4.175182 s` median over four samples. The artifact-wide batch variant measured `4.976070 s`, `16.09%` slower, while route count and output shape remained unchanged.
+- Accepted because: the current storage stack benefits from multiple outstanding expert reads; sequentializing them by artifact loses useful NVMe/OS parallelism. The exact grouped three-role read remains accepted.
+- Revisit: after a full-model trace with direct I/O or an asynchronous queue can prove that descriptor overhead, rather than storage parallelism, is dominant.
+
 ## D-0068 -- Reject physical-offset sorting inside grouped role reads
 
 - Decision: keep `read_tensor_extents_many()` in caller/request order. Do not sort the three role records by physical offset unless a future storage benchmark proves a stable benefit.
