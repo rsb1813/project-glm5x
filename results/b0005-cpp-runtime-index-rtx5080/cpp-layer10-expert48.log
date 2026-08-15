@@ -1,0 +1,2 @@
+{"artifact_count":282,"tensor_count":59585,"payload_bytes":75497472,"reader_read_calls":3,"reader_completed_bytes":75497472,"role_sha256":["a348f071772f56ee8292e7b57c87a8ba6f4b5f07d76b211b8111d6a3b5e79562","1ad06eb65169032296b4d42a1a802f6e8ee63bf853ef1975dbdfc0d8131c259f","e510e23742dcc3eaf73ad71a4141d6cd9c4d1ee7456bbf2ead944297b9f7a0de"]}
+wall_seconds=3.31 max_rss_kb=86784

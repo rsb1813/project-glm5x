@@ -661,3 +661,13 @@
 - The existing C++ expert loader accepts an already-opened shard list and scans every shard for each role. It cannot consume the 282-shard bundle index directly and is unsuitable as the full-model tensor lookup path.
 - The accepted minimum bridge is a deterministic fixed-record `.gxi` generated from the verified JSON bundle. It maps every tensor ID to one artifact and record position, binds artifacts by root SHA-256 and tensor count, and leaves all model payloads out-of-core.
 - A general C++ JSON dependency and per-lookup 282-shard scanning are rejected. The new index must preserve exact BF16 bytes, natural routing, and existing Python bundle behavior.
+
+## 2026-08-16 -- C++ official-bundle runtime index result
+
+- Added atomic `build-runtime-index`, a fixed-record C++ reader, exact tensor/expert reads, CLI coverage, corruption coverage, and an official 282-shard bounded gate.
+- The first official open failed on shard 270 because MTP non-expert tensors use `layer_id=78` while the main `LAYR` directory contains indices `0..77`. After admitting configured MTP tensor layers, shard 271 exposed the second real case: MTP expert tensors also use layer 78 but intentionally have no main-layer `EXPT` directory records. Focused RED tests reproduced both cases before the final reader change.
+- The accepted invariant is tensor `layer_id < hidden_layers + mtp_layers`; expert IDs remain bounded by configured routed experts; global expert tensors remain invalid; and actual `LAYR`/`EXPT` records retain the strict main-layer range.
+- The official `.gxi` contains 282 artifact records and 59,585 tensor locators in `1,454,984` bytes. Build wall time was `5.29 s`; its SHA-256 is `c69cd3a4ab22f1424c201a87f014dedff9bd3b78e90d8690b0f97efb72561485`.
+- C++ opened the full metadata set and loaded layer 10 expert 48 in `3.31 s`, `86,784 KiB` maximum RSS, and exactly `75,497,472` payload bytes. Python measured `3.36 s`, `210,184 KiB`, and the same bytes. All three role SHA-256 digests matched.
+- No wrapper benchmark script was added because the converter CLI and JSON-emitting C++ contract executable already provide the complete reproducible boundary; adding a second orchestration layer would duplicate parsing without exercising new product code.
+- This milestone does not execute a full decoder token. Exact full-model decode remains `0.010559 tok/s`; 10 tok/s is still unachieved. The next integration is exact trunk/layer construction and bounded final-logit parity through `.gxi`, followed by resident/asynchronous H2D scheduling.

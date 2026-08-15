@@ -1,0 +1,4 @@
+scope,implementation,artifact_count,tensor_count,index_bytes,payload_bytes,wall_seconds,max_rss_kb,read_calls,payload_identity,decode_tok_s,quality_status
+index_build,python,282,59585,1454984,,5.29,660416,,,,metadata-only
+expert_lookup,cpp,282,59585,1454984,75497472,3.31,86784,3,true,,exact-payload
+expert_lookup,python,282,59585,,75497472,3.36,210184,1,true,,exact-payload
