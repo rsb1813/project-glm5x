@@ -4,6 +4,7 @@
 #include "k3x/format.hpp"
 #include "k3x/glm5x_bundle.hpp"
 #include "k3x/glm5x_activation.hpp"
+#include "k3x/glm5x_runtime_index.hpp"
 #include "k3x/routing_policy.hpp"
 
 #include <algorithm>
@@ -34,6 +35,7 @@ constexpr std::size_t kIntermediateSize = 2048;
 
 struct Arguments {
     std::filesystem::path artifact_dir;
+    std::filesystem::path runtime_index;
     std::uint32_t layer{};
     std::uint32_t expert{};
     std::size_t experts{1};
@@ -76,6 +78,8 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
         const std::string value = argv[index + 1];
         if (key == "--artifact-dir") {
             result.artifact_dir = value;
+        } else if (key == "--runtime-index") {
+            result.runtime_index = value;
         } else if (key == "--layer") {
             const auto parsed = parse_u32(value);
             if (!parsed) return std::nullopt;
@@ -136,7 +140,8 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             return std::nullopt;
         }
     }
-    if (result.artifact_dir.empty() || result.precision == "" ||
+    if (result.artifact_dir.empty() == result.runtime_index.empty() ||
+        result.precision == "" ||
         result.output == "") return std::nullopt;
     if (result.precision != "fp32" && result.precision != "bf16-rounded") {
         return std::nullopt;
@@ -273,6 +278,32 @@ k3x::Result<NamedTensorPayload> load_named_tensor(
     return k3x::Result<NamedTensorPayload>::success(std::move(result));
 }
 
+k3x::Result<NamedTensorPayload> load_named_tensor(
+    const k3x::Glm5xRuntimeIndex& runtime_index,
+    std::string_view name) {
+    const std::string owned_name(name);
+    const auto tensor_id = k3x::fnv1a64(owned_name.c_str());
+    auto loaded = runtime_index.read_tensor_with_metadata(tensor_id);
+    if (!loaded) {
+        return k3x::Result<NamedTensorPayload>::failure(
+            loaded.error(), loaded.message());
+    }
+    const auto& record = loaded.value().record;
+    if (record.quantization != 0 ||
+        record.logical_length != record.data_length ||
+        record.auxiliary_length != 0 || record.auxiliary_offset != 0 ||
+        record.auxiliary_crc32c != 0) {
+        return k3x::Result<NamedTensorPayload>::failure(
+            k3x::ErrorCode::invalid_directory, "invalid named GLM tensor");
+    }
+    NamedTensorPayload result;
+    result.dtype = record.dtype;
+    result.rank = record.rank;
+    result.dimensions = record.dimensions;
+    result.bytes = std::move(loaded.value().payload);
+    return k3x::Result<NamedTensorPayload>::success(std::move(result));
+}
+
 bool has_shape(
     const NamedTensorPayload& tensor,
     std::initializer_list<std::uint64_t> expected) {
@@ -366,8 +397,13 @@ std::vector<std::filesystem::path> artifact_paths(
 
 int main(int argc, char** argv) {
     const auto arguments = parse_arguments(argc, argv);
-    if (!arguments || !std::filesystem::is_directory(arguments->artifact_dir)) {
-        std::cerr << "usage: --artifact-dir DIR --layer N --expert N "
+    if (!arguments ||
+        (!arguments->artifact_dir.empty() &&
+         !std::filesystem::is_directory(arguments->artifact_dir)) ||
+        (!arguments->runtime_index.empty() &&
+         !std::filesystem::is_regular_file(arguments->runtime_index))) {
+        std::cerr << "usage: (--artifact-dir DIR | --runtime-index FILE) "
+                     "--layer N --expert N "
                      "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
                      "[--workspace-bytes N] [--resident-bytes N] [--precision fp32|bf16-rounded] "
                      "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major|learned-expert-major|learned-moe-layer] "
@@ -376,33 +412,78 @@ int main(int argc, char** argv) {
                      "[--input-bf16 FILE] [--expected-bf16 FILE]\n";
         return 2;
     }
-    const auto paths = artifact_paths(arguments->artifact_dir);
-    if (paths.empty()) return 3;
     k3x::ReaderOptions reader_options;
     reader_options.verify = k3x::VerifyMode::metadata_only;
+    std::vector<std::filesystem::path> paths;
     std::vector<k3x::Reader> readers;
-    readers.reserve(paths.size());
-    for (const auto& path : paths) {
-        auto reader = k3x::Reader::open(path, reader_options);
-        if (!reader) {
-            std::cerr << k3x::error_code_name(reader.error()) << ": "
-                      << reader.message() << '\n';
+    std::vector<const k3x::Reader*> shard_views;
+    std::optional<k3x::Glm5xRuntimeIndex> runtime_index;
+    if (!arguments->artifact_dir.empty()) {
+        paths = artifact_paths(arguments->artifact_dir);
+        if (paths.empty()) return 3;
+        readers.reserve(paths.size());
+        for (const auto& path : paths) {
+            auto reader = k3x::Reader::open(path, reader_options);
+            if (!reader) {
+                std::cerr << k3x::error_code_name(reader.error()) << ": "
+                          << reader.message() << '\n';
+                return 4;
+            }
+            readers.push_back(std::move(reader.value()));
+        }
+        shard_views.reserve(readers.size());
+        for (const auto& reader : readers) shard_views.push_back(&reader);
+    } else {
+        auto opened = k3x::Glm5xRuntimeIndex::open(
+            arguments->runtime_index, reader_options);
+        if (!opened) {
+            std::cerr << k3x::error_code_name(opened.error()) << ": "
+                      << opened.message() << '\n';
             return 4;
         }
-        readers.push_back(std::move(reader.value()));
+        runtime_index.emplace(std::move(opened.value()));
     }
-    std::vector<const k3x::Reader*> shard_views;
-    shard_views.reserve(readers.size());
-    for (const auto& reader : readers) shard_views.push_back(&reader);
     std::set<std::uint32_t> available_experts;
-    for (const auto& reader : readers) {
-        for (const auto& record : reader.tensors()) {
-            if (record.layer_id == static_cast<std::int32_t>(arguments->layer) &&
-                record.expert_id >= 0) {
-                available_experts.insert(static_cast<std::uint32_t>(record.expert_id));
+    if (runtime_index) {
+        for (std::uint32_t expert_id = 0; expert_id < 256; ++expert_id) {
+            const auto prefix =
+                "model.layers." + std::to_string(arguments->layer) +
+                ".mlp.experts." + std::to_string(expert_id) + ".";
+            if (runtime_index->contains_tensor(
+                    k3x::fnv1a64((prefix + "gate_proj.weight").c_str())) &&
+                runtime_index->contains_tensor(
+                    k3x::fnv1a64((prefix + "up_proj.weight").c_str())) &&
+                runtime_index->contains_tensor(
+                    k3x::fnv1a64((prefix + "down_proj.weight").c_str()))) {
+                available_experts.insert(expert_id);
+            }
+        }
+    } else {
+        for (const auto& reader : readers) {
+            for (const auto& record : reader.tensors()) {
+                if (record.layer_id ==
+                        static_cast<std::int32_t>(arguments->layer) &&
+                    record.expert_id >= 0) {
+                    available_experts.insert(
+                        static_cast<std::uint32_t>(record.expert_id));
+                }
             }
         }
     }
+    const auto load_source_tensor = [&](std::string_view name) {
+        return runtime_index
+            ? load_named_tensor(*runtime_index, name)
+            : load_named_tensor(shard_views, name);
+    };
+    const auto load_source_expert = [&](std::uint32_t expert_id) {
+        return runtime_index
+            ? runtime_index->read_expert(
+                  arguments->layer, expert_id,
+                  kHiddenSize, kIntermediateSize)
+            : k3x::load_glm5x_bf16_expert(
+                  shard_views, arguments->layer, expert_id,
+                  kHiddenSize, kIntermediateSize);
+    };
     const bool sparse_packed = arguments->input_mode == "sparse-packed";
     const bool expert_major = arguments->input_mode == "expert-major";
     const bool learned_expert_major =
@@ -464,12 +545,10 @@ int main(int argc, char** argv) {
     std::uint64_t router_payload_bytes = 0;
     const auto host_start = std::chrono::steady_clock::now();
     if (learned_route_mode) {
-        const auto router = load_named_tensor(
-            shard_views,
+        const auto router = load_source_tensor(
             "model.layers." + std::to_string(arguments->layer) +
                 ".mlp.gate.weight");
-        const auto bias = load_named_tensor(
-            shard_views,
+        const auto bias = load_source_tensor(
             "model.layers." + std::to_string(arguments->layer) +
                 ".mlp.gate.e_score_correction_bias");
         if (!router || !bias || router.value().dtype != 3 ||
@@ -511,9 +590,7 @@ int main(int argc, char** argv) {
     fixtures.reserve(expert_ids.size());
     std::uint64_t host_payload_bytes = 0;
     for (const auto expert_id : expert_ids) {
-        auto loaded = k3x::load_glm5x_bf16_expert(
-            shard_views, arguments->layer, expert_id,
-            kHiddenSize, kIntermediateSize);
+        auto loaded = load_source_expert(expert_id);
         if (!loaded) {
             std::cerr << k3x::error_code_name(loaded.error()) << ": "
                       << loaded.message() << '\n';
@@ -576,7 +653,7 @@ int main(int argc, char** argv) {
             {kHiddenSize, kIntermediateSize},
         }};
         for (std::size_t index = 0; index < names.size(); ++index) {
-            auto payload = load_named_tensor(shard_views, names[index]);
+            auto payload = load_source_tensor(names[index]);
             if (!payload || payload.value().dtype != 3 ||
                 !has_shape(payload.value(),
                            {shapes[index][0], shapes[index][1]})) {
@@ -615,6 +692,18 @@ int main(int argc, char** argv) {
     const auto host_load_ns = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - host_start).count());
+    k3x::ReadCounters source_reads;
+    if (runtime_index) {
+        source_reads = runtime_index->counters();
+    } else {
+        for (const auto& reader : readers) {
+            const auto counters = reader.counters();
+            source_reads.calls += counters.calls;
+            source_reads.completed_bytes += counters.completed_bytes;
+        }
+    }
+    const auto source_artifact_count = runtime_index
+        ? runtime_index->artifact_count() : paths.size();
     if (sparse_packed &&
         (arguments->precision != "bf16-rounded" || arguments->tokens != 2)) {
         std::cerr << "sparse-packed requires --precision bf16-rounded --tokens 2\n";
@@ -935,7 +1024,14 @@ int main(int argc, char** argv) {
               << ",\"expert_count\":" << expert_ids.size()
               << ",\"token_count\":" << arguments->tokens
               << ",\"last_expert_id\":" << expert_ids.back()
-              << ",\"shard_count\":" << paths.size()
+              << ",\"shard_count\":" << source_artifact_count
+              << ",\"source_kind\":\""
+              << (runtime_index ? "runtime_index" : "artifact_directory")
+              << "\""
+              << ",\"source_artifact_count\":" << source_artifact_count
+              << ",\"source_read_calls\":" << source_reads.calls
+              << ",\"source_read_bytes\":"
+              << source_reads.completed_bytes
               << ",\"precision\":\"" << arguments->precision << "\""
               << ",\"output\":\"" << arguments->output << "\""
               << ",\"input_mode\":\"" << arguments->input_mode << "\""

@@ -47,11 +47,11 @@
 - Produces: `--runtime-index FILE` as an alternative to `--artifact-dir DIR`.
 - Reports: `source_kind`, `source_artifact_count`, `source_read_calls`, and `source_read_bytes`.
 
-- [ ] Add the new CLI/source branch while retaining the artifact-directory control path.
-- [ ] Build the CUDA benchmark and confirm invalid dual/missing source arguments are rejected.
-- [ ] Run the official layer-10 learned-MoE gate through `.gxi` and the existing GLM5XACT files.
-- [ ] Compare route IDs, expected-output error, host payload bytes, H2D bytes, and warm latency with the artifact-directory control.
-- [ ] Commit the benchmark integration.
+- [x] Add the new CLI/source branch while retaining the artifact-directory control path.
+- [x] Build the CUDA benchmark and confirm invalid dual/missing source arguments are rejected.
+- [x] Run the official layer-10 learned-MoE gate through `.gxi` and the existing GLM5XACT files.
+- [x] Compare route IDs, expected-output error, host payload bytes, H2D bytes, and warm latency with the artifact-directory control.
+- [x] Commit the benchmark integration.
 
 ### Task 3: Verification and measured evidence
 
