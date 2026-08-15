@@ -13,6 +13,11 @@
 
 namespace k3x {
 
+struct Glm5xTensorLoad {
+    TensorRecord record;
+    std::vector<std::byte> payload;
+};
+
 class Glm5xRuntimeIndex {
 public:
     Glm5xRuntimeIndex(Glm5xRuntimeIndex&&) noexcept = default;
@@ -25,6 +30,9 @@ public:
         ReaderOptions options);
 
     Result<std::vector<std::byte>> read_tensor(std::uint64_t tensor_id) const;
+    Result<Glm5xTensorLoad> read_tensor_with_metadata(
+        std::uint64_t tensor_id) const;
+    bool contains_tensor(std::uint64_t tensor_id) const;
     Result<GlmBf16ExpertLoad> read_expert(
         std::uint32_t layer_id,
         std::uint32_t expert_id,

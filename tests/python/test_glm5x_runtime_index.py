@@ -204,8 +204,12 @@ def test_cpp_runtime_index_reads_exact_cross_shard_expert(tmp_path) -> None:
         hashlib.sha256(payload[role]).hexdigest()
         for role in ("gate_proj", "up_proj", "down_proj")
     ]
-    assert measured["reader_read_calls"] == 3
-    assert measured["reader_completed_bytes"] == 48
+    assert measured["reader_read_calls"] == 4
+    assert measured["reader_completed_bytes"] == 64
+    assert measured["gate_dtype"] == 3
+    assert measured["gate_rank"] == 2
+    assert measured["gate_dimensions"] == [2, 4]
+    assert measured["gate_payload_bytes"] == 16
 
 
 def test_cpp_runtime_index_accepts_mtp_tensor_layer(tmp_path) -> None:

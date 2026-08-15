@@ -32,10 +32,10 @@
 - Produces: `Glm5xTensorLoad { TensorRecord record; std::vector<std::byte> payload; }`.
 - Produces: `read_tensor_with_metadata(uint64_t)` and `contains_tensor(uint64_t)`.
 
-- [ ] Add metadata assertions to the C++ contract output and confirm compilation fails on the missing API.
-- [ ] Implement the membership and validated metadata-plus-payload read without duplicating payload validation.
-- [ ] Rebuild and run the focused C++/Python runtime-index regression.
-- [ ] Commit the runtime-index API change.
+- [x] Add metadata assertions to the C++ contract output and confirm compilation fails on the missing API.
+- [x] Implement the membership and validated metadata-plus-payload read without duplicating payload validation.
+- [x] Rebuild and run the focused C++/Python runtime-index regression.
+- [x] Commit the runtime-index API change.
 
 ### Task 2: Runtime-index source for the existing CUDA gate
 
