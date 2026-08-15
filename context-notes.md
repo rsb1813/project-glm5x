@@ -613,3 +613,17 @@
 - The standard synthetic gate measured `150.141/129.338/113.328` decode tok/s for candidate counts `0/1/2`. Candidate 2 reduced exposed expert-load wait but matched only `17/36` submissions and slowed decode by about `24.5%`, so the path is retained only as an experimental hook.
 - Full verification passed CUDA CTest `27/27`, CPU CTest `15/15`, and CPU-build Python `362 passed, 124 skipped`. The two failures seen when the Python suite was pointed at a noncanonical CUDA build directory were environment-selection failures in CPU-unavailable tests, not product regressions; the proper CPU build passed them.
 - Next performance work must move from host-only ticket lookahead to exact packed expert residency plus pooled pinned sidecar-to-VRAM staging. No full-model TPS or quality claim changed.
+
+## 2026-08-15 -- Stable hot-bank start
+
+- Work continues directly without subagents on `codex/stable-hot-bank`, stacked above transition-prefetch commit `0437bc0`.
+
+## 2026-08-16 -- Stable hot-bank result
+
+- Added an opt-in `stable_hot_bank` device-cache policy. Per-layer retained entries are replaced only by a strictly more frequently observed same-layer expert; equal-count/transient candidates bypass admission. Routing and exact sidecar payload identity are unchanged.
+- The first benchmark attempt correctly rejected a stale `layer-0010-expert-0026.pgu` whose source digest did not match the current bundle. The durable benchmark now reads only sidecar headers during trace selection and includes only digest-matched files.
+- B-0002 used 128 real `.pgu` entries across 16 layers. Three warm-pass medians were `3.656221967 s` for LRU and `3.289269276 s` for the stable bank. The stable bank kept 16 hits per pass and reduced H2D bytes by `12.5%`.
+- This is a structured cache-transport result, not natural-router full-model TPS or quality evidence. Keep the policy default-off and combine it with pooled asynchronous H2D before another 78-layer gate.
+- Final verification passed B-0002 raw/summary hash parity, focused `35 passed, 6 skipped`, full Python `365 passed, 124 skipped`, changed-module `py_compile`, and `git diff --check`.
+- The first target is exact device residency, not route prediction: keep a bounded set of repeatedly used experts per layer and bypass low-value transient admissions so sequential layer traversal cannot erase the bank.
+- Existing LRU and layer-balanced policies remain controls. The policy must preserve natural routes and outputs and will stay default-off unless a real RTX 5080 repeated-route benchmark improves wall time or H2D bytes.

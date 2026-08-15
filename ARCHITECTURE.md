@@ -173,6 +173,14 @@ The strict reference path is always available. Any adaptive Top-K, proxy, prunin
 - The C++ deadline scheduler exposes the feature through `--transition-prefetch-candidates 1..16`. Current-layer exact tickets are submitted first. Predicted tickets use a later deadline and are reused only if the next layer's natural router selects the same `(layer, expert)` key; every miss falls back to the unchanged exact load path.
 - Telemetry records successful submissions, matches, selected misses, unused predictions, ready/late matches, submission failures, requested bytes, and useful bytes. The standard JSON/CSV benchmark path preserves these fields. Candidate count zero is the default, and nonzero candidates require deadline scheduling.
 - This is an implemented experimental L2-to-host payload schedule, not full GLM sidecar-to-VRAM lookahead. The first synthetic gate preserved token and route traces but reduced decode throughput, so no quality mode enables it. The next accepted boundary must couple high-recall prediction to pooled pinned H2D and exact multi-layer device residency.
+
+## 2026-08-16 -- Experimental stable per-layer hot bank
+
+- `GLM5XExpertTensorCache(policy="stable_hot_bank")` keeps a bounded exact expert bank per layer. Every cache lookup updates a per-session access count, but a nonresident expert replaces a retained same-layer expert only after its count becomes strictly higher. Equal-count and one-off candidates bypass admission instead of churning the bank.
+- The policy never changes router scores, Top-K, expert values, or execution order. It operates only after natural routing has selected an exact expert and remains opt-in through `--expert-device-cache-policy stable_hot_bank` plus a positive protected-entry count.
+- Byte capacity remains authoritative. If the retained per-layer banks cannot fit, later admissions bypass rather than evict another layer's protected entry. The intended first full-model configuration is one retained mixed `.pgu` expert per sparse layer under the 4 GiB device-cache budget; this still requires a natural-router capacity gate.
+- A digest-matched real-sidecar trace over 16 layers and 8 experts per layer measured 16 warm hits instead of LRU's zero, reduced repeated H2D payload from `5,033,165,824` to `4,404,020,096` bytes, and reduced three-pass median wall time from `3.656` to `3.289` seconds. This validates the admission boundary only; it is not full-model decode or quality evidence.
+- The next architecture step is to combine retained banks with pooled pinned N+1 sidecar staging and stream/event completion that does not force per-expert synchronization. Only then should the 78-layer exact gate be rerun.
 # 2026-08-15 performance-path update
 
 ## Implemented experimental INT4 expert path

@@ -1,0 +1,64 @@
+{
+  "benchmark_id": "B-0002",
+  "date": "2026-08-16",
+  "boundary": "structured-real-sidecar-residency",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "torch_version": "2.13.0+cu130"
+  },
+  "model_artifact": {
+    "bundle": "build-glm5x-full-k3x/glm5x-experts-full.json",
+    "bundle_sha256": "c75b96f8b7be54603fcd7755f7d821814116907cf6e0bc3f5b65f55a4dc741c8",
+    "precision": "nvfp4_gate_up"
+  },
+  "configuration": {
+    "device_cache_capacity_bytes": 805306368,
+    "host_cache_capacity_bytes": 8589934592,
+    "layers": 16,
+    "experts_per_layer": 8,
+    "trace_entries": 128,
+    "warm_passes": 3
+  },
+  "cases": {
+    "lru": {
+      "cold_elapsed_nanoseconds": 29795967729,
+      "warm_median_elapsed_nanoseconds": 3656221967,
+      "warm_device_cache_hits": 0,
+      "warm_device_cache_misses": 128,
+      "warm_hit_rate": 0.0,
+      "warm_h2d_bytes": 5033165824,
+      "warm_h2d_event_median_nanoseconds": 572164194,
+      "resident_bytes": 786432160,
+      "peak_cuda_allocated_bytes": 825775104,
+      "raw": "lru-repeat.json",
+      "raw_sha256": "0dca3c1f3fcb38789ca0207e260ec7fe958cfcd1ec2cebf119b7693769e2616d"
+    },
+    "stable_hot_bank": {
+      "protected_entries_per_layer": 1,
+      "cold_elapsed_nanoseconds": 30084442793,
+      "warm_median_elapsed_nanoseconds": 3289269276,
+      "warm_device_cache_hits": 16,
+      "warm_device_cache_misses": 112,
+      "warm_hit_rate": 0.125,
+      "warm_h2d_bytes": 4404020096,
+      "warm_h2d_event_median_nanoseconds": 562860753,
+      "resident_bytes": 629145728,
+      "peak_cuda_allocated_bytes": 668484608,
+      "raw": "stable-hot-bank-repeat.json",
+      "raw_sha256": "248c1a8886c9a324a4bd399c3f775c889ce0a6ff2f6585a033b7ba6259c44261"
+    }
+  },
+  "comparison": {
+    "warm_elapsed_reduction_percent": 10.036389866698702,
+    "warm_h2d_bytes_reduction_percent": 12.5,
+    "warm_h2d_event_reduction_percent": 1.626008949452018,
+    "peak_cuda_allocated_reduction_percent": 19.047619047619047
+  },
+  "status": "experimental-default-off",
+  "full_model_tps": null,
+  "quality_claim": "cache-only exact payload identity; no model-logit claim",
+  "limitations": [
+    "The trace uses digest-matched real sidecars but is a structured repeated-layer trace, not a natural-router full-model decode.",
+    "The result does not establish end-to-end token throughput or output quality."
+  ]
+}
