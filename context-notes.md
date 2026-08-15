@@ -625,5 +625,11 @@
 - B-0002 used 128 real `.pgu` entries across 16 layers. Three warm-pass medians were `3.656221967 s` for LRU and `3.289269276 s` for the stable bank. The stable bank kept 16 hits per pass and reduced H2D bytes by `12.5%`.
 - This is a structured cache-transport result, not natural-router full-model TPS or quality evidence. Keep the policy default-off and combine it with pooled asynchronous H2D before another 78-layer gate.
 - Final verification passed B-0002 raw/summary hash parity, focused `35 passed, 6 skipped`, full Python `365 passed, 124 skipped`, changed-module `py_compile`, and `git diff --check`.
+
+## 2026-08-16 -- Full stable hot-bank gate start
+
+- The next-layer CUDA overlap proposal crosses ticket ownership, stream/event lifetime, model/session route state, and exact fallback boundaries. It is deferred until a natural-routing full gate proves that stable residency yields useful hits under the official 78-layer access sequence.
+- The comparison changes only `expert_device_cache_policy` from the prior 4 GiB `layer_balanced` run to `stable_hot_bank`. It retains 40 GiB trunk cache, mixed `.pgu` gate/up NVFP4 plus BF16 down, natural Top-8, two decode tokens, and the same bundle/config/prompt.
+- Work continues directly without subagents on `codex/full-stable-hot-bank-gate`.
 - The first target is exact device residency, not route prediction: keep a bounded set of repeatedly used experts per layer and bypass low-value transient admissions so sequential layer traversal cannot erase the bank.
 - Existing LRU and layer-balanced policies remain controls. The policy must preserve natural routes and outputs and will stay default-off unless a real RTX 5080 repeated-route benchmark improves wall time or H2D bytes.
