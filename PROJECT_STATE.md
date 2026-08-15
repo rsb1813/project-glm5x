@@ -1,6 +1,6 @@
 # GLM5X Project State
 
-Latest verified complete Python regression: `341 passed, 124 skipped` in `173.77 s`. The prior milestone text below retains historical counts for context.
+Latest verified complete Python regression: `352 passed, 124 skipped` in `75.19 s` from WSL2 CUDA environment. The prior milestone text below retains historical counts for context.
 
 ## Current milestone
 
@@ -16,7 +16,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 - Full-gate result: exact cold one-token run took `306.933 s` prefill plus `302.688 s` decode, with `79.763 GB` of logical artifact reads per token and `8.083 GB` peak allocated VRAM. The cached two-token run took `303.585 s` prefill and `611.386 s` decode, with zero expert-cache hits because the configured cache capacity evicted the working set.
 - Current bottleneck: the exact reference is still limited by storage/reload, while the first NVFP4 full gate exposes additional sidecar I/O/native FP4 overhead and final-token divergence. A 4 GiB plain LRU device cache had `0` hits and `1,691` evictions, so the next target is layer-aware protected residency and explicit sidecar-to-VRAM prefetch, followed by calibrated FP4 residual handling and final-logit parity.
 - Reduced-routing/proxy gate: the real layer-10 four-token shared Top-4 proxy measured `5.043440291978186 s` versus natural Top-8 `12.43729756900575 s`, but relative L2 drift was `0.8120684623718262`; the proxy is default-off and does not count toward the TPS target.
-- Verification: the latest complete WSL Python suite passed `341 passed, 124 skipped` in `173.77 s`; the focused NVFP4/layer/cache/model group passed `17 passed` for the selected follow-up set. These are current local results; no full-model speed claim changed.
+- Verification: the latest complete WSL Python suite passed `352 passed, 124 skipped` in `75.19 s`; the focused NVFP4/layer/cache/model/grouped suite passed `38` before the full run. These are current local results; no full-model speed claim changed.
 - GitHub: public head `bb85223` contains the native NVFP4 path, full-gate measurements, and documentation. The latest local verification is `341 passed, 124 skipped`; the recurring red `correctness / Linux (push)` notification is stale run `31795400168` on `b94c8b8`, where 50 historical evidence files were absent; it is not an active failure on `main`.
 - Dependency status: Dependabot update PRs `#1`--`#4` are closed and no open Dependabot PR exists. The repository security-alert endpoints are disabled (`403`/`404`), so the visible alarm cannot be converted into a verified CVE count.
 
@@ -279,3 +279,11 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 - Added experimental `.pm4` fingerprinted sidecars and `expert_precision=mxfp4`. The current reference path packs E2M1/E8M0 MXFP4, then decodes to BF16 for execution; BF16 remains the exact/default path.
 - Real layer-10 one-token gate: eight routed experts occupied `160,440,156` sidecar bytes (`26.56%` of corresponding BF16 role bytes), route IDs matched, and MXFP4-vs-BF16 relative L2 error was `0.16359105706214905` with max absolute error `0.001750946044921875`. Fresh sidecar decode took `17.867729659978068 s` versus `2.79652249100036 s` BF16 because the native FP4 kernel is not connected yet.
 - Status: FP4 storage plumbing is implemented and tested, but uncalibrated MXFP4 is not promoted. Next is calibrated residual metadata plus native RTX 5080 FP4 execution, followed by one fresh full-model quality/traffic gate.
+
+## 2026-08-15 -- Luna parallel NVFP4/cache follow-up
+
+- Implemented: `reference/glm5x_ref/nvfp4_batched.py`, the `grouped_nvfp4` layer/model switch, `--nvfp4-grouped`, and focused parity tests. The grouped API is an experimental CUDA kernel boundary and is not silently enabled for the full model.
+- Implemented: explicit protected-key tracking for `GLM5XExpertTensorCache(policy="layer_balanced")`. A RED regression reproduced protected-entry eviction; the focused suite is green after the fix.
+- Measured: grouped NVFP4 projection samples were variable (`0.783x` to `2.138x` versus sequential depending on expert count). The real sidecar admission/H2D probe measured roughly `89.505--102.677 ms` GPU-event time per expert, while gate/up projection itself was about `0.131 ms`; transfer/residency is the current dominant boundary.
+- Verification complete: full WSL Python regression passed `352 passed, 124 skipped` in `75.19 s` after the focused `38 passed` result.
+- Known blocker: the current full NVFP4 gate remains `0.0144835562212668` decode tok/s with final-token divergence from exact BF16. Ten tok/s is not achieved; the next concrete task is pinned asynchronous staging plus route-stable layer-window residency and separate sidecar/H2D telemetry.

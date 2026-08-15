@@ -83,6 +83,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="bounded exact decoded CUDA expert cache capacity; 0 disables it",
     )
     parser.add_argument(
+        "--expert-device-cache-policy",
+        choices=("lru", "layer_balanced"),
+        default="lru",
+        help="expert device-cache admission policy; layer_balanced protects per-layer entries",
+    )
+    parser.add_argument(
+        "--expert-device-cache-protected-entries-per-layer",
+        type=int,
+        default=1,
+        help="minimum entries protected per layer for layer_balanced policy",
+    )
+    parser.add_argument(
         "--expert-packed-cache-dir",
         type=Path,
         default=None,
@@ -107,6 +119,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="non-expert projection precision; int4 requires CUDA TinyGEMM",
     )
     parser.add_argument(
+        "--nvfp4-grouped",
+        action="store_true",
+        help="experimental grouped gate/up NVFP4 projection for one-token CUDA forwards",
+    )
+    parser.add_argument(
         "--lazy-bundle",
         action="store_true",
         help="skip whole-artifact payload/root scans and CRC-check selected tensors on read",
@@ -129,6 +146,15 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         raise ValueError("expert-cache-bytes must be non-negative")
     if arguments.expert_device_cache_bytes < 0:
         raise ValueError("expert-device-cache-bytes must be non-negative")
+    if arguments.expert_device_cache_protected_entries_per_layer < 0:
+        raise ValueError("expert-device-cache-protected-entries-per-layer must be non-negative")
+    if (
+        arguments.expert_device_cache_policy == "layer_balanced"
+        and arguments.expert_device_cache_protected_entries_per_layer <= 0
+    ):
+        raise ValueError(
+            "layer-balanced expert-device-cache policy requires protected entries per layer"
+        )
     if arguments.trunk_cache_bytes < 0:
         raise ValueError("trunk-cache-bytes must be non-negative")
     if arguments.device == "cuda" and not torch.cuda.is_available():
@@ -151,6 +177,10 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         expert_load_workers=arguments.expert_load_workers,
         expert_cache_capacity_bytes=arguments.expert_cache_bytes,
         expert_device_cache_capacity_bytes=arguments.expert_device_cache_bytes,
+        expert_device_cache_policy=arguments.expert_device_cache_policy,
+        expert_device_cache_protected_entries_per_layer=(
+            arguments.expert_device_cache_protected_entries_per_layer
+        ),
         trunk_cache_capacity_bytes=arguments.trunk_cache_bytes,
         packed_expert_cache_path=arguments.expert_packed_cache_dir,
         routing_top_k=arguments.routing_top_k,
@@ -158,6 +188,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         proxy_top_k=arguments.proxy_top_k,
         expert_precision=arguments.expert_precision,
         trunk_precision=arguments.trunk_precision,
+        grouped_nvfp4=arguments.nvfp4_grouped,
     )
     storage_before = model.bundle_read_stats
     prompt = torch.tensor(arguments.prompt, dtype=torch.long, device=device)
@@ -241,6 +272,10 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         "expert_load_workers": arguments.expert_load_workers,
         "expert_cache_bytes": arguments.expert_cache_bytes,
         "expert_device_cache_bytes": arguments.expert_device_cache_bytes,
+        "expert_device_cache_policy": arguments.expert_device_cache_policy,
+        "expert_device_cache_protected_entries_per_layer": (
+            arguments.expert_device_cache_protected_entries_per_layer
+        ),
         "expert_packed_cache_dir": (
             None
             if arguments.expert_packed_cache_dir is None
@@ -249,6 +284,7 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         "trunk_cache_bytes": arguments.trunk_cache_bytes,
         "expert_precision": arguments.expert_precision,
         "trunk_precision": arguments.trunk_precision,
+        "nvfp4_grouped": arguments.nvfp4_grouped,
         "lazy_bundle": arguments.lazy_bundle,
     }
     cache_stats = model.expert_payload_cache_stats

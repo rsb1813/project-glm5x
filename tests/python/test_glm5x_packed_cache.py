@@ -122,3 +122,26 @@ def test_packed_expert_cache_round_trip_nvfp4_gate_up(tmp_path) -> None:
     torch.testing.assert_close(loaded.gate_proj.packed, expert.gate_proj.packed)
     torch.testing.assert_close(loaded.up_proj.scales, expert.up_proj.scales)
     torch.testing.assert_close(loaded.down_proj, expert.down_proj)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_packed_expert_cache_get_many_reads_independent_sidecars(tmp_path) -> None:
+    torch.manual_seed(59)
+    expert = GLM5XExpertWeights(
+        gate_proj=quantize_nvfp4_weight(torch.randn(64, 128, device="cuda"), device="cuda"),
+        up_proj=quantize_nvfp4_weight(torch.randn(64, 128, device="cuda"), device="cuda"),
+        down_proj=torch.randn(128, 64, dtype=torch.bfloat16, device="cuda"),
+    )
+    cache = GLM5XPackedExpertCache(tmp_path)
+    digests = {
+        (4, 12): "digest-12-000000000000",
+        (4, 13): "digest-13-000000000000",
+    }
+    for key, digest in digests.items():
+        cache.put(key, digest, expert, precision="nvfp4_gate_up")
+    loaded = cache.get_many(
+        digests, device="cuda", precision="nvfp4_gate_up", workers=2
+    )
+    assert set(loaded) == set(digests)
+    assert cache.stats.hits == 2
+    assert cache.stats.misses == 0

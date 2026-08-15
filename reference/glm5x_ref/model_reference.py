@@ -229,6 +229,8 @@ class GLM5XDecoderModelReference:
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache_capacity_bytes: int = 0,
+        expert_device_cache_policy: str = "lru",
+        expert_device_cache_protected_entries_per_layer: int = 0,
         trunk_cache_capacity_bytes: int = 0,
         packed_expert_cache_path: str | Path | None = None,
         routing_top_k: int | None = None,
@@ -236,6 +238,7 @@ class GLM5XDecoderModelReference:
         proxy_top_k: int | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
+        grouped_nvfp4: bool = False,
     ) -> "GLM5XDecoderModelReference":
         """Build an out-of-core model factory from one validated GLM bundle.
 
@@ -253,6 +256,19 @@ class GLM5XDecoderModelReference:
             or expert_device_cache_capacity_bytes < 0
         ):
             raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_CAPACITY")
+        if expert_device_cache_policy not in {"lru", "layer_balanced"}:
+            raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_POLICY")
+        if (
+            not isinstance(expert_device_cache_protected_entries_per_layer, int)
+            or isinstance(expert_device_cache_protected_entries_per_layer, bool)
+            or expert_device_cache_protected_entries_per_layer < 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
+        if (
+            expert_device_cache_policy == "layer_balanced"
+            and expert_device_cache_protected_entries_per_layer <= 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_PROTECTED_ENTRIES")
         if (
             not isinstance(trunk_cache_capacity_bytes, int)
             or isinstance(trunk_cache_capacity_bytes, bool)
@@ -323,7 +339,11 @@ class GLM5XDecoderModelReference:
         )
         tensor_refs = _collect_tensor_refs(bundle)
         expert_device_cache = (
-            GLM5XExpertTensorCache(expert_device_cache_capacity_bytes)
+            GLM5XExpertTensorCache(
+                expert_device_cache_capacity_bytes,
+                policy=expert_device_cache_policy,
+                protected_entries_per_layer=expert_device_cache_protected_entries_per_layer,
+            )
             if expert_device_cache_capacity_bytes
             else None
         )
@@ -385,6 +405,7 @@ class GLM5XDecoderModelReference:
                 trunk_precision=trunk_precision,
                 proxy_mode=proxy_mode,
                 proxy_top_k=proxy_top_k,
+                grouped_nvfp4=grouped_nvfp4,
             )
 
         instance = cls.from_layer_loader(

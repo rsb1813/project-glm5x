@@ -706,3 +706,19 @@
 - Evidence: resident RTX 5080 GLM-shaped microbenchmark averaged `0.0007789301977027208 s` paired versus `0.0014070075005292893 s` independent (`1.8063332307297124x`); parity test passed and the full suite was `341 passed, 124 skipped`.
 - Accepted because: it is local, correctness-preserving, and removes duplicated activation work without changing routing or quantized weights.
 - Revisit: after a full clean NVFP4 gate; the microbenchmark is not an end-to-end TPS claim.
+
+## D-0089 -- Keep grouped NVFP4 projection experimental
+
+- Decision: add and test `nvfp4_batched.py` as a selectable kernel boundary, but do not silently replace the full-model loop scheduler with it yet.
+- Alternatives: enable grouped gate/up for every NVFP4 token, discard the prototype because transfer dominates, or implement a larger fused expert-major scheduler first.
+- Evidence: CUDA parity was bit-equal on the tested shapes. Real RTX 5080 layer-10 samples ranged from `0.783x` to `2.138x` versus sequential gate/up depending on expert count, while the full gate is dominated by roughly `90--100 ms` sidecar admission/H2D per expert and measured `0.0144836` decode tok/s.
+- Accepted because: the primitive is small, independently tested, and preserves an exact fallback, but the data does not justify making a variable projection microbenchmark the default end-to-end path.
+- Revisit: after pinned/asynchronous staging and a layer-window residency scheduler provide a clean full-layer and full-model comparison.
+
+## D-0090 -- Make layer-balanced protection explicit
+
+- Decision: represent protected `(layer, expert)` keys explicitly in `GLM5XExpertTensorCache`; a protected key is never selected as an eviction candidate while a non-protected overrepresented entry exists.
+- Alternatives: keep the count-only heuristic, pin all entries from a layer, or increase the device-cache capacity without changing policy.
+- Evidence: the RED regression reproduced eviction of `(0,0)` after `(0,0)`, `(0,1)`, `(1,0)`, and `(0,2)` were admitted with one protected entry per layer. A larger synthetic multi-layer trace also produced zero second-pass hits under the old heuristic.
+- Accepted because: it fixes the stated policy invariant without changing LRU behavior or natural routing. It does not claim that a 4 GiB cache can hold the full expert working set.
+- Revisit: after route-stable hot-bank selection and a full-model trace show how many protected entries per layer fit the 16 GiB VRAM budget.

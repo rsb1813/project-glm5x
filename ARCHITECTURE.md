@@ -142,6 +142,13 @@ The fingerprinted expert sidecar supports CUDA TinyGEMM INT4 (`.pi4`), compariso
 The strict reference path is always available. Any adaptive Top-K, proxy, pruning, or verifier-budget mode is opt-in and must report quality divergence. SHADOW and PHOENIX-style escalation are policy layers and cannot silently change the natural routing contract.
 
 `TURBO-LONGCTX` is an experimental mode for 600k–1M context capacity. It keeps exact routing and target verification while allowing compressed historical KV. Context capacity, prefill/TTFT, and decode tok/s are recorded as separate measurements. TurboQuant does not compress the 753B model weights; expert weight streaming remains an independent bottleneck.
+
+## 2026-08-15 performance follow-up
+
+- `reference/glm5x_ref/nvfp4_batched.py` adds a correctness-tested, CUDA-only grouped NVFP4 projection primitive. It concatenates selected expert rows and blocked scales for one scaled GEMM, then restores `[tokens, experts, features]` order. CPU fallback remains per-expert and the API does not change router semantics.
+- The grouped primitive is currently an experimental kernel boundary, not the default full-model scheduler. RTX 5080 layer-10 sidecar measurements were mixed at one token (`4` experts `0.469632 ms` grouped versus `0.443808 ms` sequential) and showed a larger benefit at some wider batches (`8` experts `2.708 ms` versus `4.382 ms`). It is therefore retained for controlled ablation while transfer/residency work remains the primary path.
+- `GLM5XExpertTensorCache(policy="layer_balanced")` now tracks protected keys explicitly. Eviction candidates must be non-protected entries from an overrepresented layer; the previous count-only heuristic could evict the very entry intended to be protected and produced zero second-pass hits in a multi-layer trace.
+- The current sidecar path is still synchronous: file read, CRC/decode, and pageable host-to-device copies occur before the expert MLP. The next architecture boundary is pinned staging plus layer-window residency/prefetch with separate sidecar and H2D telemetry. No asynchronous overlap is claimed yet.
 # 2026-08-15 performance-path update
 
 ## Implemented experimental INT4 expert path

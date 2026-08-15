@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 import os
 import struct
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import Lock
-from typing import Any
+from typing import Any, Mapping
 
 import google_crc32c
 import torch
@@ -339,64 +340,94 @@ class GLM5XPackedExpertCache:
         if precision not in _PRECISIONS:
             raise ValueError("GLM5X_PACKED_CACHE_PRECISION")
         path = self._path(self.root, key, precision)
-        with self._lock:
-            try:
-                data = path.read_bytes()
-                if len(data) < _HEADER.size:
-                    raise ValueError("GLM5X_PACKED_CACHE_HEADER")
-                magic, version, metadata_length = _HEADER.unpack_from(data)
-                if magic != _MAGIC or version != _VERSION:
-                    raise ValueError("GLM5X_PACKED_CACHE_FORMAT")
-                metadata_start = _HEADER.size
-                metadata_end = metadata_start + metadata_length
-                metadata = json.loads(data[metadata_start:metadata_end].decode("utf-8"))
-                if metadata.get("format") != f"glm5x-{precision}-expert-v1":
-                    raise ValueError("GLM5X_PACKED_CACHE_FORMAT")
-                if metadata.get("source_digest") != source_digest:
-                    raise ValueError("GLM5X_PACKED_CACHE_SOURCE_MISMATCH")
-                roles = metadata.get("roles")
-                if not isinstance(roles, list) or len(roles) != 3:
-                    raise ValueError("GLM5X_PACKED_CACHE_ROLES")
-                payload = data[metadata_end:]
-                if len(payload) != int(metadata.get("payload_bytes", -1)):
-                    raise ValueError("GLM5X_PACKED_CACHE_PAYLOAD_EXTENT")
-                decoded = tuple(
-                    self._decode_role(role, payload, device=target, precision=precision)
-                    for role in roles
-                )
-                from .layer10_moe import GLM5XExpertWeights
+        try:
+            data = path.read_bytes()
+            if len(data) < _HEADER.size:
+                raise ValueError("GLM5X_PACKED_CACHE_HEADER")
+            magic, version, metadata_length = _HEADER.unpack_from(data)
+            if magic != _MAGIC or version != _VERSION:
+                raise ValueError("GLM5X_PACKED_CACHE_FORMAT")
+            metadata_start = _HEADER.size
+            metadata_end = metadata_start + metadata_length
+            metadata = json.loads(data[metadata_start:metadata_end].decode("utf-8"))
+            if metadata.get("format") != f"glm5x-{precision}-expert-v1":
+                raise ValueError("GLM5X_PACKED_CACHE_FORMAT")
+            if metadata.get("source_digest") != source_digest:
+                raise ValueError("GLM5X_PACKED_CACHE_SOURCE_MISMATCH")
+            roles = metadata.get("roles")
+            if not isinstance(roles, list) or len(roles) != 3:
+                raise ValueError("GLM5X_PACKED_CACHE_ROLES")
+            payload = data[metadata_end:]
+            if len(payload) != int(metadata.get("payload_bytes", -1)):
+                raise ValueError("GLM5X_PACKED_CACHE_PAYLOAD_EXTENT")
+            decoded = tuple(
+                self._decode_role(role, payload, device=target, precision=precision)
+                for role in roles
+            )
+            from .layer10_moe import GLM5XExpertWeights
 
+            with self._lock:
                 self._hits += 1
-                if precision == "fp8":
-                    gate, gate_scale = decoded[0]
-                    up, up_scale = decoded[1]
-                    down, down_scale = decoded[2]
-                    return GLM5XExpertWeights(
-                        gate_proj=gate,
-                        up_proj=up,
-                        down_proj=down,
-                        gate_scale=gate_scale,
-                        up_scale=up_scale,
-                        down_scale=down_scale,
-                    )
-                if precision == "mxfp4":
-                    return GLM5XExpertWeights(
-                        gate_proj=decoded[0],
-                        up_proj=decoded[1],
-                        down_proj=decoded[2],
-                    )
-                if precision in {"nvfp4", "nvfp4_gate_up"}:
-                    return GLM5XExpertWeights(
-                        gate_proj=decoded[0],
-                        up_proj=decoded[1],
-                        down_proj=decoded[2],
-                    )
+            if precision == "fp8":
+                gate, gate_scale = decoded[0]
+                up, up_scale = decoded[1]
+                down, down_scale = decoded[2]
                 return GLM5XExpertWeights(
-                    gate_proj=decoded[0], up_proj=decoded[1], down_proj=decoded[2]
+                    gate_proj=gate,
+                    up_proj=up,
+                    down_proj=down,
+                    gate_scale=gate_scale,
+                    up_scale=up_scale,
+                    down_scale=down_scale,
                 )
-            except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return GLM5XExpertWeights(
+                gate_proj=decoded[0],
+                up_proj=decoded[1],
+                down_proj=decoded[2],
+            )
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            with self._lock:
                 self._misses += 1
-                return None
+            return None
+
+    def get_many(
+        self,
+        source_digests: Mapping[tuple[int, int], str],
+        *,
+        device: torch.device | str,
+        precision: str = "int4",
+        workers: int = 1,
+    ) -> dict[tuple[int, int], Any]:
+        """Read independent sidecars concurrently without serializing file I/O."""
+        if (
+            not isinstance(workers, int)
+            or isinstance(workers, bool)
+            or workers <= 0
+        ):
+            raise ValueError("GLM5X_PACKED_CACHE_WORKERS")
+        items = list(source_digests.items())
+        if not items:
+            return {}
+        if workers == 1 or len(items) == 1:
+            return {
+                key: cached
+                for key, digest in items
+                if (cached := self.get(key, digest, device=device, precision=precision))
+                is not None
+            }
+        result: dict[tuple[int, int], Any] = {}
+        with ThreadPoolExecutor(max_workers=min(workers, len(items))) as executor:
+            futures = {
+                key: executor.submit(
+                    self.get, key, digest, device=device, precision=precision
+                )
+                for key, digest in items
+            }
+            for key, future in futures.items():
+                cached = future.result()
+                if cached is not None:
+                    result[key] = cached
+        return result
 
     @property
     def stats(self) -> GLM5XPackedExpertCacheStats:
