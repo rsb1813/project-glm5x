@@ -107,6 +107,41 @@ def test_glm5x_moe_loads_each_selected_expert_once() -> None:
     assert len(calls) == result.expert_load_count
 
 
+def test_glm5x_shared_proxy_limits_exact_expert_admission() -> None:
+    hidden = torch.tensor(
+        [[0.5, -1.0, 0.25], [1.0, 0.25, -0.75]], dtype=torch.float32
+    )
+    router_weight = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.5, 0.25]],
+        dtype=torch.float32,
+    )
+    correction_bias = torch.tensor([0.0, 0.1, -0.2, 0.05], dtype=torch.float32)
+    calls: list[int] = []
+
+    def load(expert_id: int) -> GLM5XExpertWeights:
+        calls.append(expert_id)
+        return _weights(expert_id)
+
+    model = GLM5XLayer10MoEReference(
+        router_weight=router_weight,
+        correction_bias=correction_bias,
+        expert_loader=load,
+        shared_expert=_weights(0),
+        top_k=3,
+        proxy_mode="shared",
+        proxy_top_k=1,
+        routed_scaling_factor=2.5,
+        n_group=1,
+        topk_group=1,
+    )
+
+    result = model(hidden)
+    exact_ids = result.topk_indices[:, :1].flatten().tolist()
+    assert sorted(calls) == sorted(set(exact_ids))
+    assert result.topk_indices.shape[-1] == 3
+    assert torch.isfinite(result.output).all()
+
+
 def test_glm5x_expert_major_matches_reference_loop() -> None:
     hidden = torch.tensor(
         [

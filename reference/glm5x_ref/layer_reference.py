@@ -96,6 +96,8 @@ class GLM5XDecoderLayerReference:
         packed_expert_cache: GLM5XPackedExpertCache | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
+        proxy_mode: str = "none",
+        proxy_top_k: int | None = None,
     ) -> "GLM5XDecoderLayerReference":
         bundle = GLM5XExpertBundle.open(
             bundle_path,
@@ -130,6 +132,8 @@ class GLM5XDecoderLayerReference:
             packed_expert_cache=packed_expert_cache,
             expert_precision=expert_precision,
             trunk_precision=trunk_precision,
+            proxy_mode=proxy_mode,
+            proxy_top_k=proxy_top_k,
         )
 
     @classmethod
@@ -163,6 +167,8 @@ class GLM5XDecoderLayerReference:
         packed_expert_cache: GLM5XPackedExpertCache | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
+        proxy_mode: str = "none",
+        proxy_top_k: int | None = None,
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
         """Open and validate one bundle once, then provide individual layers."""
         bundle = GLM5XExpertBundle.open(
@@ -201,6 +207,8 @@ class GLM5XDecoderLayerReference:
                 packed_expert_cache=packed_expert_cache,
                 expert_precision=expert_precision,
                 trunk_precision=trunk_precision,
+                proxy_mode=proxy_mode,
+                proxy_top_k=proxy_top_k,
             )
 
         return load
@@ -235,6 +243,8 @@ class GLM5XDecoderLayerReference:
         packed_expert_cache: GLM5XPackedExpertCache | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
+        proxy_mode: str = "none",
+        proxy_top_k: int | None = None,
     ) -> "GLM5XDecoderLayerReference":
         if mlp_type not in {"dense", "sparse"}:
             raise ValueError("GLM5X_LAYER_MLP_TYPE")
@@ -355,6 +365,8 @@ class GLM5XDecoderLayerReference:
                 packed_expert_cache=packed_expert_cache,
                 expert_precision=expert_precision,
                 trunk_precision=trunk_precision,
+                proxy_mode=proxy_mode,
+                proxy_top_k=proxy_top_k,
                 tensor_values=tensor_values,
             )
         return cls(

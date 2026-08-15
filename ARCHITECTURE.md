@@ -119,6 +119,12 @@ The current CUDA evidence is deliberately bounded. The shaped benchmark runs the
 
 K3-specific KDA, Attention Residual, Stable LatentMoE, 896-way Top-16 assumptions, and native Kimi MXFP4 naming are not part of the GLM5X default graph. They remain historical source context in the old K3X repository only.
 
+## Experimental reduced routing and cold-expert proxy
+
+`GLM5XDecoderModelReference.from_bundle()` now exposes two explicit experimental controls. `routing_top_k` changes the reference router's evaluated K, while `proxy_mode="shared"` keeps the natural route metadata but evaluates only `proxy_top_k` routed experts and uses the shared expert as a dropped-mass approximation. `proxy_mode="none"` remains exact and rejects a mismatched `proxy_top_k`.
+
+The controls are useful for measuring the trade-off between expert admission and output drift, but they are not enabled by any quality mode. On the real layer-10 four-token activation, natural Top-8 used `12.43729756900575 s` and 31 unique routed experts. The shared Top-4 proxy used `5.043440291978186 s` and 16 unique experts, but its relative L2 difference against the natural Top-8 output was `0.8120684623718262`. This is an experimental/rejected default path, not a quality-preserving speed claim.
+
 ## Quality modes
 
 The strict reference path is always available. Any adaptive Top-K, proxy, pruning, or verifier-budget mode is opt-in and must report quality divergence. SHADOW and PHOENIX-style escalation are policy layers and cannot silently change the natural routing contract.

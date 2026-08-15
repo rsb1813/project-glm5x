@@ -299,6 +299,8 @@ class GLM5XLayer10MoEReference:
         expert_device_cache: GLM5XExpertTensorCache | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
+        proxy_mode: str = "none",
+        proxy_top_k: int | None = None,
     ) -> None:
         router_weight = torch.as_tensor(router_weight)
         correction_bias = torch.as_tensor(correction_bias)
@@ -327,6 +329,19 @@ class GLM5XLayer10MoEReference:
             raise ValueError("GLM5X_INVALID_EXECUTION_MODE")
         if expert_precision not in {"bf16", "fp8", "int4"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
+        if proxy_mode not in {"none", "shared"}:
+            raise ValueError("GLM5X_INVALID_PROXY_MODE")
+        if proxy_top_k is None:
+            proxy_top_k = top_k
+        if (
+            not isinstance(proxy_top_k, int)
+            or isinstance(proxy_top_k, bool)
+            or proxy_top_k <= 0
+            or proxy_top_k > top_k
+        ):
+            raise ValueError("GLM5X_INVALID_PROXY_TOP_K")
+        if proxy_mode == "none" and proxy_top_k != top_k:
+            raise ValueError("GLM5X_PROXY_TOP_K_WITHOUT_PROXY")
         if expert_batch_loader is not None and not callable(expert_batch_loader):
             raise ValueError("GLM5X_INVALID_EXPERT_BATCH_LOADER")
         if (
@@ -360,6 +375,8 @@ class GLM5XLayer10MoEReference:
         self.expert_load_workers = expert_load_workers
         self.expert_device_cache = expert_device_cache
         self.expert_precision = expert_precision
+        self.proxy_mode = proxy_mode
+        self.proxy_top_k = proxy_top_k
         self._expert_cache: dict[int, GLM5XExpertWeights] = {}
 
     @property
@@ -566,14 +583,16 @@ class GLM5XLayer10MoEReference:
         topk_weights: torch.Tensor,
         output: torch.Tensor,
     ) -> tuple[int, ...]:
-        expert_ids = [int(value) for value in torch.unique(topk_indices, sorted=True)]
+        exact_indices = topk_indices[:, : self.proxy_top_k]
+        exact_weights = topk_weights[:, : self.proxy_top_k]
+        expert_ids = [int(value) for value in torch.unique(exact_indices, sorted=True)]
         experts, loaded = self._load_experts(expert_ids)
         for expert_id in expert_ids:
             expert = experts[expert_id]
-            slot_mask = topk_indices == expert_id
+            slot_mask = exact_indices == expert_id
             token_indices, slots = torch.where(slot_mask)
             routed = self._mlp(flat[token_indices], expert)
-            weighted = routed * topk_weights[token_indices, slots].to(
+            weighted = routed * exact_weights[token_indices, slots].to(
                 routed.dtype
             ).unsqueeze(-1)
             output.index_add_(0, token_indices, weighted.to(output.dtype))
@@ -586,12 +605,14 @@ class GLM5XLayer10MoEReference:
         topk_weights: torch.Tensor,
         output: torch.Tensor,
     ) -> tuple[int, ...]:
-        expert_ids = [int(value) for value in torch.unique(topk_indices, sorted=True)]
+        exact_indices = topk_indices[:, : self.proxy_top_k]
+        exact_weights = topk_weights[:, : self.proxy_top_k]
+        expert_ids = [int(value) for value in torch.unique(exact_indices, sorted=True)]
         experts, loaded = self._load_experts(expert_ids)
         assignments: list[tuple[int, GLM5XExpertWeights, torch.Tensor, torch.Tensor]] = []
         for expert_id in expert_ids:
             expert = experts[expert_id]
-            slot_mask = topk_indices == expert_id
+            slot_mask = exact_indices == expert_id
             token_indices, slots = torch.where(slot_mask)
             assignments.append((expert_id, expert, token_indices, slots))
 
@@ -606,7 +627,7 @@ class GLM5XLayer10MoEReference:
         ):
             for _, expert, token_indices, slots in assignments:
                 routed = self._mlp(flat[token_indices], expert)
-                weighted = routed * topk_weights[token_indices, slots].to(
+                weighted = routed * exact_weights[token_indices, slots].to(
                     routed.dtype
                 ).unsqueeze(-1)
                 output.index_add_(0, token_indices, weighted.to(output.dtype))
@@ -661,7 +682,7 @@ class GLM5XLayer10MoEReference:
         )
         for group_index, (_, _, token_indices, slots) in enumerate(assignments):
             count = token_indices.numel()
-            weighted = routed[group_index, :count] * topk_weights[
+            weighted = routed[group_index, :count] * exact_weights[
                 token_indices, slots
             ].to(routed.dtype).unsqueeze(-1)
             output.index_add_(0, token_indices, weighted.to(output.dtype))
@@ -679,7 +700,14 @@ class GLM5XLayer10MoEReference:
             loaded = self._run_loop(flat, topk_indices, topk_weights, output)
         else:
             loaded = self._run_expert_major(flat, topk_indices, topk_weights, output)
-        output += self._mlp(flat, self.shared_expert).to(output.dtype)
+        shared_output = self._mlp(flat, self.shared_expert).to(output.dtype)
+        if self.proxy_mode == "shared" and self.proxy_top_k < self.top_k:
+            dropped_mass = topk_weights[:, self.proxy_top_k :].sum(
+                dim=-1, keepdim=True
+            ).to(dtype=shared_output.dtype)
+            output += shared_output * (1.0 + dropped_mass)
+        else:
+            output += shared_output
         return GLM5XMoEForward(
             output=output.reshape(original_shape),
             router_logits=logits.reshape(*original_shape[:-1], self.num_experts),
@@ -702,6 +730,9 @@ class GLM5XLayer10MoEReference:
         norm_topk_prob: bool = True,
         expert_intermediate_size: int = 2048,
         hidden_size: int = 6144,
+        device: torch.device | str | None = None,
+        verify_payloads: bool = True,
+        verify_root: bool = True,
         execution_mode: str = "loop",
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
@@ -709,9 +740,14 @@ class GLM5XLayer10MoEReference:
         packed_expert_cache: GLM5XPackedExpertCache | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
+        proxy_mode: str = "none",
+        proxy_top_k: int | None = None,
     ) -> "GLM5XLayer10MoEReference":
         bundle = GLM5XExpertBundle.open(
-            bundle_path, expert_cache_capacity_bytes=expert_cache_capacity_bytes
+            bundle_path,
+            verify_payloads=verify_payloads,
+            verify_root=verify_root,
+            expert_cache_capacity_bytes=expert_cache_capacity_bytes,
         )
         return cls._from_open_bundle(
             bundle,
@@ -729,8 +765,11 @@ class GLM5XLayer10MoEReference:
             expert_load_workers=expert_load_workers,
             expert_device_cache=expert_device_cache,
             packed_expert_cache=packed_expert_cache,
+            device=device,
             expert_precision=expert_precision,
             trunk_precision=trunk_precision,
+            proxy_mode=proxy_mode,
+            proxy_top_k=proxy_top_k,
         )
 
     @classmethod
@@ -756,6 +795,8 @@ class GLM5XLayer10MoEReference:
         packed_expert_cache: GLM5XPackedExpertCache | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
+        proxy_mode: str = "none",
+        proxy_top_k: int | None = None,
     ) -> "GLM5XLayer10MoEReference":
 
         prefix = f"model.layers.{layer_id}.mlp"
@@ -926,6 +967,8 @@ class GLM5XLayer10MoEReference:
             expert_load_workers=expert_load_workers,
             expert_device_cache=expert_device_cache,
             expert_precision=expert_precision,
+            proxy_mode=proxy_mode,
+            proxy_top_k=proxy_top_k,
         )
 
     @classmethod

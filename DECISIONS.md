@@ -649,3 +649,11 @@
 - Evidence: sidecar reuse is a measured sublayer improvement, while the only full-model INT4 gate remains `0.002830 tok/s` and `45,298,483,200` logical expert bytes/token.
 - Accepted because: it captures the safe warm-path win while preserving an auditable cold path and avoiding unbounded local disk growth.
 - Revisit: after a fresh full-model run records bytes/token, VRAM/RAM, physical NVMe traffic, and quality.
+
+## D-0082 -- Keep reduced routing and shared cold-expert proxy experimental
+
+- Decision: expose `routing_top_k` and `proxy_mode="shared"` as explicit reference/benchmark switches, but keep natural Top-8 routing and exact expert execution as the default.
+- Alternatives: make Top-4 or Top-6 the default, hide dropped experts behind the normal route metadata, or promote the shared expert as a lossless cold-expert replacement.
+- Evidence: on the real layer-10 four-token activation, natural Top-8 took `12.43729756900575 s` with 31 unique experts. The shared Top-4 proxy took `5.043440291978186 s` with 16 unique experts, but relative L2 drift was `0.8120684623718262` and maximum absolute error was `0.01171150803565979`.
+- Rejected as a default because: the measured quality drift is far outside the current coding-quality budget even though expert admission and wall time improve. The route metadata remains available for diagnosis, and the exact path is unchanged.
+- Revisit: only after a calibrated proxy, outlier residual, or task-specific quality gate demonstrates materially lower drift on real GLM layers and full-model logits.

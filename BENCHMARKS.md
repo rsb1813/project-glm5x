@@ -1,5 +1,13 @@
 # GLM5X Benchmarks
 
+## 2026-08-15 -- Reduced-routing and shared-proxy quality gate
+
+- Hardware: RTX 5080 16 GB, WSL2 CUDA 13.0/PyTorch 2.13.0; model/checkpoint: official GLM-5.2 layer-10 real activation and five-shard expert bundle; context: four candidate tokens.
+- Exact reference: natural Top-8, BF16 expert weights, 31 unique routed experts, `12.43729756900575 s` for the measured four-token layer-10 block.
+- Experimental proxy: natural route metadata retained, exact Top-4 routed experts plus shared-expert dropped-mass approximation, 16 unique experts, `5.043440291978186 s`; relative L2 error `0.8120684623718262`; maximum absolute error `0.01171150803565979` against the natural Top-8 output.
+- Decode/prefill tok/s, TTFT, physical NVMe GB/token, H2D GB/token, and full-model quality are not applicable to this bounded layer experiment. No speculative acceptance or adaptive policy was enabled.
+- Decision: keep the proxy and reduced-routing controls experimental and default-off. The result is not a full-model throughput claim.
+
 No end-to-end GLM-5.2 throughput or quality benchmark has been run yet. The bounded CUDA records below are kernel/layer evidence only and must not be reported as model tok/s.
 
 The first benchmark record must include the commit, hardware, model/checkpoint identity, mode, context length, decode and prefill tok/s, TTFT, VRAM, system RAM, NVMe GB/token, H2D GB/token, cache hit rate, average Top-K, speculative acceptance, quality result, and enabled optimizations.

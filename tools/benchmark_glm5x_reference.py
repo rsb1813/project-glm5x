@@ -39,6 +39,24 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cache-experts", action="store_true")
     parser.add_argument("--layer-cache-capacity", type=int, default=0)
     parser.add_argument(
+        "--routing-top-k",
+        type=int,
+        default=None,
+        help="optional reduced routed-expert K; omitted keeps the natural config Top-K",
+    )
+    parser.add_argument(
+        "--proxy-mode",
+        choices=("none", "shared"),
+        default="none",
+        help="optional cold-expert proxy; shared approximates dropped routed experts",
+    )
+    parser.add_argument(
+        "--proxy-top-k",
+        type=int,
+        default=None,
+        help="number of routed experts evaluated exactly when proxy-mode=shared",
+    )
+    parser.add_argument(
         "--execution-mode", choices=("loop", "expert_major"), default="loop"
     )
     parser.add_argument(
@@ -101,6 +119,10 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         raise ValueError("new-tokens must be positive")
     if arguments.layer_cache_capacity < 0:
         raise ValueError("layer-cache-capacity must be non-negative")
+    if arguments.routing_top_k is not None and arguments.routing_top_k <= 0:
+        raise ValueError("routing-top-k must be positive")
+    if arguments.proxy_top_k is not None and arguments.proxy_top_k <= 0:
+        raise ValueError("proxy-top-k must be positive")
     if arguments.expert_load_workers <= 0:
         raise ValueError("expert-load-workers must be positive")
     if arguments.expert_cache_bytes < 0:
@@ -131,6 +153,9 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         expert_device_cache_capacity_bytes=arguments.expert_device_cache_bytes,
         trunk_cache_capacity_bytes=arguments.trunk_cache_bytes,
         packed_expert_cache_path=arguments.expert_packed_cache_dir,
+        routing_top_k=arguments.routing_top_k,
+        proxy_mode=arguments.proxy_mode,
+        proxy_top_k=arguments.proxy_top_k,
         expert_precision=arguments.expert_precision,
         trunk_precision=arguments.trunk_precision,
     )
@@ -208,6 +233,9 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         "generated_tokens": generated,
         "cache_experts": arguments.cache_experts,
         "layer_cache_capacity": arguments.layer_cache_capacity,
+        "routing_top_k": arguments.routing_top_k,
+        "proxy_mode": arguments.proxy_mode,
+        "proxy_top_k": arguments.proxy_top_k,
         "execution_mode": arguments.execution_mode,
         "sparse_topk_attention": arguments.sparse_topk_attention,
         "expert_load_workers": arguments.expert_load_workers,

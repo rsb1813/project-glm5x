@@ -537,3 +537,9 @@
 - RED/GREEN: the dedicated CUDA round-trip test first failed on the missing cache module, then passed after implementation. The bounded integration probe created 31 sidecars in `18.112762928998563 s`; a fresh layer instance reused them in `1.152440828998806 s`, with `31` hits and no bundle-read calls or bytes.
 - Full verification after integration is `332 passed, 124 skipped` in `76.14 s`; focused sidecar/bundle/layer/model/MoE/schema coverage is `32 passed, 6 skipped`.
 - This is a storage warm-path result only. It does not change routing, does not reduce the already measured cold `45.3 GB/token` expert bound, and does not justify a 10--20 tok/s claim. The next task is multi-layer residency/trunk staging followed by one fresh full-model gate.
+
+## 2026-08-15 -- Reduced routing and shared proxy gate
+
+- Added explicit `routing_top_k`, `proxy_mode`, and `proxy_top_k` controls through the model/layer reference and benchmark CLI. Natural route metadata remains visible; only the selected exact expert work is reduced in the proxy path.
+- Added a focused admission regression. The real layer-10 four-token measurement showed `5.0434 s` for shared Top-4 versus `12.4373 s` for natural Top-8, but relative L2 drift was `0.8121`; the proxy is therefore documented as experimental and default-off.
+- Next bottleneck remains storage-side residency and calibrated FP4/mixed-precision expert artifacts, not another unqualified Top-K reduction.

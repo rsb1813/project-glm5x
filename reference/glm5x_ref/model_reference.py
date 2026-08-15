@@ -231,6 +231,9 @@ class GLM5XDecoderModelReference:
         expert_device_cache_capacity_bytes: int = 0,
         trunk_cache_capacity_bytes: int = 0,
         packed_expert_cache_path: str | Path | None = None,
+        routing_top_k: int | None = None,
+        proxy_mode: str = "none",
+        proxy_top_k: int | None = None,
         expert_precision: str = "bf16",
         trunk_precision: str = "bf16",
     ) -> "GLM5XDecoderModelReference":
@@ -260,6 +263,27 @@ class GLM5XDecoderModelReference:
             raise ValueError("GLM5X_INVALID_TRUNK_PRECISION")
         if expert_precision not in {"bf16", "fp8", "int4"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
+        if routing_top_k is not None and (
+            not isinstance(routing_top_k, int)
+            or isinstance(routing_top_k, bool)
+            or routing_top_k <= 0
+            or routing_top_k > descriptor.top_k
+        ):
+            raise ValueError("GLM5X_BUNDLE_ROUTING_TOP_K")
+        effective_top_k = descriptor.top_k if routing_top_k is None else routing_top_k
+        if proxy_mode not in {"none", "shared"}:
+            raise ValueError("GLM5X_BUNDLE_PROXY_MODE")
+        if proxy_top_k is None:
+            proxy_top_k = effective_top_k
+        if (
+            not isinstance(proxy_top_k, int)
+            or isinstance(proxy_top_k, bool)
+            or proxy_top_k <= 0
+            or proxy_top_k > effective_top_k
+        ):
+            raise ValueError("GLM5X_BUNDLE_PROXY_TOP_K")
+        if proxy_mode == "none" and proxy_top_k != effective_top_k:
+            raise ValueError("GLM5X_BUNDLE_PROXY_TOP_K_WITHOUT_PROXY")
         layer_count = descriptor.hidden_layers
         hidden_size = descriptor.hidden_size
         num_heads = _positive_config_int(config, "num_attention_heads")
@@ -341,7 +365,7 @@ class GLM5XDecoderModelReference:
                 qk_rope_head_dim=qk_rope_head_dim,
                 v_head_dim=v_head_dim,
                 index_topk=descriptor.index_topk,
-                top_k=descriptor.top_k,
+                top_k=effective_top_k,
                 routed_scaling_factor=routed_scaling_factor,
                 expert_intermediate_size=descriptor.moe_intermediate_size,
                 hidden_size=hidden_size,
@@ -358,6 +382,8 @@ class GLM5XDecoderModelReference:
                 packed_expert_cache=packed_expert_cache,
                 expert_precision=expert_precision,
                 trunk_precision=trunk_precision,
+                proxy_mode=proxy_mode,
+                proxy_top_k=proxy_top_k,
             )
 
         instance = cls.from_layer_loader(
@@ -374,6 +400,7 @@ class GLM5XDecoderModelReference:
         instance._expert_device_cache = expert_device_cache
         instance._trunk_tensor_cache = trunk_tensor_cache
         instance._packed_expert_cache = packed_expert_cache
+        instance._routing_top_k = effective_top_k
         return instance
 
     @property

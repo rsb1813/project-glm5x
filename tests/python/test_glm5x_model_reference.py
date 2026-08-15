@@ -273,6 +273,26 @@ def test_model_reference_factory_loads_dense_sparse_and_shared_indexer_layers(tm
     assert forward.layers[2].moe.topk_indices.shape[-1] == 1
     assert forward.layers[2].moe.expert_load_count > 0
 
+    reduced_model = GLM5XDecoderModelReference.from_bundle(
+        bundle_path,
+        config=config,
+        layer_cache_capacity=3,
+        routing_top_k=1,
+    )
+    reduced_forward = reduced_model.forward_tokens(torch.tensor([1, 2]))
+    assert reduced_forward.layers[2].moe.topk_indices.shape[-1] == 1
+
+    proxy_model = GLM5XDecoderModelReference.from_bundle(
+        bundle_path,
+        config=config,
+        layer_cache_capacity=3,
+        proxy_mode="shared",
+        proxy_top_k=1,
+    )
+    proxy_forward = proxy_model.forward_tokens(torch.tensor([1, 2]))
+    assert proxy_forward.layers[2].moe.topk_indices.shape[-1] == 1
+    assert proxy_forward.layers[2].moe.expert_load_count <= 2
+
     state = model.empty_state()
     for index, token in enumerate((1, 2)):
         step = model.forward_token(token, state)
