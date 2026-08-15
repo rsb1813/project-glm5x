@@ -68,25 +68,56 @@ std::size_t HostExpertStore::KeyHash::operator()(
 
 Result<ExpertPayloadHandle> HostExpertStore::get_or_load(
     ExpertKey key, const ExpertPayloadLoader& loader) {
-    std::lock_guard lock(mutex_);
-    if (mode_ != L1ExpertCacheMode::disabled) {
-        if (const auto found = entries_.find(key); found != entries_.end()) {
-            ++stats_.hits;
-            found->second.last_cycle = active_cycle_;
-            found->second.last_access = next_access_++;
-            ++found->second.frequency;
-            return Result<ExpertPayloadHandle>::success(found->second.handle);
+    bool owns_load = false;
+    {
+        std::unique_lock lock(mutex_);
+        if (mode_ != L1ExpertCacheMode::disabled) {
+            for (;;) {
+                if (const auto found = entries_.find(key);
+                    found != entries_.end()) {
+                    ++stats_.hits;
+                    found->second.last_cycle = active_cycle_;
+                    found->second.last_access = next_access_++;
+                    ++found->second.frequency;
+                    return Result<ExpertPayloadHandle>::success(
+                        found->second.handle);
+                }
+                if (!loading_.contains(key)) {
+                    loading_.insert(key);
+                    owns_load = true;
+                    break;
+                }
+                load_condition_.wait(lock);
+            }
         }
     }
 
-    auto loaded = loader();
+    const auto finish_load = [&] {
+        if (!owns_load) return;
+        {
+            std::lock_guard lock(mutex_);
+            loading_.erase(key);
+        }
+        load_condition_.notify_all();
+    };
+
+    auto loaded = Result<ExpertMlpPayload>::failure(ErrorCode::invalid_state);
+    try {
+        loaded = loader();
+    } catch (...) {
+        finish_load();
+        throw;
+    }
     if (!loaded) {
+        finish_load();
         return Result<ExpertPayloadHandle>::failure(
             loaded.error(), loaded.message());
     }
     auto bytes = charged_bytes(loaded.value());
     if (!bytes) {
-        return Result<ExpertPayloadHandle>::failure(bytes.error(), bytes.message());
+        finish_load();
+        return Result<ExpertPayloadHandle>::failure(
+            bytes.error(), bytes.message());
     }
     ExpertPayloadHandle handle =
         std::make_shared<const ExpertMlpPayload>(std::move(loaded.value()));
@@ -94,6 +125,7 @@ Result<ExpertPayloadHandle> HostExpertStore::get_or_load(
         return Result<ExpertPayloadHandle>::success(std::move(handle));
     }
 
+    std::unique_lock lock(mutex_);
     ++stats_.misses;
     if (const auto evicted = evicted_cycle_.find(key);
         evicted != evicted_cycle_.end() && evicted->second == active_cycle_) {
@@ -101,11 +133,15 @@ Result<ExpertPayloadHandle> HostExpertStore::get_or_load(
     }
     if (bytes.value() > capacity_bytes_) {
         ++stats_.bypasses;
+        lock.unlock();
+        finish_load();
         return Result<ExpertPayloadHandle>::success(std::move(handle));
     }
     if (mode_ == L1ExpertCacheMode::static_admission &&
         bytes.value() > capacity_bytes_ - stats_.resident_bytes) {
         ++stats_.bypasses;
+        lock.unlock();
+        finish_load();
         return Result<ExpertPayloadHandle>::success(std::move(handle));
     }
     while (bytes.value() > capacity_bytes_ - stats_.resident_bytes) {
@@ -160,6 +196,8 @@ Result<ExpertPayloadHandle> HostExpertStore::get_or_load(
         }
         if (victim == entries_.end()) {
             ++stats_.bypasses;
+            lock.unlock();
+            finish_load();
             return Result<ExpertPayloadHandle>::success(std::move(handle));
         }
         stats_.resident_bytes -= victim->second.bytes;
@@ -173,6 +211,8 @@ Result<ExpertPayloadHandle> HostExpertStore::get_or_load(
     stats_.resident_bytes += bytes.value();
     stats_.peak_resident_bytes =
         std::max(stats_.peak_resident_bytes, stats_.resident_bytes);
+    lock.unlock();
+    finish_load();
     return Result<ExpertPayloadHandle>::success(std::move(handle));
 }
 

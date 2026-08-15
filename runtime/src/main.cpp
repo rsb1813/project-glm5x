@@ -132,6 +132,7 @@ int main(int argc, char** argv) {
     std::string l2_io_name = "pread";
     std::string l2_cache_name = "buffered";
     std::string l2_queue_depth_text = "8";
+    std::string l2_expert_workers_text = "8";
     std::string l2_schedule_name = "blocking";
     std::string routing_mode_name = "natural";
     std::string routing_fixed_k_text = "0";
@@ -186,6 +187,7 @@ int main(int argc, char** argv) {
         else if (key == "--l2-io") l2_io_name = value;
         else if (key == "--l2-cache") l2_cache_name = value;
         else if (key == "--l2-queue-depth") l2_queue_depth_text = value;
+        else if (key == "--l2-expert-workers") l2_expert_workers_text = value;
         else if (key == "--l2-schedule") l2_schedule_name = value;
         else if (key == "--routing-mode") routing_mode_name = value;
         else if (key == "--routing-fixed-k") routing_fixed_k_text = value;
@@ -629,6 +631,13 @@ int main(int argc, char** argv) {
     if (reader_options.queue_depth > k3x::maximum_l2_queue_depth) {
         std::cerr << "L2 queue depth exceeds maximum: "
                   << reader_options.queue_depth << '\n';
+        return 2;
+    }
+    if (!parse_size(l2_expert_workers_text, runtime_options.l2_expert_workers) ||
+        runtime_options.l2_expert_workers == 0 ||
+        runtime_options.l2_expert_workers > 64) {
+        std::cerr << "invalid L2 expert worker count: "
+                  << l2_expert_workers_text << '\n';
         return 2;
     }
     if (backend_name == "cpu") {
@@ -1451,6 +1460,8 @@ int main(int argc, char** argv) {
            << reader.value().direct_offset_alignment();
     output << ",\"l2_expert_schedule\":";
     write_json_string(output, l2_schedule_name);
+    output << ",\"l2_expert_workers\":"
+           << runtime_options.l2_expert_workers;
     const auto& expert_load = result.value().expert_load_scheduler;
     output << ",\"expert_load_submissions\":"
            << expert_load.submissions

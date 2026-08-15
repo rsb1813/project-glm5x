@@ -136,6 +136,7 @@ class BenchmarkRecord:
     l2_io_engine: str = "pread"
     l2_cache_mode: str = "buffered"
     l2_queue_depth: int = 8
+    l2_expert_workers: int = 8
     l2_direct_memory_alignment: int = 0
     l2_direct_offset_alignment: int = 0
     reader_batch_submissions: int = 0
@@ -315,6 +316,7 @@ def _run_process(
     l2_cache: str,
     l2_queue_depth: int,
     l2_expert_schedule: str,
+    l2_expert_workers: int = 8,
     profile_prior_strength: int = 64,
     runtime_metadata: str = "",
     runtime_profile_in: Path | None = None,
@@ -337,6 +339,8 @@ def _run_process(
     aurora_draft_boundary: str = "ffn-block",
     diagnostics: bool = False,
 ) -> tuple[dict, int, float]:
+    if l2_expert_workers <= 0 or l2_expert_workers > 64:
+        raise ValueError("l2_expert_workers must be between 1 and 64")
     command = [
         str(runner), "--model", str(artifact), "--prompt-ids", "1,7,3,9",
         "--generate", str(generated_tokens), "--mode", "incremental",
@@ -356,6 +360,7 @@ def _run_process(
         "--l2-io", l2_io,
         "--l2-cache", l2_cache,
         "--l2-queue-depth", str(l2_queue_depth),
+        "--l2-expert-workers", str(l2_expert_workers),
         "--l2-schedule", l2_expert_schedule,
         "--routing-mode", routing_mode,
         "--routing-fixed-k", str(routing_fixed_k),
@@ -1272,6 +1277,7 @@ def benchmark_once(
         l2_io_engine=samples[0]["l2_io_engine"],
         l2_cache_mode=samples[0]["l2_cache_mode"],
         l2_queue_depth=samples[0]["l2_queue_depth"],
+        l2_expert_workers=samples[0].get("l2_expert_workers", 8),
         l2_direct_memory_alignment=samples[0]["l2_direct_memory_alignment"],
         l2_direct_offset_alignment=samples[0]["l2_direct_offset_alignment"],
         reader_batch_submissions=samples[0]["reader_batch_submissions"],
@@ -1520,6 +1526,7 @@ def main() -> int:
     parser.add_argument("--l2-io", choices=("pread", "io-uring"), default="pread")
     parser.add_argument("--l2-cache", choices=("buffered", "direct"), default="buffered")
     parser.add_argument("--l2-queue-depth", type=int, default=8)
+    parser.add_argument("--l2-expert-workers", type=int, default=8)
     parser.add_argument(
         "--l2-expert-schedule", choices=("blocking", "deadline"),
         default="blocking",
@@ -1584,6 +1591,7 @@ def main() -> int:
         l2_io=args.l2_io,
         l2_cache=args.l2_cache,
         l2_queue_depth=args.l2_queue_depth,
+        l2_expert_workers=args.l2_expert_workers,
         l2_expert_schedule=args.l2_expert_schedule,
         routing_mode=args.routing_mode,
         routing_fixed_k=args.routing_fixed_k,

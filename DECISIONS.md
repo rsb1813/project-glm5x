@@ -561,3 +561,11 @@
 - Evidence: on the RTX 5080 WSL2 five-shard GLM-5.2 layer-10 probe with two input tokens, 16 selected experts, four payload readers, lazy bundle admission, and no expert caches, four paired samples measured a sorted median of `4.745335 s` versus `4.565814 s` in the existing request order. The sorted variant was `3.93%` slower; route count and output shape were unchanged. Focused reader/bundle/CPP tests passed `24` cases with `4` capability skips after reverting the experiment.
 - Accepted because: the proposed seek optimization did not improve measured end-to-end sublayer time. The existing one-open-per-artifact grouping remains accepted; no speculative physical-order behavior is added.
 - Revisit: only with controlled direct-I/O or a full 78-layer NVMe trace showing seek latency as a dominant component.
+
+## D-0071 -- Add a bounded C++ deadline expert-load worker pool
+
+- Decision: allow `DeadlineExpertLoader` to run `1..64` workers and make `RuntimeSession` use eight workers for the deadline schedule. Move `HostExpertStore` payload I/O outside its global mutex while retaining per-key in-flight deduplication and exact cache accounting.
+- Alternatives: keep one serial loader with the old lock held across I/O, submit one artifact-wide batch task, or expose unrestricted thread creation per request.
+- Evidence: the pre-change scheduler test failed to compile for the new two-argument constructor, then the focused scheduler/store tests passed after implementation. The C++ full suite passed `15/15`, and the Python suite passed `325` with `124` capability skips. A tiny synthetic runtime sweep was compute-dominated and showed no meaningful throughput gain, so it is not a performance claim. The real layer-10 Python probe had already shown expert-read overlap improving from `7.635803 s` at one reader to `3.159413 s` at sixteen readers, but the full C++ model gate remains pending.
+- Accepted because: the worker count is explicit and bounded, same-key loads still execute once, different experts can overlap, and serial correctness remains selectable. No quantization, routing, or payload semantics change.
+- Revisit: after the complete bundle gate records end-to-end latency, NVMe/RAM/H2D traffic, host memory, and quality. Reduce or raise the default only from those measurements.

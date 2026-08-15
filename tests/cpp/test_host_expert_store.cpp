@@ -167,6 +167,30 @@ int main() {
         assert(handle.get() == handles.front().get());
     }
 
+    HostExpertStore parallel_cache(L1ExpertCacheMode::static_admission, 3264);
+    std::atomic<int> active_parallel_loads{0};
+    std::atomic<int> peak_parallel_loads{0};
+    std::barrier parallel_start(2);
+    std::vector<std::thread> parallel_threads;
+    for (std::size_t index = 0; index < 2; ++index) {
+        parallel_threads.emplace_back([&, index] {
+            parallel_start.arrive_and_wait();
+            auto result = parallel_cache.get_or_load({5, index}, [&] {
+                const auto active = active_parallel_loads.fetch_add(1) + 1;
+                auto peak = peak_parallel_loads.load();
+                while (peak < active &&
+                       !peak_parallel_loads.compare_exchange_weak(peak, active)) {
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds{20});
+                active_parallel_loads.fetch_sub(1);
+                return Result<k3x::ExpertMlpPayload>::success(payload(80 + index));
+            });
+            assert(result);
+        });
+    }
+    for (auto& thread : parallel_threads) thread.join();
+    assert(peak_parallel_loads.load() >= 2);
+
     const auto load_key = [](HostExpertStore& target, ExpertKey key,
                              std::uint64_t id) {
         auto result = target.get_or_load(key, [id] {

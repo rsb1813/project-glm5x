@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -109,6 +110,8 @@ private:
     std::size_t active_layer_{};
     std::uint64_t next_access_{};
     std::uint64_t next_insertion_{};
+    std::condition_variable load_condition_;
+    std::unordered_set<ExpertKey, KeyHash> loading_;
     mutable std::mutex mutex_;
 };
 }

@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <mutex>
 #include <span>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -33,6 +34,7 @@ struct RuntimeOptions {
     RoutingPolicyConfig routing_policy{};
     SpeculativeVerificationMode speculative_verification{
         SpeculativeVerificationMode::token_major};
+    std::size_t l2_expert_workers{8};
 };
 
 class RuntimeSession {
@@ -51,7 +53,13 @@ public:
                             : nullptr,
                         options.profile_prior_strength) {
         if (options.l2_expert_schedule == L2ExpertScheduleMode::deadline) {
-            expert_loader_ = std::make_unique<DeadlineExpertLoader>(64);
+            if (options.l2_expert_workers == 0 ||
+                options.l2_expert_workers > 64) {
+                throw std::invalid_argument(
+                    "L2 expert worker count is out of range");
+            }
+            expert_loader_ = std::make_unique<DeadlineExpertLoader>(
+                64, options.l2_expert_workers);
         }
     }
 

@@ -60,7 +60,8 @@ using ExpertLoadFunction =
 
 class DeadlineExpertLoader {
 public:
-    explicit DeadlineExpertLoader(std::size_t maximum_pending);
+    explicit DeadlineExpertLoader(std::size_t maximum_pending,
+                                  std::size_t worker_count = 1);
     ~DeadlineExpertLoader();
     DeadlineExpertLoader(const DeadlineExpertLoader&) = delete;
     DeadlineExpertLoader& operator=(const DeadlineExpertLoader&) = delete;

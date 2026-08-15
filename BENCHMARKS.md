@@ -782,3 +782,10 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Timing medians: `1=7.635803 s`, `2=5.390695 s`, `4=4.428789 s`, `8=3.704820 s`, `16=3.159413 s` for one layer-10 MoE forward. Sixteen readers were approximately `28.7%` faster than four in this bounded sample.
 - Correctness: all points selected the same 16 experts and returned the same output shape. No end-to-end tok/s or quality benchmark was measured.
 - Operational choice: the local full-gate monitor now defaults to `EXPERT_LOAD_WORKERS=16`; the environment variable allows reproduction of another setting, and the serial correctness default is unchanged.
+
+## 2026-08-15 -- C++ deadline worker-pool correctness gate
+
+- Hardware/model: WSL2 Ubuntu-24.04 C++ CPU build with synthetic K3X payloads; no full GLM bundle and no CUDA throughput claim.
+- Change: `DeadlineExpertLoader(max_pending, worker_count)` now supports a bounded worker pool. `RuntimeSession` defaults to eight deadline workers, while `HostExpertStore` performs payload I/O outside its mutex and deduplicates concurrent loads for the same `(layer, expert)` key.
+- Verification: C++ build succeeded; CTest passed `15/15`; Python regression passed `325` with `124` capability skips; `py_compile tools/benchmark_synthetic.py` passed. The scheduler overlap test observed at least two concurrent loads, and the store test confirmed different keys overlap while the existing same-key single-loader test remains green.
+- Synthetic timing: the tiny CPU fixture did not show a stable decode improvement across `1/2/4/8` workers, so no tok/s or speedup is reported. The real full-model C++ gate remains pending completion of the 282-shard bundle.

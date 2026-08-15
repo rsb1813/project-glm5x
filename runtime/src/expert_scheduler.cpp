@@ -117,10 +117,15 @@ struct DeadlineExpertLoader::Impl {
         }
     };
 
-    explicit Impl(std::size_t capacity)
-        : maximum_pending(capacity),
+    explicit Impl(std::size_t capacity, std::size_t worker_count)
+        : maximum_pending(capacity), worker_count(worker_count),
           metrics(std::make_shared<detail::ExpertLoadMetrics>()),
-          worker([this] { run(); }) {}
+          workers() {
+        workers.reserve(worker_count);
+        for (std::size_t index = 0; index < worker_count; ++index) {
+            workers.emplace_back([this] { run(); });
+        }
+    }
 
     ~Impl() {
         {
@@ -128,7 +133,9 @@ struct DeadlineExpertLoader::Impl {
             stopping = true;
         }
         condition.notify_all();
-        if (worker.joinable()) worker.join();
+        for (auto& worker : workers) {
+            if (worker.joinable()) worker.join();
+        }
     }
 
     void run() {
@@ -140,7 +147,7 @@ struct DeadlineExpertLoader::Impl {
                 if (stopping && queue.empty()) return;
                 job = queue.top();
                 queue.pop();
-                active = true;
+                ++active_workers;
             }
             const auto start = Clock::now();
             auto result = invoke_loader(job.loader);
@@ -159,13 +166,14 @@ struct DeadlineExpertLoader::Impl {
             job.state->condition.notify_all();
             {
                 std::lock_guard lock(mutex);
-                active = false;
+                --active_workers;
             }
             idle_condition.notify_all();
         }
     }
 
     std::size_t maximum_pending;
+    std::size_t worker_count;
     std::shared_ptr<detail::ExpertLoadMetrics> metrics;
     std::mutex mutex;
     std::condition_variable condition;
@@ -173,16 +181,18 @@ struct DeadlineExpertLoader::Impl {
     std::priority_queue<Job, std::vector<Job>, LaterDeadline> queue;
     std::uint64_t next_sequence{};
     bool stopping{};
-    bool active{};
-    std::thread worker;
+    std::size_t active_workers{};
+    std::vector<std::thread> workers;
 };
 
-DeadlineExpertLoader::DeadlineExpertLoader(std::size_t maximum_pending)
+DeadlineExpertLoader::DeadlineExpertLoader(std::size_t maximum_pending,
+                                           std::size_t worker_count)
     : impl_() {
-    if (maximum_pending == 0) {
-        throw std::invalid_argument("maximum pending loads must be positive");
+    if (maximum_pending == 0 || worker_count == 0) {
+        throw std::invalid_argument(
+            "maximum pending loads and worker count must be positive");
     }
-    impl_ = std::make_unique<Impl>(maximum_pending);
+    impl_ = std::make_unique<Impl>(maximum_pending, worker_count);
 }
 
 DeadlineExpertLoader::~DeadlineExpertLoader() = default;
@@ -236,7 +246,7 @@ Result<ExpertLoadTicket> DeadlineExpertLoader::submit(
 void DeadlineExpertLoader::wait_idle() {
     std::unique_lock lock(impl_->mutex);
     impl_->idle_condition.wait(
-        lock, [&] { return impl_->queue.empty() && !impl_->active; });
+        lock, [&] { return impl_->queue.empty() && impl_->active_workers == 0; });
 }
 
 ExpertLoadSchedulerStats DeadlineExpertLoader::stats() const {

@@ -198,6 +198,14 @@ int main() {
     }
     require(rejected_zero_capacity);
 
+    bool rejected_zero_workers = false;
+    try {
+        k3x::DeadlineExpertLoader invalid(1, 0);
+    } catch (const std::invalid_argument&) {
+        rejected_zero_workers = true;
+    }
+    require(rejected_zero_workers);
+
     std::atomic<bool> drained{false};
     {
         k3x::DeadlineExpertLoader draining(1);
@@ -241,6 +249,32 @@ int main() {
     idle_waiter.join();
     require(idle_returned.load());
     require(static_cast<bool>(idle_ticket.value().wait()));
+
+    std::atomic<int> active_loads{0};
+    std::atomic<int> peak_loads{0};
+    k3x::DeadlineExpertLoader parallel(8, 4);
+    std::vector<k3x::ExpertLoadTicket> parallel_tickets;
+    parallel_tickets.reserve(4);
+    for (int index = 0; index < 4; ++index) {
+        auto ticket = parallel.submit(
+            {Clock::now(), std::chrono::nanoseconds{0}, 1, false},
+            [&active_loads, &peak_loads] {
+                const auto active = active_loads.fetch_add(1) + 1;
+                auto peak = peak_loads.load();
+                while (peak < active &&
+                       !peak_loads.compare_exchange_weak(peak, active)) {
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds{20});
+                active_loads.fetch_sub(1);
+                return k3x::Result<k3x::ExpertPayloadHandle>::success(payload());
+            });
+        require(static_cast<bool>(ticket));
+        parallel_tickets.push_back(std::move(ticket.value()));
+    }
+    for (auto& ticket : parallel_tickets) {
+        require(static_cast<bool>(ticket.wait()));
+    }
+    require(peak_loads.load() >= 2);
 
     return 0;
 }

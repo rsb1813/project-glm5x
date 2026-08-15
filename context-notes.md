@@ -482,3 +482,10 @@
 
 - A real layer-10 worker sweep measured `7.635803/5.390695/4.428789/3.704820/3.159413 s` medians for `1/2/4/8/16` expert readers. The read sum dominates the bounded forward; decode and GPU MLP are small by comparison.
 - The full-gate monitor now defaults to 16 readers through `EXPERT_LOAD_WORKERS`, while the runtime CLI keeps its correctness-oriented serial default. The already-running monitor was not restarted and still uses its original four-reader setting.
+
+## 2026-08-15 -- C++ deadline worker-pool implementation
+
+- Added a bounded worker pool to `DeadlineExpertLoader`; direct construction defaults to one worker, and `RuntimeSession` exposes `l2_expert_workers` with a default of eight and CLI validation for `1..64`.
+- Split `HostExpertStore` cache lookup/admission from the blocking payload loader. A per-key in-flight set and condition variable preserve one loader for a duplicate key, while different expert keys can overlap without changing cache policy or returned bytes.
+- TDD evidence: the new scheduler API first failed to compile before implementation. After the implementation, C++ CTest passed `15/15`, the full Python suite passed `325 passed, 124 skipped`, and the benchmark tool compiled successfully.
+- The synthetic runtime sweep was compute-dominated and is intentionally not promoted as a speed result. The live three-worker full-checkpoint conversion was not restarted; the complete bundle and native full-model gate remain the next evidence boundary.
