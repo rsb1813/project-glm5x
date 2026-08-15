@@ -363,3 +363,14 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 - Known blockers: the official 282-shard model is still not connected to the C++ full-model execution path; hot-bank full-model hit rate and final-logit parity are unmeasured; physical NVMe traffic remains unmeasured; and pinned H2D currently synchronizes for telemetry/completion.
 - Next concrete task: combine the exact stable bank with pooled pinned N+1 sidecar staging and asynchronous completion, then run a natural-router bounded/full-model quality and traffic gate. Do not infer full-model TPS from B-0002.
 - Last known-good test state: implementation commit `f602371` and evidence/document commit `19d3918`; B-0002 raw/summary SHA-256 parity passed; focused cache/model/CLI regression `35 passed, 6 skipped`; full CPU-build Python regression `365 passed, 124 skipped` in `107.34 s`; changed-module `py_compile` and `git diff --check` passed. Branch `codex/stable-hot-bank` is published in draft PR #8.
+
+## 2026-08-16 -- Full stable hot-bank gate milestone
+
+- Current milestone: B-0003 measured stable and layer-balanced device-cache policies on the same current HEAD, official 78-layer natural-routing mixed-NVFP4 full-model path, and fully warm sidecars.
+- Result: stable measured `0.013321270279236509` decode tok/s versus layer-balanced `0.013164422849939591`, with identical generated tokens `[154820,474]`. Stable gained only three cache hits (`21` versus `18`) and remains default-off.
+- Resource result: stable reduced resident device-cache bytes from `4,286,055,272` to `2,949,120,600` and peak allocated VRAM from `12,371,738,112` to `11,034,244,608`, but left `1,345,846,696` configured cache bytes unused.
+- Quality boundary: both rows remain quality-rejected mixed NVFP4. Best exact full-model decode remains `0.010559 tok/s`; the historical best mixed gate remains `0.014484 tok/s`. No 10 tok/s result exists.
+- Decision: defer model-level asynchronous replay-prefetch tickets. The next implementation is an exact adaptive hot-bank tier that preserves the one-per-layer base bank and fills only spare VRAM with experts observed at least twice.
+- Known blockers: natural-route device hit rate remains about 1%; each nonresident mixed expert still requires sidecar decode/H2D; physical NVMe and H2D bytes were not measured in this timing gate; the official full model is still Python-reference bound and quality parity for NVFP4 is unresolved.
+- Next concrete task: TDD an `adaptive_hot_bank` device-cache policy, run the bounded real-sidecar trace, then repeat the full gate only if predicted hit accounting shows a material increase. Keep routing, Top-K, exact payload identity, and mixed-path tokens unchanged.
+- Last known-good test state: no source code changed in B-0003. Raw log SHA-256 and summary JSON/CSV parity passed; evidence commit is `68f4fdd`, published in draft PR #9. Prior full Python state remains `365 passed, 124 skipped`.

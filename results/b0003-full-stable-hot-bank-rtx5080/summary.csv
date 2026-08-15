@@ -1,0 +1,3 @@
+policy,decode_tok_s,decode_seconds,prefill_tok_s,prefill_seconds,ttft_seconds,device_cache_hits,device_cache_misses,device_cache_hit_rate,device_cache_entries,device_cache_evictions,device_cache_bypasses,device_cache_promotions,device_cache_resident_bytes,vram_peak_bytes,generated_tokens,quality_status
+layer_balanced,0.013164422849939591,151.92462463397533,0.00328501180705759,304.4129089130147,382.7666282549908,18,1782,0.01,109,1673,0,0,4286055272,12371738112,"154820 474",rejected-mixed-nvfp4
+stable_hot_bank,0.013321270279236509,150.13583224997274,0.0033121310187905696,301.92042353600846,379.71072287100833,21,1779,0.011666666666666667,75,54,1650,54,2949120600,11034244608,"154820 474",rejected-mixed-nvfp4
