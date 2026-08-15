@@ -234,6 +234,50 @@ int test_grouped_execution() {
     return 0;
 }
 
+int test_bf16_resident_hit_skips_host_weight_conversion() {
+    k3x::BackendOptions options;
+    options.kind = k3x::BackendKind::cuda_dense;
+    options.dense_precision = k3x::DensePrecision::bf16_rounded;
+    options.cuda_allocation = k3x::CudaAllocationMode::reused;
+    options.cuda_weights = k3x::CudaWeightMode::resident;
+    options.cuda_resident_bytes = 1ULL << 20;
+    auto backend = k3x::make_cuda_backend(options);
+    if (!backend) return 102;
+
+    const std::array<float, 3> input{1.0F, 2.0F, -1.0F};
+    const std::array<float, 6> weight{
+        0.5F, -0.25F, 2.0F,
+        1.5F, 0.75F, -1.0F,
+    };
+    const k3x::DenseWeightView view{901, weight, 2, 3};
+    const auto first = backend.value()->dense_matvec(
+        input, view, 21, k3x::ProfilePhase::decode);
+    if (!first) return 103;
+    const auto first_stats = backend.value()->runtime_stats();
+    if (first_stats.dense_bf16_host_conversion_calls != 1 ||
+        first_stats.dense_bf16_host_conversion_bytes !=
+            weight.size() * sizeof(std::uint16_t) ||
+        first_stats.weight_cache_misses != 1 ||
+        first_stats.weight_cache_hits != 0) {
+        return 104;
+    }
+
+    const auto second = backend.value()->dense_matvec(
+        input, view, 21, k3x::ProfilePhase::decode);
+    if (!second || second.value() != first.value()) return 105;
+    const auto second_stats = backend.value()->runtime_stats();
+    if (second_stats.dense_bf16_host_conversion_calls !=
+            first_stats.dense_bf16_host_conversion_calls ||
+        second_stats.dense_bf16_host_conversion_bytes !=
+            first_stats.dense_bf16_host_conversion_bytes ||
+        second_stats.weight_cache_misses != first_stats.weight_cache_misses ||
+        second_stats.weight_cache_hits != first_stats.weight_cache_hits + 1 ||
+        second_stats.weight_h2d_bytes != first_stats.weight_h2d_bytes) {
+        return 106;
+    }
+    return 0;
+}
+
 int test_bf16_resident_grid() {
     k3x::BackendOptions options;
     options.kind = k3x::BackendKind::cuda_custom;
@@ -608,5 +652,8 @@ int main() {
     if (allocation_result != 0) return allocation_result;
     const auto grouped_result = test_grouped_execution();
     if (grouped_result != 0) return grouped_result;
+    const auto resident_hit_result =
+        test_bf16_resident_hit_skips_host_weight_conversion();
+    if (resident_hit_result != 0) return resident_hit_result;
     return test_bf16_resident_grid();
 }

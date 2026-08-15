@@ -270,20 +270,29 @@ public:
         std::size_t weight_bytes = weight.size_bytes();
         if (options_.dense_precision == DensePrecision::bf16_rounded) {
             bf16_input.reserve(input.size());
-            bf16_weight.reserve(weight.size());
             for (const auto value : input) {
                 bf16_input.push_back(__float2bfloat16_rn(value));
             }
-            for (const auto value : weight) {
-                bf16_weight.push_back(__float2bfloat16_rn(value));
-            }
             host_input = bf16_input.data();
-            host_weight = bf16_weight.data();
             input_type = CUDA_R_16BF;
             weight_type = CUDA_R_16BF;
             input_bytes = bf16_input.size() * sizeof(__nv_bfloat16);
-            weight_bytes = bf16_weight.size() * sizeof(__nv_bfloat16);
+            weight_bytes = weight.size() * sizeof(__nv_bfloat16);
         }
+
+        const auto prepare_bf16_weight = [&]() {
+            if (options_.dense_precision != DensePrecision::bf16_rounded ||
+                !bf16_weight.empty()) {
+                return;
+            }
+            bf16_weight.reserve(weight.size());
+            for (const auto value : weight) {
+                bf16_weight.push_back(__float2bfloat16_rn(value));
+            }
+            host_weight = bf16_weight.data();
+            ++runtime_stats_.dense_bf16_host_conversion_calls;
+            runtime_stats_.dense_bf16_host_conversion_bytes += weight_bytes;
+        };
 
         const auto output_bytes = rows * sizeof(float);
         bool has_resident_weight = false;
@@ -294,23 +303,41 @@ public:
                 options_.dense_precision == DensePrecision::fp32
                     ? cuda::WeightRepresentation::dense_fp32
                     : cuda::WeightRepresentation::dense_bf16;
-            const auto host_bytes = std::span(
-                static_cast<const std::byte*>(host_weight), weight_bytes);
-            const auto acquisition = resident_weights_->acquire(
-                {weight_view.tensor_id, representation, rows, cols, 0},
-                host_bytes, {});
-            if (!acquisition) {
+            const cuda::ResidentWeightKey resident_key{
+                weight_view.tensor_id, representation, rows, cols, 0};
+            const auto existing = resident_weights_->find(resident_key);
+            if (!existing) {
                 record(phase, ProfileOperation::dense_matvec, precision, layer,
                        operation_start, logical_weight_bytes, 0, 0, false);
                 return Result<std::vector<float>>::failure(
-                    acquisition.error(), acquisition.message());
+                    existing.error(), existing.message());
             }
-            has_resident_weight =
-                acquisition.value().disposition !=
-                cuda::ResidentDisposition::bypass;
-            resident_weight = acquisition.value().primary;
-            weight_transfer_bytes = acquisition.value().uploaded_bytes;
-            if (!has_resident_weight) weight_transfer_bytes = weight_bytes;
+            if (existing.value()) {
+                has_resident_weight = true;
+                resident_weight = existing.value()->primary;
+                weight_transfer_bytes = 0;
+            } else {
+                prepare_bf16_weight();
+                const auto host_bytes = std::span(
+                    static_cast<const std::byte*>(host_weight), weight_bytes);
+                const auto acquisition = resident_weights_->acquire(
+                    resident_key, host_bytes, {});
+                if (!acquisition) {
+                    record(phase, ProfileOperation::dense_matvec, precision,
+                           layer, operation_start, logical_weight_bytes, 0, 0,
+                           false);
+                    return Result<std::vector<float>>::failure(
+                        acquisition.error(), acquisition.message());
+                }
+                has_resident_weight =
+                    acquisition.value().disposition !=
+                    cuda::ResidentDisposition::bypass;
+                resident_weight = acquisition.value().primary;
+                weight_transfer_bytes = acquisition.value().uploaded_bytes;
+                if (!has_resident_weight) weight_transfer_bytes = weight_bytes;
+            }
+        } else {
+            prepare_bf16_weight();
         }
         cuda::DeviceAllocation local_input(&memory_stats_, &runtime_stats_);
         cuda::DeviceAllocation local_weight(&memory_stats_, &runtime_stats_);

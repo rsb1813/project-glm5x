@@ -21,6 +21,12 @@ int test_representation_identity() {
         7, k3x::cuda::WeightRepresentation::dense_fp32, 2, 3, 0};
     const k3x::cuda::ResidentWeightKey bf16_key{
         7, k3x::cuda::WeightRepresentation::dense_bf16, 2, 3, 0};
+    const auto invalid_lookup = table.find({
+        8, k3x::cuda::WeightRepresentation::dense_bf16, 0, 3, 0});
+    if (invalid_lookup ||
+        invalid_lookup.error() != k3x::ErrorCode::invalid_extent) {
+        return 6;
+    }
     const auto first = table.acquire(
         fp32_key, std::as_bytes(std::span(fp32)), {});
     if (!first || first.value().disposition !=

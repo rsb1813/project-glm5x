@@ -59,6 +59,8 @@ struct BackendRuntimeStats {
     std::uint64_t weight_cache_hits{};
     std::uint64_t weight_cache_misses{};
     std::uint64_t weight_cache_bypasses{};
+    std::uint64_t dense_bf16_host_conversion_calls{};
+    std::uint64_t dense_bf16_host_conversion_bytes{};
     std::uint64_t resident_weight_bytes{};
     std::uint64_t peak_resident_weight_bytes{};
     std::uint64_t immutable_validation_scans{};
