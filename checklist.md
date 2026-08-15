@@ -77,5 +77,6 @@
 - [x] Add a chunked reference MXFP4 encoder with max-abs/MSE scale modes and round-trip tests.
 - [x] Add an opt-in, parity-tested Python expert-major MoE path and measure its single-token/four-token/full-layer trade-off.
 - [x] Add the explicit-token full-bundle reference benchmark gate for measured prefill/TTFT/decode output.
+- [x] Reuse the exact FP32 LM-head preparation across reference logits calls and record its VRAM trade-off.
 - [ ] Add calibrated outlier or mixed-precision expert storage and a real-layer quality gate before converter integration.
 - [ ] Finish the 282-shard local stream and assemble the full expert bundle.

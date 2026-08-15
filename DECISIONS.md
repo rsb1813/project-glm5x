@@ -577,3 +577,11 @@
 - Evidence: `K3XReader` owns every selected payload extent read and can count data plus auxiliary bytes without changing bytes, routing, or validation. The host page cache can satisfy those reads, so the counter is a logical storage request rather than a device-level measurement.
 - Accepted because: it gives the first full-model gate an auditable traffic baseline while preserving the distinction needed for later `iostat`/ETW/NVML or direct-I/O measurements.
 - Revisit: when the full gate runs, pair these counters with physical device counters and H2D telemetry before publishing NVMe GB/token.
+
+## D-0073 -- Reuse the exact FP32 LM head between logits calls
+
+- Decision: lazily convert `lm_head.weight` to FP32 once per model/device and reuse that matrix for later logits calls. Keep FP32 logits as the correctness path; do not switch to BF16 logits implicitly.
+- Alternatives: convert on every forward, keep only BF16 and accept a fast-mode quality change, or keep the FP32 matrix on CPU and copy it for every token.
+- Evidence: at the real GLM shape `(154880, 6144)` on the RTX 5080, a fresh BF16-to-FP32 conversion took a `0.061629 s` median and allocated a `3,806,330,880`-byte matrix. Reuse of the prepared transpose view measured `3.13 us` median. The model/reference parity suite passed `9/9` after the change.
+- Accepted because: output arithmetic and token routing are unchanged, while repeated full-vocabulary conversion is removed from the decode hot path. The extra approximately `3.81 GB` VRAM must be included in the full-model pressure result.
+- Revisit: after the complete bundle gate records peak VRAM and decode tok/s. If 16 GB pressure is material, add an explicitly opt-in BF16 logits mode with a separate quality gate rather than silently changing default precision.

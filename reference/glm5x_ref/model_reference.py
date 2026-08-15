@@ -145,6 +145,7 @@ class GLM5XDecoderModelReference:
         self._rope_dim = int(self.layers[0].attention.weights.qk_rope_head_dim)
         self.final_norm = final_norm
         self.lm_head = lm_head
+        self._prepared_lm_head: torch.Tensor | None = None
         self.rope_theta = float(rope_theta)
 
     @classmethod
@@ -198,6 +199,7 @@ class GLM5XDecoderModelReference:
         instance._expert_device_cache = None
         instance.final_norm = final_norm
         instance.lm_head = lm_head
+        instance._prepared_lm_head = None
         instance.rope_theta = float(rope_theta)
         return instance
 
@@ -381,6 +383,10 @@ class GLM5XDecoderModelReference:
         return bundle.read_stats
 
     @property
+    def prepared_lm_head(self) -> torch.Tensor | None:
+        return self._prepared_lm_head
+
+    @property
     def cached_layer_count(self) -> int:
         return len(self._layer_cache)
 
@@ -460,9 +466,13 @@ class GLM5XDecoderModelReference:
         normalized = normalized * self.final_norm.to(
             device=normalized.device, dtype=normalized.dtype
         )
-        logits = torch.matmul(
-            normalized.to(torch.float32), self.lm_head.to(device=normalized.device, dtype=torch.float32).t()
-        )
+        prepared_lm_head = self._prepared_lm_head
+        if prepared_lm_head is None or prepared_lm_head.device != normalized.device:
+            prepared_lm_head = self.lm_head.to(
+                device=normalized.device, dtype=torch.float32
+            )
+            self._prepared_lm_head = prepared_lm_head
+        logits = torch.matmul(normalized.to(torch.float32), prepared_lm_head.t())
         return GLM5XModelForward(
             logits=logits,
             hidden_states=current,

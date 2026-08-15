@@ -495,3 +495,8 @@
 - Added thread-safe payload read counters to `K3XReader` and aggregate counters to `GLM5XExpertBundle`.
 - The full-bundle benchmark now reports separate prefill/decode storage read calls and bytes. The field name deliberately avoids `NVMe` because warm OS page cache reads are not physical-device evidence.
 - TDD evidence: the new reader counter test initially exposed that MXFP4 records include an auxiliary scale extent; the expectation was corrected to count data plus auxiliary bytes. Focused tests passed `29` with `6` capability skips and the complete Python suite passed `326` with `124` skips.
+
+## 2026-08-15 -- Exact LM-head preparation reuse
+
+- TDD: added a regression that requires the reference model to reuse one prepared FP32 LM-head tensor across forwards; it failed before implementation and passed after the cache was added.
+- The isolated RTX 5080 full-vocabulary probe measured `61.629 ms` median for a fresh BF16-to-FP32 conversion versus microseconds for reuse. The optimization preserves FP32 logits but adds about `3.81 GB` of resident VRAM, so the complete-model gate must decide whether the trade-off fits.

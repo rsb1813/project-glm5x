@@ -41,6 +41,27 @@ def test_model_prefill_incremental_and_greedy_generation_match() -> None:
     assert model.generate(prompt, 2) == expected
 
 
+def test_model_reuses_prepared_fp32_lm_head() -> None:
+    layer, _, _ = _make_layer()
+    torch.manual_seed(74)
+    model = GLM5XDecoderModelReference(
+        embedding=torch.randn(16, 8),
+        layers=(layer,),
+        final_norm=torch.ones(8),
+        lm_head=torch.randn(16, 8),
+    )
+
+    assert model.prepared_lm_head is None
+    first = model.forward_tokens(torch.tensor([1]))
+    prepared = model.prepared_lm_head
+    assert prepared is not None
+    second = model.forward_tokens(torch.tensor([2]))
+    assert model.prepared_lm_head is prepared
+    assert prepared.dtype == torch.float32
+    assert prepared.device == first.logits.device
+    assert second.logits.shape == first.logits.shape
+
+
 def test_model_reference_can_load_one_layer_at_a_time() -> None:
     layer, _, _ = _make_layer()
     torch.manual_seed(79)

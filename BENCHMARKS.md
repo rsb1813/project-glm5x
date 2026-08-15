@@ -795,3 +795,10 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Change: `K3XReader` now counts payload read calls and data-plus-auxiliary bytes; `GLM5XExpertBundle` aggregates those counters and `benchmark_glm5x_reference.py` records separate prefill/decode `storage_read_*` fields.
 - Verification: the focused K3X format, expert-bundle, and benchmark-schema suite passed `29` with `6` capability skips; the complete Python suite passed `326` with `124` skips.
 - Measurement boundary: these are logical artifact-file reads. They are not physical NVMe GB/token because the OS page cache may serve the read. Full-model values remain pending bundle completion.
+
+## 2026-08-15 -- Exact FP32 LM-head reuse microbenchmark
+
+- Shape: GLM-5.2 `lm_head.weight` shape `(154880, 6144)` on RTX 5080, BF16 source.
+- Fresh conversion: `0.061629 s` median over three synchronized conversions; FP32 resident bytes `3,806,330,880` and peak allocation for BF16 plus FP32 `5,710,544,896` bytes in the isolated probe.
+- Reuse: prepared transpose-view access `3.13 us` median over ten synchronized accesses. This is a bounded component measurement, not end-to-end tok/s.
+- Correctness: model-reference focused suite `9 passed`; full-model logits and quality remain pending the 282-shard bundle.
