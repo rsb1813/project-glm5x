@@ -78,5 +78,6 @@
 - [x] Add an opt-in, parity-tested Python expert-major MoE path and measure its single-token/four-token/full-layer trade-off.
 - [x] Add the explicit-token full-bundle reference benchmark gate for measured prefill/TTFT/decode output.
 - [x] Reuse the exact FP32 LM-head preparation across reference logits calls and record its VRAM trade-off.
+- [x] Add a dimension-derived GLM-5.2 traffic model that clearly separates bounds from measured TPS.
 - [ ] Add calibrated outlier or mixed-precision expert storage and a real-layer quality gate before converter integration.
 - [ ] Finish the 282-shard local stream and assemble the full expert bundle.

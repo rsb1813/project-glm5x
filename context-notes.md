@@ -500,3 +500,8 @@
 
 - TDD: added a regression that requires the reference model to reuse one prepared FP32 LM-head tensor across forwards; it failed before implementation and passed after the cache was added.
 - The isolated RTX 5080 full-vocabulary probe measured `61.629 ms` median for a fresh BF16-to-FP32 conversion versus microseconds for reuse. The optimization preserves FP32 logits but adds about `3.81 GB` of resident VRAM, so the complete-model gate must decide whether the trade-off fits.
+
+## 2026-08-15 -- Dimension-derived traffic boundary
+
+- Derived from the official GLM-5.2 dimensions without loading payloads: non-routed BF16 trunk `34,228,302,336` bytes (`31.88 GiB`) and one-token Top-8 routed fetch including that trunk `79,526,785,536` bytes (`74.07 GiB`). These are bounds, not measurements.
+- This makes resident mixed-precision trunk execution a required performance direction for the 10 tok/s objective. The full bundle gate must still measure actual H2D, physical NVMe, quality, and VRAM before accepting a design.

@@ -585,3 +585,11 @@
 - Evidence: at the real GLM shape `(154880, 6144)` on the RTX 5080, a fresh BF16-to-FP32 conversion took a `0.061629 s` median and allocated a `3,806,330,880`-byte matrix. Reuse of the prepared transpose view measured `3.13 us` median. The model/reference parity suite passed `9/9` after the change.
 - Accepted because: output arithmetic and token routing are unchanged, while repeated full-vocabulary conversion is removed from the decode hot path. The extra approximately `3.81 GB` VRAM must be included in the full-model pressure result.
 - Revisit: after the complete bundle gate records peak VRAM and decode tok/s. If 16 GB pressure is material, add an explicitly opt-in BF16 logits mode with a separate quality gate rather than silently changing default precision.
+
+## D-0074 -- Treat the BF16 traffic model as a constraint, not a performance result
+
+- Decision: keep the dimension-derived GLM-5.2 traffic model in a separate document and do not convert it into a TPS estimate. Use it to prioritize resident mixed-precision trunk and expert-major reuse work.
+- Alternatives: report a theoretical TPS from PCIe specifications, defer all traffic reasoning until the full bundle, or assume expert streaming is the only dominant cost.
+- Evidence: official dimensions imply `34,228,302,336` bytes (`31.88 GiB`) of non-routed BF16 trunk and `79,526,785,536` bytes (`74.07 GiB`) of one-token trunk plus Top-8 routed expert fetch if weights are reloaded each layer. No physical bandwidth or end-to-end latency has been measured yet.
+- Accepted because: the bound rules out an unquantized reload-everything design for the 10 tok/s objective without fabricating a result, while leaving exact routing and quality gates intact.
+- Revisit: after the complete bundle records actual H2D/NVMe traffic, cache residency, and quality for at least one exact and one mixed-precision mode.
