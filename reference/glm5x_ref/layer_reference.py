@@ -7,6 +7,7 @@ from typing import Callable, Mapping
 
 import torch
 
+from k3x_converter.format import K3XError
 from glm5x_converter.bundle import GLM5XExpertBundle
 
 from .layer10_moe import (
@@ -221,12 +222,54 @@ class GLM5XDecoderLayerReference:
             raise ValueError("GLM5X_LAYER_MLP_TYPE")
         target = None if device is None else torch.device(device)
 
-        def read(name: str) -> torch.Tensor:
-            value = GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)
-            return value if target is None else value.to(device=target)
-
         prefix = f"model.layers.{layer_id}"
         attention_prefix = f"{prefix}.self_attn"
+        indexer_layer = layer_id if indexer_source_layer is None else indexer_source_layer
+        indexer_prefix = f"model.layers.{indexer_layer}.self_attn.indexer"
+        tensor_names = [
+            f"{prefix}.input_layernorm.weight",
+            f"{prefix}.post_attention_layernorm.weight",
+            f"{attention_prefix}.q_a_proj.weight",
+            f"{attention_prefix}.q_a_layernorm.weight",
+            f"{attention_prefix}.q_b_proj.weight",
+            f"{attention_prefix}.kv_a_proj_with_mqa.weight",
+            f"{attention_prefix}.kv_a_layernorm.weight",
+            f"{attention_prefix}.kv_b_proj.weight",
+            f"{attention_prefix}.o_proj.weight",
+            f"{indexer_prefix}.wq_b.weight",
+            f"{indexer_prefix}.wk.weight",
+            f"{indexer_prefix}.k_norm.weight",
+            f"{indexer_prefix}.k_norm.bias",
+            f"{indexer_prefix}.weights_proj.weight",
+        ]
+        if mlp_type == "dense":
+            tensor_names.extend(
+                [
+                    f"{prefix}.mlp.gate_proj.weight",
+                    f"{prefix}.mlp.up_proj.weight",
+                    f"{prefix}.mlp.down_proj.weight",
+                ]
+            )
+        else:
+            tensor_names.extend(
+                [
+                    f"{prefix}.mlp.gate.weight",
+                    f"{prefix}.mlp.gate.e_score_correction_bias",
+                    f"{prefix}.mlp.shared_experts.gate_proj.weight",
+                    f"{prefix}.mlp.shared_experts.up_proj.weight",
+                    f"{prefix}.mlp.shared_experts.down_proj.weight",
+                ]
+            )
+        tensor_values = GLM5XLayer10MoEReference._read_tensors(
+            tensor_refs, tensor_names
+        )
+
+        def read(name: str) -> torch.Tensor:
+            value = tensor_values.get(name)
+            if value is None:
+                raise K3XError("GLM5X_LAYER_TENSOR_NOT_FOUND", name)
+            return value if target is None else value.to(device=target)
+
         attention = GLM5XMLAReference(
             GLM5XMLAWeights(
                 q_a_proj=read(f"{attention_prefix}.q_a_proj.weight"),
@@ -244,8 +287,6 @@ class GLM5XDecoderLayerReference:
             ),
             use_sparse_topk=use_sparse_topk,
         )
-        indexer_layer = layer_id if indexer_source_layer is None else indexer_source_layer
-        indexer_prefix = f"model.layers.{indexer_layer}.self_attn.indexer"
         indexer = GLM5XOfficialDSAIndexer(
             wq_b=read(f"{indexer_prefix}.wq_b.weight"),
             wk=read(f"{indexer_prefix}.wk.weight"),
@@ -279,6 +320,7 @@ class GLM5XDecoderLayerReference:
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
                 expert_precision=expert_precision,
+                tensor_values=tensor_values,
             )
         return cls(
             input_layernorm=read(f"{prefix}.input_layernorm.weight"),

@@ -6,6 +6,7 @@ import pytest
 from safetensors.torch import save_file
 
 from glm5x_converter.bundle import GLM5XExpertBundle, assemble_glm5x_expert_bundle
+from k3x_converter.reader import K3XReader
 from glm5x_converter.shard import convert_glm5x_shard
 from glm5x_ref.manifest import GLM5XTensorManifest
 from glm5x_ref.layer10_moe import (
@@ -233,6 +234,8 @@ def test_decoder_layer_bundle_loader_reads_attention_and_experts(monkeypatch, tm
     assert report.completed is True
     original_open = GLM5XExpertBundle.open
     open_count = 0
+    single_read_count = 0
+    grouped_read_count = 0
 
     def count_bundle_open(path, **kwargs):
         nonlocal open_count
@@ -240,6 +243,23 @@ def test_decoder_layer_bundle_loader_reads_attention_and_experts(monkeypatch, tm
         return original_open(path, **kwargs)
 
     monkeypatch.setattr(GLM5XExpertBundle, "open", staticmethod(count_bundle_open))
+
+    original_single_read = K3XReader.read_tensor_extents
+    original_grouped_read = K3XReader.read_tensor_extents_many
+
+    def count_single_read(reader, record):
+        nonlocal single_read_count
+        single_read_count += 1
+        return original_single_read(reader, record)
+
+    def count_grouped_read(reader, records):
+        nonlocal grouped_read_count
+        grouped_read_count += 1
+        return original_grouped_read(reader, records)
+
+    monkeypatch.setattr(K3XReader, "read_tensor_extents", count_single_read)
+    monkeypatch.setattr(K3XReader, "read_tensor_extents_many", count_grouped_read)
+
     layer = GLM5XDecoderLayerReference.from_bundle(
         bundle_path,
         layer_id=0,
@@ -252,6 +272,8 @@ def test_decoder_layer_bundle_loader_reads_attention_and_experts(monkeypatch, tm
         expert_intermediate_size=intermediate,
         hidden_size=hidden_size,
     )
+    assert single_read_count == 0
+    assert grouped_read_count >= 1
     hidden = torch.randn(1, 2, hidden_size)
     positions = torch.arange(2, dtype=torch.float32).view(1, 2)
     inverse = 1.0 / (10000.0 ** (torch.arange(0, rope, 2) / rope))

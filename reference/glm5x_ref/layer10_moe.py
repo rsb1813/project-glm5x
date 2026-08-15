@@ -607,6 +607,7 @@ class GLM5XLayer10MoEReference:
         bundle: GLM5XExpertBundle,
         *,
         tensor_refs: Mapping[str, tuple[K3XReader, object]],
+        tensor_values: Mapping[str, torch.Tensor] | None = None,
         layer_id: int = 10,
         cache_experts: bool = False,
         top_k: int = 8,
@@ -627,17 +628,26 @@ class GLM5XLayer10MoEReference:
         target = None if device is None else torch.device(device)
         if expert_precision not in {"bf16", "fp8"}:
             raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
-        router_weight = cls._read_tensor(tensor_refs, f"{prefix}.gate.weight").to(
+        def read(name: str) -> torch.Tensor:
+            if tensor_values is not None:
+                value = tensor_values.get(name)
+                if value is None:
+                    raise K3XError("GLM5X_LAYER_TENSOR_NOT_FOUND", name)
+                return value
+            return cls._read_tensor(tensor_refs, name)
+
+        router_weight = read(f"{prefix}.gate.weight").to(
             device=target, dtype=torch.float32
         )
-        correction_bias = cls._read_tensor(
-            tensor_refs, f"{prefix}.gate.e_score_correction_bias"
-        ).to(device=target, dtype=torch.float32)
+        correction_bias = read(f"{prefix}.gate.e_score_correction_bias").to(
+            device=target, dtype=torch.float32
+        )
         shared = cls._read_expert(
             tensor_refs,
             f"{prefix}.shared_experts.gate_proj.weight",
             f"{prefix}.shared_experts.up_proj.weight",
             f"{prefix}.shared_experts.down_proj.weight",
+            tensor_values=tensor_values,
         )
         if expert_precision == "fp8":
             shared = cls._quantize_expert_fp8(shared)
@@ -745,15 +755,41 @@ class GLM5XLayer10MoEReference:
             expert_precision=expert_precision,
         )
 
-    @staticmethod
+    @classmethod
+    def _read_tensors(
+        cls,
+        refs: Mapping[str, tuple[K3XReader, object]],
+        names: Sequence[str],
+    ) -> dict[str, torch.Tensor]:
+        grouped: dict[int, tuple[K3XReader, list[tuple[str, object]]]] = {}
+        for name in names:
+            item = refs.get(name)
+            if item is None:
+                raise K3XError("GLM5X_LAYER_TENSOR_NOT_FOUND", name)
+            reader, record = item
+            group = grouped.setdefault(id(reader), (reader, []))
+            group[1].append((name, record))
+
+        values: dict[str, torch.Tensor] = {}
+        for reader, items in grouped.values():
+            payloads = reader.read_tensor_extents_many(
+                [record for _, record in items]
+            )
+            for name, record in items:
+                data, auxiliary = payloads[record.tensor_id]
+                values[name] = cls._decode_tensor(name, record, data, auxiliary)
+        return values
+
+    @classmethod
     def _read_tensor(
-        refs: Mapping[str, tuple[K3XReader, object]], name: str
+        cls, refs: Mapping[str, tuple[K3XReader, object]], name: str
     ) -> torch.Tensor:
-        item = refs.get(name)
-        if item is None:
-            raise K3XError("GLM5X_LAYER_TENSOR_NOT_FOUND", name)
-        reader, record = item
-        data, auxiliary = reader.read_tensor_extents(record)
+        return cls._read_tensors(refs, (name,))[name]
+
+    @staticmethod
+    def _decode_tensor(
+        name: str, record: object, data: bytes, auxiliary: bytes
+    ) -> torch.Tensor:
         if auxiliary or record.quantization.name != "NONE":
             raise K3XError("GLM5X_LAYER_UNSUPPORTED_TENSOR", name)
         if record.dtype == DType.BF16:
@@ -776,7 +812,18 @@ class GLM5XLayer10MoEReference:
         gate_name: str,
         up_name: str,
         down_name: str,
+        *,
+        tensor_values: Mapping[str, torch.Tensor] | None = None,
     ) -> GLM5XExpertWeights:
+        if tensor_values is not None:
+            try:
+                return GLM5XExpertWeights(
+                    gate_proj=tensor_values[gate_name],
+                    up_proj=tensor_values[up_name],
+                    down_proj=tensor_values[down_name],
+                )
+            except KeyError as exc:
+                raise K3XError("GLM5X_LAYER_TENSOR_NOT_FOUND", str(exc)) from exc
         return GLM5XExpertWeights(
             gate_proj=cls._read_tensor(refs, gate_name),
             up_proj=cls._read_tensor(refs, up_name),
