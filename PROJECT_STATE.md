@@ -246,6 +246,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 
 ## 2026-08-15 -- Fingerprinted packed expert sidecar
 
+- Public commit: `7c3f539` (`perf: add fingerprinted packed expert sidecar`), pushed to `origin/main`.
 - Implemented: optional CUDA-only `.pi4` sidecars for packed INT4 gate/up/down projections, source-layout fingerprints, per-role CRC32C validation, atomic writes, model/CLI wiring, and benchmark telemetry.
 - Measured bounded result: layer-10 sidecar population took `18.112762928998563 s`; a fresh layer instance reused 31 sidecars in `1.152440828998806 s` with `0` bundle-read calls and `0` bundle-read bytes. Route equality remained `true`.
 - Verification: full WSL Python suite `332 passed, 124 skipped` in `76.14 s`; focused sidecar integration `32 passed, 6 skipped`; changed-module `py_compile` passed.
