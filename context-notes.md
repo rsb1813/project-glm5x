@@ -477,3 +477,8 @@
 
 - Tried grouping all selected role records by `.k3x` artifact so each artifact had one sequential reader task. The same 16-expert, two-token layer-10 RTX 5080 probe measured `4.175182 s` median for the existing four concurrent per-expert tasks versus `4.976070 s` for artifact grouping, a `16.09%` regression.
 - The new batch API and layer integration were reverted. The current path keeps multiple outstanding expert reads; only the already accepted per-expert three-role grouped open remains in production. Focused MoE/layer/model tests passed `13/13` after the revert.
+
+## 2026-08-15 -- Tune full-gate expert read parallelism
+
+- A real layer-10 worker sweep measured `7.635803/5.390695/4.428789/3.704820/3.159413 s` medians for `1/2/4/8/16` expert readers. The read sum dominates the bounded forward; decode and GPU MLP are small by comparison.
+- The full-gate monitor now defaults to 16 readers through `EXPERT_LOAD_WORKERS`, while the runtime CLI keeps its correctness-oriented serial default. The already-running monitor was not restarted and still uses its original four-reader setting.

@@ -10,6 +10,7 @@ cold_cuda_report="$repo_root/build-glm5x-full-reference-cuda-cold.json"
 cached_cuda_report="$repo_root/build-glm5x-full-reference-cuda-cached.json"
 expected_shards="${EXPECTED_SHARDS:-282}"
 poll_seconds="${POLL_SECONDS:-60}"
+expert_load_workers="${EXPERT_LOAD_WORKERS:-16}"
 
 if [[ ! -d "$output_dir" || ! -d "$source_dir" ]]; then
   echo "GLM5X_FULL_GATE_INPUT_DIRECTORY_MISSING" >&2
@@ -43,7 +44,7 @@ python tools/benchmark_glm5x_reference.py \
   --prompt 0 \
   --new-tokens 1 \
   --device cuda \
-  --expert-load-workers 4 \
+  --expert-load-workers "$expert_load_workers" \
   --expert-cache-bytes 0 \
   --expert-device-cache-bytes 0 \
   --lazy-bundle \
@@ -57,7 +58,7 @@ python tools/benchmark_glm5x_reference.py \
   --prompt 0 \
   --new-tokens 2 \
   --device cuda \
-  --expert-load-workers 4 \
+  --expert-load-workers "$expert_load_workers" \
   --expert-cache-bytes 8589934592 \
   --expert-device-cache-bytes 4294967296 \
   --lazy-bundle \

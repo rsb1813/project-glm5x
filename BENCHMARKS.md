@@ -775,3 +775,10 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Timing: existing per-expert tasks measured `4.175182 s` median; artifact-grouped tasks measured `4.976070 s` median, `16.09%` slower. This is a bounded layer-10 measurement, not full-model tok/s.
 - Correctness: both variants selected 16 experts and returned the same `(1, 2, 6144)` output shape. The batch API and layer integration were reverted; the focused MoE/layer/model tests remain green at `13 passed`.
 - Decision: reject artifact-wide batching for the current WSL/NTFS storage path. Keep parallel expert tasks until a full-model I/O trace justifies a different queue granularity.
+
+## 2026-08-15 -- Expert-read worker sweep for full-gate tuning
+
+- Hardware/model: RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.0, official GLM-5.2 five-shard layer-10 probe, two-token BF16 activation, 16 selected experts, lazy bundle admission, no host/device expert cache.
+- Timing medians: `1=7.635803 s`, `2=5.390695 s`, `4=4.428789 s`, `8=3.704820 s`, `16=3.159413 s` for one layer-10 MoE forward. Sixteen readers were approximately `28.7%` faster than four in this bounded sample.
+- Correctness: all points selected the same 16 experts and returned the same output shape. No end-to-end tok/s or quality benchmark was measured.
+- Operational choice: the local full-gate monitor now defaults to `EXPERT_LOAD_WORKERS=16`; the environment variable allows reproduction of another setting, and the serial correctness default is unchanged.

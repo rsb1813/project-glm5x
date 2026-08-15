@@ -546,6 +546,14 @@
 - Accepted because: the current storage stack benefits from multiple outstanding expert reads; sequentializing them by artifact loses useful NVMe/OS parallelism. The exact grouped three-role read remains accepted.
 - Revisit: after a full-model trace with direct I/O or an asynchronous queue can prove that descriptor overhead, rather than storage parallelism, is dominant.
 
+## D-0070 -- Use sixteen expert read workers for the local full-gate benchmark
+
+- Decision: set `tools/monitor_glm5x_full_gate.sh` to default `EXPERT_LOAD_WORKERS=16`, while keeping the general benchmark and correctness defaults explicitly switchable and serial where already defined.
+- Alternatives: keep the monitor at four workers, use eight workers, or promote sixteen workers globally for every correctness run.
+- Evidence: the same RTX 5080 WSL2 five-shard layer-10 probe with two tokens and 16 selected experts measured medians of `7.635803 s` (1 worker), `5.390695 s` (2), `4.428789 s` (4), `3.704820 s` (8), and `3.159413 s` (16). The 16-worker sample was approximately `28.7%` below four workers; route count and output shape stayed unchanged. This is a bounded I/O result, not full-model tok/s.
+- Accepted because: the monitor is an explicit performance gate, and sixteen is the maximum useful parallelism for this eight-way/top-k probe without adding duplicate work. The CLI's serial correctness path remains available.
+- Revisit: after the 78-layer gate records NVMe queue depth, host RSS, H2D traffic, and end-to-end quality. Reduce the monitor default if storage contention or memory pressure appears.
+
 ## D-0068 -- Reject physical-offset sorting inside grouped role reads
 
 - Decision: keep `read_tensor_extents_many()` in caller/request order. Do not sort the three role records by physical offset unless a future storage benchmark proves a stable benefit.
