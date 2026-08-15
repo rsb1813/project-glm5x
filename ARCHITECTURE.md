@@ -124,3 +124,17 @@ K3-specific KDA, Attention Residual, Stable LatentMoE, 896-way Top-16 assumption
 The strict reference path is always available. Any adaptive Top-K, proxy, pruning, or verifier-budget mode is opt-in and must report quality divergence. SHADOW and PHOENIX-style escalation are policy layers and cannot silently change the natural routing contract.
 
 `TURBO-LONGCTX` is an experimental mode for 600k–1M context capacity. It keeps exact routing and target verification while allowing compressed historical KV. Context capacity, prefill/TTFT, and decode tok/s are recorded as separate measurements. TurboQuant does not compress the 753B model weights; expert weight streaming remains an independent bottleneck.
+# 2026-08-15 performance-path update
+
+## Implemented experimental INT4 expert path
+
+- `reference/glm5x_ref/int4.py` implements CUDA TinyGEMM-compatible per-group INT4 packing with BF16 scale/zero metadata. The packed object preserves the original `[out, in]` shape and reports its resident byte size.
+- `GLM5XLayer10MoEReference` accepts `expert_precision="int4"` and uses the same exact router and token-major scatter semantics as BF16. `expert_major` falls back to the loop scheduler when packed weights are present, so the experimental representation cannot silently enter the incompatible `torch.stack` path.
+- Shared and routed experts can be packed once and retained by `GLM5XExpertTensorCache`. The cache is bounded by bytes and remains opt-in; BF16 remains the correctness/default representation.
+- Packing is GPU-side when a CUDA target is selected. This removes the large CPU quantization pass, but it does not reduce the logical K3X bytes read from NVMe. A packed on-disk expert sidecar is still a proposed storage change.
+
+## Measured boundary and non-adopted path
+
+- The first full-model cold INT4-expert probe (`trunk=int4`, natural Top-8, no device cache) measured `0.002830 tok/s`, `353.331 s` decode, `45,298,483,200` logical expert bytes/token, and `17,341,184,512` peak allocated VRAM bytes. It is rejected as a default fast mode because it adds cold packing cost and exceeds the nominal 16 GiB device budget.
+- A bounded layer-10 probe with a 2 GiB packed device cache measured `13.2817 s` for the first 4-token MoE call and `0.00977 s` for the identical cached call. This confirms that resident reuse, not cold quantization, is the useful property. It is not a full-model tok/s result.
+- The next accepted performance boundary is an exact, budgeted packed-expert residency policy plus a storage-side packed format. Until that exists, no INT4 flag is promoted into QUALITY or BALANCED defaults.

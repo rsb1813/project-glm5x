@@ -233,3 +233,13 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 - Root cause of the repeated local gate error: `tools/monitor_glm5x_full_gate.sh` used Bash-only syntax without a shebang and was invoked through `sh`, producing `line 27: syntax error near unexpected token 'then'`. The script is now POSIX-`sh` compatible, declares its interpreter, and selects `/home/jolib/.venvs/k3x-m1/bin/python` (override with `K3X_PYTHON`) before falling back to `python3`/`python`; `sh -n` and `bash -n` pass.
 - Public verification after the script repair is green at `5dfe036`: correctness `31863769799` completed in about `3m02s`, and CodeQL `31863769798` completed in about `3m46s`; no cloud or paid resource was used.
 - Next bottleneck: implement an exact resident non-expert trunk policy and layer-aware pinned/asynchronous staging so the measured `79.8 GB/token` logical reload is amortized. Re-run exact parity and the full gate before enabling any mixed precision, proxy, adaptive Top-K, or speculative mode.
+
+## 2026-08-15 -- INT4 expert residency gate
+
+- Implemented: CUDA TinyGEMM INT4 weight wrapper, GPU-side group quantization/packing, INT4 expert/shared projection support, device-cache byte accounting, expert-major safety fallback, CLI precision flag, and bundle grouped expert reads.
+- Verification: WSL focused INT4/bundle/layer/model/MoE/schema tests `33 passed, 6 skipped`; targeted `py_compile` passed.
+- Measured rejection: full-model cold `trunk=int4 + expert=int4` with no packed cache measured `0.002830204968837129` decode tok/s, `353.3312996799941 s` decode, `45,298,483,200` logical expert bytes/token, and `17,341,184,512` peak allocated VRAM bytes. This is not a usable 16 GiB default.
+- Measured opportunity: real layer-10 four-token INT4 MoE with a 2 GiB packed device cache measured `13.281714103999548 s` on first call and `0.00977079599397257 s` on an identical cached call (`31` hits, `31` misses, `621,674,496` resident bytes). This is a sublayer-only result.
+- In progress: design a storage-side packed expert artifact and an exact route-stable residency policy. The current source bundle still forces `45.3 GB/token` logical expert reads, so 10--20 tok/s is not yet physically plausible on the target NVMe/PCIe path.
+- Known blocker: the long 2-token 8 GiB packed-cache full-model run was stopped before completion because initial full-bundle materialization exceeded the requested turnaround; no partial result is treated as a benchmark.
+- Last known-good tests: the focused suite above; no new public push was made for the uncommitted INT4 work.

@@ -4,7 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import torch
-import torch.nn.functional as F
+
+from .int4 import GLM5XInt4Weight, linear, weight_shape
 
 
 def _rms_norm(values: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
@@ -47,13 +48,13 @@ def _apply_interleaved_rope(
 class GLM5XMLAWeights:
     """GLM MLA projection tensors in safetensors linear-layer orientation."""
 
-    q_a_proj: torch.Tensor
+    q_a_proj: torch.Tensor | GLM5XInt4Weight
     q_a_norm: torch.Tensor
-    q_b_proj: torch.Tensor
-    kv_a_proj: torch.Tensor
+    q_b_proj: torch.Tensor | GLM5XInt4Weight
+    kv_a_proj: torch.Tensor | GLM5XInt4Weight
     kv_a_norm: torch.Tensor
-    kv_b_proj: torch.Tensor
-    o_proj: torch.Tensor
+    kv_b_proj: torch.Tensor | GLM5XInt4Weight
+    o_proj: torch.Tensor | GLM5XInt4Weight
     num_heads: int
     qk_nope_head_dim: int
     qk_rope_head_dim: int
@@ -64,24 +65,24 @@ class GLM5XMLAWeights:
     rms_norm_eps: float = 1e-5
 
     def __post_init__(self) -> None:
-        q_a_proj = torch.as_tensor(self.q_a_proj)
+        q_a_proj = weight_shape(self.q_a_proj)
         q_a_norm = torch.as_tensor(self.q_a_norm)
-        q_b_proj = torch.as_tensor(self.q_b_proj)
-        kv_a_proj = torch.as_tensor(self.kv_a_proj)
+        q_b_proj = weight_shape(self.q_b_proj)
+        kv_a_proj = weight_shape(self.kv_a_proj)
         kv_a_norm = torch.as_tensor(self.kv_a_norm)
-        kv_b_proj = torch.as_tensor(self.kv_b_proj)
-        o_proj = torch.as_tensor(self.o_proj)
-        if any(value.ndim != 2 for value in (q_a_proj, q_b_proj, kv_a_proj, kv_b_proj, o_proj)):
+        kv_b_proj = weight_shape(self.kv_b_proj)
+        o_proj = weight_shape(self.o_proj)
+        if any(len(value) != 2 for value in (q_a_proj, q_b_proj, kv_a_proj, kv_b_proj, o_proj)):
             raise ValueError("GLM5X_MLA_PROJECTION_RANK")
         if q_a_norm.ndim != 1 or kv_a_norm.ndim != 1:
             raise ValueError("GLM5X_MLA_NORM_RANK")
-        if q_a_proj.shape[0] != q_a_norm.shape[0] or q_b_proj.shape[1] != q_a_proj.shape[0]:
+        if q_a_proj[0] != q_a_norm.shape[0] or q_b_proj[1] != q_a_proj[0]:
             raise ValueError("GLM5X_MLA_Q_SHAPE")
         if not isinstance(self.qk_rope_head_dim, int) or self.qk_rope_head_dim <= 0 or self.qk_rope_head_dim % 2:
             raise ValueError("GLM5X_MLA_ROPE_DIM")
-        if kv_a_proj.shape[0] <= kv_a_norm.shape[0] or kv_a_proj.shape[0] != kv_a_norm.shape[0] + self.qk_rope_head_dim:
+        if kv_a_proj[0] <= kv_a_norm.shape[0] or kv_a_proj[0] != kv_a_norm.shape[0] + self.qk_rope_head_dim:
             raise ValueError("GLM5X_MLA_KV_A_SHAPE")
-        if kv_b_proj.shape[1] != kv_a_norm.shape[0]:
+        if kv_b_proj[1] != kv_a_norm.shape[0]:
             raise ValueError("GLM5X_MLA_KV_B_SHAPE")
         if not isinstance(self.num_heads, int) or self.num_heads <= 0:
             raise ValueError("GLM5X_MLA_HEAD_COUNT")
@@ -89,20 +90,20 @@ class GLM5XMLAWeights:
             raise ValueError("GLM5X_MLA_NOPE_DIM")
         if not isinstance(self.v_head_dim, int) or self.v_head_dim <= 0:
             raise ValueError("GLM5X_MLA_VALUE_DIM")
-        if q_b_proj.shape[0] != self.num_heads * (self.qk_nope_head_dim + self.qk_rope_head_dim):
+        if q_b_proj[0] != self.num_heads * (self.qk_nope_head_dim + self.qk_rope_head_dim):
             raise ValueError("GLM5X_MLA_Q_HEAD_SHAPE")
-        if kv_b_proj.shape[0] != self.num_heads * (self.qk_nope_head_dim + self.v_head_dim):
+        if kv_b_proj[0] != self.num_heads * (self.qk_nope_head_dim + self.v_head_dim):
             raise ValueError("GLM5X_MLA_KV_HEAD_SHAPE")
-        if o_proj.shape[1] != self.num_heads * self.v_head_dim:
+        if o_proj[1] != self.num_heads * self.v_head_dim:
             raise ValueError("GLM5X_MLA_OUTPUT_HEAD_SHAPE")
-        if q_b_proj.shape[0] % 2 or kv_b_proj.shape[0] % 2:
+        if q_b_proj[0] % 2 or kv_b_proj[0] % 2:
             raise ValueError("GLM5X_MLA_HEAD_SHAPE")
-        if o_proj.shape[1] <= 0 or o_proj.shape[0] != q_a_proj.shape[1]:
+        if o_proj[1] <= 0 or o_proj[0] != q_a_proj[1]:
             raise ValueError("GLM5X_MLA_OUTPUT_SHAPE")
         for name, bias, width in (
-            ("q_a_bias", self.q_a_bias, q_a_proj.shape[0]),
-            ("kv_a_bias", self.kv_a_bias, kv_a_proj.shape[0]),
-            ("o_bias", self.o_bias, o_proj.shape[0]),
+            ("q_a_bias", self.q_a_bias, q_a_proj[0]),
+            ("kv_a_bias", self.kv_a_bias, kv_a_proj[0]),
+            ("o_bias", self.o_bias, o_proj[0]),
         ):
             if bias is not None and torch.as_tensor(bias).shape != (width,):
                 raise ValueError(f"GLM5X_MLA_{name.upper()}_SHAPE")
@@ -111,11 +112,11 @@ class GLM5XMLAWeights:
 
     @property
     def hidden_size(self) -> int:
-        return int(torch.as_tensor(self.q_a_proj).shape[1])
+        return int(weight_shape(self.q_a_proj)[1])
 
     @property
     def q_lora_rank(self) -> int:
-        return int(torch.as_tensor(self.q_a_proj).shape[0])
+        return int(weight_shape(self.q_a_proj)[0])
 
     @property
     def kv_lora_rank(self) -> int:
@@ -153,14 +154,12 @@ class GLM5XMLAReference:
         self.use_sparse_topk = use_sparse_topk
 
     def _linear(
-        self, values: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None
+        self,
+        values: torch.Tensor,
+        weight: torch.Tensor | GLM5XInt4Weight,
+        bias: torch.Tensor | None,
     ) -> torch.Tensor:
-        weight = torch.as_tensor(weight).to(device=values.device)
-        if values.dtype != weight.dtype:
-            values = values.to(weight.dtype)
-        if bias is not None:
-            bias = torch.as_tensor(bias).to(device=values.device, dtype=weight.dtype)
-        return F.linear(values, weight, bias)
+        return linear(values, weight, bias)
 
     def q_residual(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states = torch.as_tensor(hidden_states)

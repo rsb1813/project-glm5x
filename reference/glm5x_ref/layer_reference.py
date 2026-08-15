@@ -16,8 +16,10 @@ from .layer10_moe import (
     GLM5XLayer10MoEReference,
     GLM5XMoEForward,
     GLM5XExpertTensorCache,
+    GLM5XTrunkTensorCache,
     _collect_tensor_refs,
 )
+from .int4 import GLM5XInt4Weight, quantize_int4_weight
 from .mla_dsa import GLM5XMLAForward, GLM5XMLAReference, GLM5XMLAState, GLM5XMLAWeights, _rms_norm
 from .official_dsa import GLM5XOfficialDSAIndexer, GLM5XOfficialDSAState
 
@@ -89,7 +91,9 @@ class GLM5XDecoderLayerReference:
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
+        trunk_tensor_cache: GLM5XTrunkTensorCache | None = None,
         expert_precision: str = "bf16",
+        trunk_precision: str = "bf16",
     ) -> "GLM5XDecoderLayerReference":
         bundle = GLM5XExpertBundle.open(
             bundle_path,
@@ -120,7 +124,9 @@ class GLM5XDecoderLayerReference:
             use_sparse_topk=use_sparse_topk,
             expert_load_workers=expert_load_workers,
             expert_device_cache=expert_device_cache,
+            trunk_tensor_cache=trunk_tensor_cache,
             expert_precision=expert_precision,
+            trunk_precision=trunk_precision,
         )
 
     @classmethod
@@ -150,7 +156,9 @@ class GLM5XDecoderLayerReference:
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
+        trunk_tensor_cache: GLM5XTrunkTensorCache | None = None,
         expert_precision: str = "bf16",
+        trunk_precision: str = "bf16",
     ) -> Callable[[int], "GLM5XDecoderLayerReference"]:
         """Open and validate one bundle once, then provide individual layers."""
         bundle = GLM5XExpertBundle.open(
@@ -185,7 +193,9 @@ class GLM5XDecoderLayerReference:
                 use_sparse_topk=use_sparse_topk,
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
+                trunk_tensor_cache=trunk_tensor_cache,
                 expert_precision=expert_precision,
+                trunk_precision=trunk_precision,
             )
 
         return load
@@ -216,11 +226,17 @@ class GLM5XDecoderLayerReference:
         use_sparse_topk: bool = False,
         expert_load_workers: int = 1,
         expert_device_cache: GLM5XExpertTensorCache | None = None,
+        trunk_tensor_cache: GLM5XTrunkTensorCache | None = None,
         expert_precision: str = "bf16",
+        trunk_precision: str = "bf16",
     ) -> "GLM5XDecoderLayerReference":
         if mlp_type not in {"dense", "sparse"}:
             raise ValueError("GLM5X_LAYER_MLP_TYPE")
+        if trunk_precision not in {"bf16", "int4"}:
+            raise ValueError("GLM5X_INVALID_TRUNK_PRECISION")
         target = None if device is None else torch.device(device)
+        if trunk_precision == "int4" and (target is None or target.type != "cuda"):
+            raise ValueError("GLM5X_INT4_TRUNK_CUDA_REQUIRED")
 
         prefix = f"model.layers.{layer_id}"
         attention_prefix = f"{prefix}.self_attn"
@@ -261,13 +277,24 @@ class GLM5XDecoderLayerReference:
                 ]
             )
         tensor_values = GLM5XLayer10MoEReference._read_tensors(
-            tensor_refs, tensor_names
+            tensor_refs, tensor_names, tensor_cache=trunk_tensor_cache
         )
 
-        def read(name: str) -> torch.Tensor:
+        def read(name: str) -> torch.Tensor | GLM5XInt4Weight:
             value = tensor_values.get(name)
             if value is None:
                 raise K3XError("GLM5X_LAYER_TENSOR_NOT_FOUND", name)
+            if (
+                trunk_precision == "int4"
+                and target is not None
+                and value.ndim == 2
+                and ".mlp.gate.weight" not in name
+                and not (
+                    "shared_experts" in name
+                    and expert_precision in {"fp8", "int4"}
+                )
+            ):
+                return quantize_int4_weight(value)
             return value if target is None else value.to(device=target)
 
         attention = GLM5XMLAReference(
@@ -320,6 +347,7 @@ class GLM5XDecoderLayerReference:
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
                 expert_precision=expert_precision,
+                trunk_precision=trunk_precision,
                 tensor_values=tensor_values,
             )
         return cls(

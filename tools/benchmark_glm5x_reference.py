@@ -65,10 +65,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="bounded exact decoded CUDA expert cache capacity; 0 disables it",
     )
     parser.add_argument(
+        "--trunk-cache-bytes",
+        type=int,
+        default=0,
+        help="bounded exact CPU cache for non-expert layer tensors; 0 disables it",
+    )
+    parser.add_argument(
         "--expert-precision",
-        choices=("bf16", "fp8"),
+        choices=("bf16", "fp8", "int4"),
         default="bf16",
-        help="expert projection precision; fp8 is experimental and default-off",
+        help="expert projection precision; fp8/int4 are experimental and default-off",
+    )
+    parser.add_argument(
+        "--trunk-precision",
+        choices=("bf16", "int4"),
+        default="bf16",
+        help="non-expert projection precision; int4 requires CUDA TinyGEMM",
     )
     parser.add_argument(
         "--lazy-bundle",
@@ -89,6 +101,8 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         raise ValueError("expert-cache-bytes must be non-negative")
     if arguments.expert_device_cache_bytes < 0:
         raise ValueError("expert-device-cache-bytes must be non-negative")
+    if arguments.trunk_cache_bytes < 0:
+        raise ValueError("trunk-cache-bytes must be non-negative")
     if arguments.device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA device requested but torch.cuda.is_available() is false")
     device = torch.device(arguments.device)
@@ -109,7 +123,9 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         expert_load_workers=arguments.expert_load_workers,
         expert_cache_capacity_bytes=arguments.expert_cache_bytes,
         expert_device_cache_capacity_bytes=arguments.expert_device_cache_bytes,
+        trunk_cache_capacity_bytes=arguments.trunk_cache_bytes,
         expert_precision=arguments.expert_precision,
+        trunk_precision=arguments.trunk_precision,
     )
     storage_before = model.bundle_read_stats
     prompt = torch.tensor(arguments.prompt, dtype=torch.long, device=device)
@@ -190,7 +206,9 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
         "expert_load_workers": arguments.expert_load_workers,
         "expert_cache_bytes": arguments.expert_cache_bytes,
         "expert_device_cache_bytes": arguments.expert_device_cache_bytes,
+        "trunk_cache_bytes": arguments.trunk_cache_bytes,
         "expert_precision": arguments.expert_precision,
+        "trunk_precision": arguments.trunk_precision,
         "lazy_bundle": arguments.lazy_bundle,
     }
     cache_stats = model.expert_payload_cache_stats
@@ -216,6 +234,20 @@ def measure(arguments: argparse.Namespace) -> dict[str, object]:
                 device_cache_stats.hits / device_cache_lookups
                 if device_cache_lookups
                 else 0.0
+            ),
+        }
+    )
+    trunk_stats = model.trunk_tensor_cache_stats
+    trunk_lookups = trunk_stats.hits + trunk_stats.misses
+    payload.update(
+        {
+            "trunk_cache_resident_bytes": trunk_stats.resident_bytes,
+            "trunk_cache_entries": trunk_stats.entries,
+            "trunk_cache_hits": trunk_stats.hits,
+            "trunk_cache_misses": trunk_stats.misses,
+            "trunk_cache_evictions": trunk_stats.evictions,
+            "trunk_cache_hit_rate": (
+                trunk_stats.hits / trunk_lookups if trunk_lookups else 0.0
             ),
         }
     )

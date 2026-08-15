@@ -15,6 +15,8 @@ from .layer10_moe import (
     GLM5XExpertTensorCache,
     GLM5XExpertTensorCacheStats,
     GLM5XLayer10MoEReference,
+    GLM5XTrunkTensorCache,
+    GLM5XTrunkTensorCacheStats,
     _collect_tensor_refs,
 )
 from .model import GLM5XModelDescriptor
@@ -142,6 +144,7 @@ class GLM5XDecoderModelReference:
         self._layer_count = len(self.layers)
         self._layer_cache_capacity = 0
         self._layer_cache: OrderedDict[int, GLM5XDecoderLayerReference] = OrderedDict()
+        self._trunk_tensor_cache = None
         self._rope_dim = int(self.layers[0].attention.weights.qk_rope_head_dim)
         self.final_norm = final_norm
         self.lm_head = lm_head
@@ -197,6 +200,7 @@ class GLM5XDecoderModelReference:
         instance._layer_cache = OrderedDict()
         instance._expert_bundle = None
         instance._expert_device_cache = None
+        instance._trunk_tensor_cache = None
         instance.final_norm = final_norm
         instance.lm_head = lm_head
         instance._prepared_lm_head = None
@@ -222,7 +226,9 @@ class GLM5XDecoderModelReference:
         expert_load_workers: int = 1,
         expert_cache_capacity_bytes: int = 0,
         expert_device_cache_capacity_bytes: int = 0,
+        trunk_cache_capacity_bytes: int = 0,
         expert_precision: str = "bf16",
+        trunk_precision: str = "bf16",
     ) -> "GLM5XDecoderModelReference":
         """Build an out-of-core model factory from one validated GLM bundle.
 
@@ -240,6 +246,16 @@ class GLM5XDecoderModelReference:
             or expert_device_cache_capacity_bytes < 0
         ):
             raise ValueError("GLM5X_BUNDLE_EXPERT_DEVICE_CACHE_CAPACITY")
+        if (
+            not isinstance(trunk_cache_capacity_bytes, int)
+            or isinstance(trunk_cache_capacity_bytes, bool)
+            or trunk_cache_capacity_bytes < 0
+        ):
+            raise ValueError("GLM5X_BUNDLE_TRUNK_CACHE_CAPACITY")
+        if trunk_precision not in {"bf16", "int4"}:
+            raise ValueError("GLM5X_INVALID_TRUNK_PRECISION")
+        if expert_precision not in {"bf16", "fp8", "int4"}:
+            raise ValueError("GLM5X_INVALID_EXPERT_PRECISION")
         layer_count = descriptor.hidden_layers
         hidden_size = descriptor.hidden_size
         num_heads = _positive_config_int(config, "num_attention_heads")
@@ -283,6 +299,11 @@ class GLM5XDecoderModelReference:
             if expert_device_cache_capacity_bytes
             else None
         )
+        trunk_tensor_cache = (
+            GLM5XTrunkTensorCache(trunk_cache_capacity_bytes)
+            if trunk_cache_capacity_bytes
+            else None
+        )
         read = lambda name: GLM5XLayer10MoEReference._read_tensor(tensor_refs, name)  # noqa: E731
         target = None if device is None else torch.device(device)
         if embedding is None:
@@ -324,7 +345,9 @@ class GLM5XDecoderModelReference:
                 use_sparse_topk=use_sparse_topk,
                 expert_load_workers=expert_load_workers,
                 expert_device_cache=expert_device_cache,
+                trunk_tensor_cache=trunk_tensor_cache,
                 expert_precision=expert_precision,
+                trunk_precision=trunk_precision,
             )
 
         instance = cls.from_layer_loader(
@@ -339,6 +362,7 @@ class GLM5XDecoderModelReference:
         )
         instance._expert_bundle = bundle
         instance._expert_device_cache = expert_device_cache
+        instance._trunk_tensor_cache = trunk_tensor_cache
         return instance
 
     @property
@@ -373,6 +397,13 @@ class GLM5XDecoderModelReference:
         cache = getattr(self, "_expert_device_cache", None)
         if cache is None:
             return GLM5XExpertTensorCacheStats(0, 0, 0, 0, 0, 0)
+        return cache.stats
+
+    @property
+    def trunk_tensor_cache_stats(self) -> GLM5XTrunkTensorCacheStats:
+        cache = getattr(self, "_trunk_tensor_cache", None)
+        if cache is None:
+            return GLM5XTrunkTensorCacheStats(0, 0, 0, 0, 0, 0)
         return cache.stats
 
     @property

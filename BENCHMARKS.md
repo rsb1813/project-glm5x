@@ -846,3 +846,34 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - CodeQL run `31863769798`: completed successfully in about `3m46s`.
 - The recurring red `correctness / Linux (push)` notification is historical run `31795400168` on stale commit `b94c8b8`; its Python step lacked 50 migrated historical `results/b0006..b0024` files. It is not an active failure on current `main`.
 - Dependabot PRs `#1`--`#4` are closed; no open update PR is present. Dependabot security alerts and vulnerability alerts are disabled at the repository endpoint (`403`/`404`), so no CVE count can be verified from the alarm banner.
+
+## 2026-08-15 -- Experimental full-model INT4 expert rejection gate
+
+- Date: 2026-08-15.
+- Commit: working tree based on `2e122a0`; this was an experimental run before the GPU-side qparam refinement was recorded, so it is not a current default-path result.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.0; system RAM and physical NVMe counters were not independently sampled.
+- Model/checkpoint: official GLM-5.2 full bundle, `282` artifacts, `78` layers, natural Top-8 from the current descriptor, exact raw-BF16 source payloads packed to CUDA TinyGEMM INT4 at load time.
+- Mode: prompt `[0]`, one prefill token and one greedy decode token, `layer_cache_capacity=78`, `expert_load_workers=16`, `expert_precision=int4`, `trunk_precision=int4`, no host/device expert cache, lazy bundle admission.
+- Decode: `353.3312996799941 s`, `0.002830204968837129 tok/s`.
+- Prefill: `657.3077802089974 s`, `0.0015213573155669026 tok/s`.
+- TTFT: `1010.6390798889915 s`.
+- Logical storage reads: prefill `79,763,152,896` bytes; decode `45,298,483,200` bytes/token over `280` grouped calls. The INT4 representation did not reduce source artifact bytes because no packed sidecar exists yet.
+- VRAM: peak allocated `17,341,184,512` bytes and peak reserved `17,624,465,408` bytes, above the nominal 16 GiB RTX 5080 budget. Quality and physical NVMe/H2D counters were not measured by this run.
+- Result: rejected as a default fast mode. Cold per-token packing and the unchanged expert-read bound dominate; the generated token was `[154820]`.
+
+## 2026-08-15 -- Layer-10 packed expert cache probe
+
+- Date: 2026-08-15.
+- Commit: working tree based on `2e122a0` with CUDA-side INT4 qparam/packing refinement.
+- Hardware/model: same RTX 5080/WSL2; official GLM-5.2 layer-10 bundle payloads and `layer10-real4-moe-input.gmlxact` with four tokens.
+- Mode: exact natural Top-8 router, `expert_precision=int4`, loop execution, `expert_load_workers=16`, 2 GiB decoded expert device cache. This is a MoE-sublayer probe, not a decoder-token benchmark.
+- First call: `13.281714103999548 s` (`0.301165946554705` input tokens/s), including payload reads and GPU packing.
+- Repeated identical call: `0.00977079599397257 s` (`409.38322757608785` input tokens/s), with `31` cache hits, `31` misses, `31` entries, `621,674,496` resident bytes, and zero evictions.
+- Quality: route/output parity was not a full-layer quality score; the probe only confirmed finite packed execution and repeated-route cache reuse.
+- Result: confirms that resident packed reuse is valuable, but it cannot be extrapolated to full-model tok/s. The missing requirement is a storage-side packed expert artifact or a route-stable residency policy that materially lowers full-model bytes/token.
+
+## 2026-08-15 -- Verification after INT4 expert changes
+
+- WSL Python focused suite: `33 passed, 6 skipped` across INT4, bundle, layer, model, MoE, and benchmark-schema tests.
+- `py_compile`: passed for the changed INT4/reference/benchmark modules.
+- No 10--20 tok/s full-model result exists. The measured full-model numbers above remain the only throughput evidence and are explicitly not targets.

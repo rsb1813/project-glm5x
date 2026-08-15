@@ -8,6 +8,8 @@ from pathlib import Path
 from safetensors import safe_open
 import torch
 
+from .int4 import GLM5XInt4Weight, linear, weight_shape
+
 
 def build_glm_indexer_rope(
     position_ids: torch.Tensor,
@@ -45,11 +47,11 @@ class GLM5XOfficialDSAState:
 class GLM5XOfficialDSAIndexer:
     """Reference implementation of the GLM-MoE-DSA indexer formula."""
 
-    wq_b: torch.Tensor
-    wk: torch.Tensor
+    wq_b: torch.Tensor | GLM5XInt4Weight
+    wk: torch.Tensor | GLM5XInt4Weight
     k_norm_weight: torch.Tensor
     k_norm_bias: torch.Tensor
-    weights_proj: torch.Tensor
+    weights_proj: torch.Tensor | GLM5XInt4Weight
     qk_rope_head_dim: int = 64
     index_topk: int = 2048
     indexer_rope_interleave: bool = True
@@ -94,21 +96,21 @@ class GLM5XOfficialDSAIndexer:
         )
 
     def __post_init__(self) -> None:
-        wq_b = torch.as_tensor(self.wq_b)
-        wk = torch.as_tensor(self.wk)
+        wq_b = weight_shape(self.wq_b)
+        wk = weight_shape(self.wk)
         k_norm_weight = torch.as_tensor(self.k_norm_weight)
         k_norm_bias = torch.as_tensor(self.k_norm_bias)
-        weights_proj = torch.as_tensor(self.weights_proj)
-        if wq_b.ndim != 2 or wk.ndim != 2 or weights_proj.ndim != 2:
+        weights_proj = weight_shape(self.weights_proj)
+        if len(wq_b) != 2 or len(wk) != 2 or len(weights_proj) != 2:
             raise ValueError("DSA_INDEXER_WEIGHTS_MUST_BE_RANK_TWO")
         if k_norm_weight.ndim != 1 or k_norm_bias.ndim != 1:
             raise ValueError("DSA_INDEXER_NORM_MUST_BE_RANK_ONE")
-        head_dim = wk.shape[0]
+        head_dim = wk[0]
         if k_norm_weight.shape != (head_dim,) or k_norm_bias.shape != (head_dim,):
             raise ValueError("DSA_INDEXER_NORM_SHAPE_MISMATCH")
-        if weights_proj.shape[1] != wk.shape[1]:
+        if weights_proj[1] != wk[1]:
             raise ValueError("DSA_WEIGHTS_PROJ_SHAPE_MISMATCH")
-        if wq_b.shape[0] != weights_proj.shape[0] * head_dim:
+        if wq_b[0] != weights_proj[0] * head_dim:
             raise ValueError("DSA_WQ_B_SHAPE_MISMATCH")
         if self.qk_rope_head_dim <= 0 or self.qk_rope_head_dim > head_dim or self.qk_rope_head_dim % 2:
             raise ValueError("DSA_INVALID_ROPE_HEAD_DIM")
@@ -119,34 +121,32 @@ class GLM5XOfficialDSAIndexer:
 
     @property
     def hidden_size(self) -> int:
-        return int(torch.as_tensor(self.wk).shape[1])
+        return int(weight_shape(self.wk)[1])
 
     @property
     def index_n_heads(self) -> int:
-        return int(torch.as_tensor(self.weights_proj).shape[0])
+        return int(weight_shape(self.weights_proj)[0])
 
     @property
     def index_head_dim(self) -> int:
-        return int(torch.as_tensor(self.wk).shape[0])
+        return int(weight_shape(self.wk)[0])
 
     @property
     def q_lora_rank(self) -> int:
-        return int(torch.as_tensor(self.wq_b).shape[1])
+        return int(weight_shape(self.wq_b)[1])
 
     def project_query(self, q_resid: torch.Tensor) -> torch.Tensor:
         q_resid = torch.as_tensor(q_resid)
         if q_resid.ndim == 0 or q_resid.shape[-1] != self.q_lora_rank:
             raise ValueError("DSA_Q_RESID_WIDTH_MISMATCH")
-        weight = torch.as_tensor(self.wq_b).to(device=q_resid.device)
-        projected = q_resid.to(weight.dtype) @ weight.T
+        projected = linear(q_resid, self.wq_b)
         return projected.reshape(*q_resid.shape[:-1], self.index_n_heads, self.index_head_dim)
 
     def project_keys(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states = torch.as_tensor(hidden_states)
         if hidden_states.ndim == 0 or hidden_states.shape[-1] != self.hidden_size:
             raise ValueError("DSA_INDEXER_HIDDEN_WIDTH_MISMATCH")
-        weight = torch.as_tensor(self.wk).to(device=hidden_states.device)
-        projected = hidden_states.to(weight.dtype) @ weight.T
+        projected = linear(hidden_states, self.wk)
         norm_weight = torch.as_tensor(self.k_norm_weight).to(device=hidden_states.device)
         norm_bias = torch.as_tensor(self.k_norm_bias).to(device=hidden_states.device)
         return torch.nn.functional.layer_norm(
@@ -215,8 +215,7 @@ class GLM5XOfficialDSAIndexer:
         k = torch.cat((k_rot, k_pass), dim=-1).squeeze(2)
         scores = torch.matmul(q.float(), k.transpose(-1, -2).float().unsqueeze(1))
         scores = torch.relu(scores) * (self.index_head_dim**-0.5)
-        weights = self.weights_proj.to(device=hidden_states.device, dtype=hidden_states.dtype)
-        weights = (hidden_states.to(weights.dtype) @ weights.T).float() * (self.index_n_heads**-0.5)
+        weights = linear(hidden_states, self.weights_proj).float() * (self.index_n_heads**-0.5)
         index_scores = torch.matmul(weights.unsqueeze(-2), scores).squeeze(-2)
         if attention_mask is not None:
             index_scores = index_scores + torch.as_tensor(attention_mask)
@@ -293,8 +292,7 @@ class GLM5XOfficialDSAIndexer:
             q.to(torch.float32), keys.to(torch.float32).transpose(-1, -2).unsqueeze(1)
         )
         scores = torch.relu(scores) * (self.index_head_dim**-0.5)
-        weights = self.weights_proj.to(device=hidden_states.device, dtype=hidden_states.dtype)
-        weights = (hidden_states.to(weights.dtype) @ weights.T).float() * (self.index_n_heads**-0.5)
+        weights = linear(hidden_states, self.weights_proj).float() * (self.index_n_heads**-0.5)
         index_scores = torch.matmul(weights.unsqueeze(-2), scores).squeeze(-2)
         causal = key_positions[:, None, :] > position_ids[:, :, None]
         index_scores = index_scores.masked_fill(causal, float("-inf"))

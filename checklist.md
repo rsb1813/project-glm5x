@@ -85,3 +85,6 @@
 - [x] Run the exact full 78-layer cold and cached CUDA reference gates and record storage/VRAM telemetry.
 - [x] Diagnose and repair the Bash/Python-path failure in the local full-gate coordinator.
 - [ ] Implement exact resident non-expert trunk reuse and layer-aware pinned/asynchronous staging; re-run full parity and throughput gates.
+- [x] Add experimental CUDA TinyGEMM INT4 expert/shared projection path, GPU-side packing, and bounded packed device-cache accounting; focused tests and layer-10 cache probe are green.
+- [ ] Add an on-disk packed expert sidecar and exact route-stable residency policy that materially lowers full-model logical expert bytes/token.
+- [ ] Re-run a fresh full-model quality/throughput gate after packed sidecar/residency work; do not claim 10--20 tok/s before this gate.

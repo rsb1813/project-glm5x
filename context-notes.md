@@ -520,3 +520,12 @@
 - The repeated local gate error was reproduced from `build-glm5x-full-gate-v2.err.log`: `tools/monitor_glm5x_full_gate.sh: line 27: syntax error near unexpected token 'then'`. The script contained Bash-only `[[`/`(( ))` syntax but no shebang and had been invoked through `sh`; it is now POSIX-`sh` compatible with a CUDA-venv Python selector, and both `sh -n` and `bash -n` pass. The local WSL image exposes CUDA Python at `/home/jolib/.venvs/k3x-m1/bin/python`, not as bare `python`.
 - GitHub verification remains clean on `5dfe036`: correctness `31863769799` and CodeQL `31863769798` succeeded. The red notification is the stale `31795400168`/`b94c8b8` run with absent historical evidence, not a current-main failure. Dependabot PRs `#1`--`#4` are closed, while security-alert enumeration is disabled and returns `403`/`404`; no CVE count was inferred.
 - Next engineering step is resident non-expert trunk reuse plus pinned/asynchronous layer staging. Do not enable mixed precision, proxy, adaptive Top-K, or speculative modes based on the baseline alone.
+
+## 2026-08-15 -- INT4 expert residency experiment
+
+- Added an opt-in CUDA TinyGEMM INT4 representation for GLM routed/shared projections. Quantization keeps the existing BF16 scale/zero semantics, packs on the selected CUDA device, and uses the common `linear()` dispatch so the exact BF16 path remains available.
+- TDD evidence: the new CPU target guard first failed with a missing `_quantize_expert_int4` method, then the focused INT4/MoE tests passed. Current focused verification is `33 passed, 6 skipped`.
+- Full-model cold evidence rejects the mode as a default: `0.002830204968837129` decode tok/s, `45,298,483,200` logical expert bytes/token, and `17,341,184,512` peak allocated bytes. The source `.k3x` artifacts are still BF16, so runtime INT4 does not reduce NVMe bytes.
+- Bounded warm evidence is useful: a layer-10 four-token repeated route took `13.281714103999548 s` on first INT4 pack/read and `0.00977079599397257 s` after a 2 GiB packed device cache fill. This is a sublayer observation only and must not be extrapolated to full-model tok/s.
+- The 8 GiB packed-cache, 1-layer-trunk, 2-token full-model run was stopped before completion to avoid further long turnaround. No partial output is treated as a benchmark.
+- Immediate next task is a storage-side packed expert artifact or exact route-stable multi-token residency; another isolated kernel toggle cannot overcome the measured `45.3 GB/token` logical expert reload.

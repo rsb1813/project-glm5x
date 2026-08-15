@@ -94,6 +94,8 @@ def test_expert_bundle_joins_roles_from_independent_artifacts(tmp_path) -> None:
     )
     lazy_payload = lazy_bundle.read_expert(0, 0)
     assert lazy_payload == payload
+    batched_payload = lazy_bundle.read_experts(0, [0])[0]
+    assert batched_payload == payload
 
     cached_bundle = GLM5XExpertBundle.open(
         artifact_dir / "experts.json",

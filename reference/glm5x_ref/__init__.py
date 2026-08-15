@@ -22,6 +22,8 @@ from .layer10_moe import (
     GLM5XExpertWeights,
     GLM5XLayer10MoEReference,
     GLM5XMoEForward,
+    GLM5XTrunkTensorCache,
+    GLM5XTrunkTensorCacheStats,
 )
 from .toy import GLM5XSyntheticConfig, GLM5XSyntheticModel
 from .turboquant import (
@@ -31,6 +33,7 @@ from .turboquant import (
     estimate_kv_storage_bytes,
     quantize_vector,
 )
+from .int4 import GLM5XInt4Weight, linear as int4_linear, quantize_int4_weight
 
 __all__ = [
     "GLM5XModelDescriptor",
@@ -57,6 +60,8 @@ __all__ = [
     "GLM5XDenseMlpReference",
     "GLM5XLayer10MoEReference",
     "GLM5XMoEForward",
+    "GLM5XTrunkTensorCache",
+    "GLM5XTrunkTensorCacheStats",
     "GLM5XSyntheticConfig",
     "GLM5XSyntheticModel",
     "QuantizedVector",
@@ -64,4 +69,7 @@ __all__ = [
     "TurboQuantKVCache",
     "estimate_kv_storage_bytes",
     "quantize_vector",
+    "GLM5XInt4Weight",
+    "int4_linear",
+    "quantize_int4_weight",
 ]

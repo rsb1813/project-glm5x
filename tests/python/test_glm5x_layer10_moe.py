@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 import torch.nn.functional as F
 
@@ -218,3 +219,13 @@ def test_glm5x_fp8_expert_mlp_has_bounded_cpu_error() -> None:
     assert actual.shape == expected.shape
     assert torch.isfinite(actual).all()
     assert float((actual.float() - expected.float()).norm() / expected.float().norm()) < 0.25
+
+
+def test_glm5x_int4_expert_quantizer_requires_cuda() -> None:
+    expert = GLM5XExpertWeights(
+        gate_proj=torch.zeros((256, 256)),
+        up_proj=torch.zeros((256, 256)),
+        down_proj=torch.zeros((256, 256)),
+    )
+    with pytest.raises(ValueError, match="GLM5X_INT4_CUDA_REQUIRED"):
+        GLM5XLayer10MoEReference._quantize_expert_int4(expert, device="cpu")

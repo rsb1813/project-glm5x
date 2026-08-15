@@ -617,3 +617,19 @@
 - Evidence: the prior invocation reached all `282/282` markers but exited before assembly with `line 27: syntax error near unexpected token 'then'` because Bash arithmetic syntax was parsed by `sh`; the WSL image also has no bare `python`, while `/home/jolib/.venvs/k3x-m1/bin/python` has CUDA 13.0 and RTX 5080 support. `bash -n` passes after the repair.
 - Accepted because: the coordinator only needs POSIX tests and arithmetic; removing Bash-only `[[`, `(( ))`, `BASH_SOURCE`, and `pipefail` makes both direct and `sh script` invocation safe while changing no conversion or model semantics.
 - Revisit: if the project adds a containerized Linux runner, make the Python path a documented container default and keep the explicit override.
+
+## D-0078 -- Keep CUDA TinyGEMM INT4 experts experimental and cache-bound
+
+- Decision: accept CUDA TinyGEMM INT4 packing as an opt-in representation, require an explicit CUDA target, and keep BF16 as the default/correctness representation. Treat packed device residency as the useful mode; do not promote cold per-token packing.
+- Alternatives: make INT4 the default, quantize on CPU and upload packed bytes, or use the existing FP8 path for all experts.
+- Evidence: focused INT4/reference coverage passed `33 passed, 6 skipped` in the current WSL environment. A real layer-10 probe measured `13.2817 s` for the first four-token INT4 MoE call and `0.00977 s` for the identical call after a 2 GiB packed device-cache fill. The first full-model cold INT4-expert probe measured `0.002830 tok/s`, `353.331 s` decode, `45,298,483,200` logical expert bytes/token, and `17,341,184,512` peak allocated VRAM bytes.
+- Accepted because: the representation and cache are correctness-tested and the warm reuse benefit is directly observed, while the cold/full-model measurement explicitly rejects silent default promotion. GPU-side qparam/packing work removes a large CPU conversion pass without changing router semantics.
+- Revisit: only after an on-disk packed expert sidecar or exact cache-residency policy reduces logical expert reads and a fresh full-model quality/VRAM gate passes on the 16 GiB target.
+
+## D-0079 -- Do not claim 10--20 tok/s while expert traffic remains 45.3 GB/token
+
+- Decision: block any 10--20 tok/s claim or quality-mode promotion until a full-model run records a materially lower expert-read bound and measured decode tok/s.
+- Alternatives: extrapolate from the layer-10 warm cache probe, report CUDA kernel times as model tok/s, or enable adaptive Top-K/proxy routing without a quality gate.
+- Evidence: the exact full-model baseline read `45,298,483,200` logical expert bytes per decode token even after trunk INT4 residency; the cold INT4 probe retained the same read volume and slowed to `0.002830 tok/s`. The layer-10 `0.00977 s` result is a four-token sublayer cache hit, not a decoder-token measurement.
+- Accepted because: it keeps benchmark semantics honest and identifies the next bottleneck as storage-side expert residency/packing rather than another isolated kernel toggle.
+- Revisit: after expert-major multi-token verification, packed sidecar conversion, or a measured cache trace demonstrates a lower full-model bytes/token value.

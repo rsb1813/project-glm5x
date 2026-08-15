@@ -9,7 +9,7 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from k3x_converter.format import K3XError, TensorRecord
 from k3x_converter.reader import K3XReader, K3XReaderReadStats
@@ -201,57 +201,85 @@ class GLM5XExpertBundle:
         )
 
     def read_expert(self, layer_id: int, expert_id: int) -> dict[str, bytes]:
-        roles = self.experts.get((layer_id, expert_id))
-        if roles is None:
-            raise K3XError("EXPERT_BUNDLE_EXPERT_NOT_FOUND", f"{layer_id}:{expert_id}")
-        if self.payload_cache is not None:
-            cached = self.payload_cache.get((layer_id, expert_id))
-            if cached is not None:
-                return cached
-        result: dict[str, bytes] = {}
-        grouped: dict[str, list[tuple[str, TensorRecord]]] = defaultdict(list)
-        for role in _ROLES:
-            item = roles[role]
-            ref = item.get("ref")
-            if not isinstance(ref, dict) or not isinstance(ref.get("artifact"), str):
-                raise K3XError("EXPERT_BUNDLE_REFERENCE_METADATA", role)
-            artifact_key = ref["artifact"]
-            reader = self.readers.get(artifact_key)
-            if reader is None or not isinstance(ref.get("tensor_id"), int):
-                raise K3XError("EXPERT_BUNDLE_REFERENCE_ARTIFACT", artifact_key)
-            record = self.record_indexes[artifact_key].get(ref["tensor_id"])
-            if record is None:
-                raise K3XError("EXPERT_BUNDLE_REFERENCE_TENSOR", role)
-            expected = {
-                "dtype": record.dtype.name,
-                "quantization": record.quantization.name,
-                "shape": list(record.dimensions),
-                "data_offset": record.data_offset,
-                "data_length": record.data_length,
-                "logical_length": record.logical_length,
-                "data_crc32c": record.data_crc32c,
-            }
-            if any(ref.get(key) != value for key, value in expected.items()):
-                raise K3XError("EXPERT_BUNDLE_REFERENCE_MISMATCH", role)
-            if (
-                record.dtype.name != "BF16"
-                or record.quantization.name != "NONE"
-                or record.auxiliary_length != 0
-            ):
-                raise K3XError("EXPERT_BUNDLE_UNSUPPORTED_PAYLOAD", role)
-            grouped[artifact_key].append((role, record))
+        return self.read_experts(layer_id, (expert_id,))[expert_id]
+
+    def read_experts(
+        self, layer_id: int, expert_ids: Sequence[int]
+    ) -> dict[int, dict[str, bytes]]:
+        """Read one layer's experts with one ordered extent pass per artifact."""
+        requested_ids = tuple(int(expert_id) for expert_id in expert_ids)
+        unique_ids = tuple(dict.fromkeys(requested_ids))
+        if len(unique_ids) != len(requested_ids):
+            raise K3XError("DUPLICATE_EXPERT_ID")
+        if not unique_ids:
+            return {}
+        results: dict[int, dict[str, bytes]] = {}
+        pending: list[int] = []
+        for expert_id in unique_ids:
+            if (layer_id, expert_id) not in self.experts:
+                raise K3XError(
+                    "EXPERT_BUNDLE_EXPERT_NOT_FOUND", f"{layer_id}:{expert_id}"
+                )
+            cached = (
+                None
+                if self.payload_cache is None
+                else self.payload_cache.get((layer_id, expert_id))
+            )
+            if cached is None:
+                pending.append(expert_id)
+            else:
+                results[expert_id] = cached
+
+        grouped: dict[str, list[tuple[int, str, TensorRecord]]] = defaultdict(list)
+        for expert_id in pending:
+            roles = self.experts[(layer_id, expert_id)]
+            for role in _ROLES:
+                item = roles[role]
+                ref = item.get("ref")
+                if not isinstance(ref, dict) or not isinstance(ref.get("artifact"), str):
+                    raise K3XError("EXPERT_BUNDLE_REFERENCE_METADATA", role)
+                artifact_key = ref["artifact"]
+                reader = self.readers.get(artifact_key)
+                if reader is None or not isinstance(ref.get("tensor_id"), int):
+                    raise K3XError("EXPERT_BUNDLE_REFERENCE_ARTIFACT", artifact_key)
+                record = self.record_indexes[artifact_key].get(ref["tensor_id"])
+                if record is None:
+                    raise K3XError("EXPERT_BUNDLE_REFERENCE_TENSOR", role)
+                expected = {
+                    "dtype": record.dtype.name,
+                    "quantization": record.quantization.name,
+                    "shape": list(record.dimensions),
+                    "data_offset": record.data_offset,
+                    "data_length": record.data_length,
+                    "logical_length": record.logical_length,
+                    "data_crc32c": record.data_crc32c,
+                }
+                if any(ref.get(key) != value for key, value in expected.items()):
+                    raise K3XError("EXPERT_BUNDLE_REFERENCE_MISMATCH", role)
+                if (
+                    record.dtype.name != "BF16"
+                    or record.quantization.name != "NONE"
+                    or record.auxiliary_length != 0
+                ):
+                    raise K3XError("EXPERT_BUNDLE_UNSUPPORTED_PAYLOAD", role)
+                grouped[artifact_key].append((expert_id, role, record))
 
         for artifact_key, items in grouped.items():
             reader = self.readers[artifact_key]
-            payloads = reader.read_tensor_extents_many([record for _, record in items])
-            for role, record in items:
+            ordered = sorted(items, key=lambda item: item[2].data_offset)
+            payloads = reader.read_tensor_extents_many(
+                [record for _, _, record in ordered]
+            )
+            for expert_id, role, record in ordered:
                 data, auxiliary = payloads[record.tensor_id]
                 if auxiliary:
                     raise K3XError("EXPERT_BUNDLE_AUXILIARY_PAYLOAD", role)
-                result[role] = data
-        if self.payload_cache is not None:
-            self.payload_cache.put((layer_id, expert_id), result)
-        return result
+                results.setdefault(expert_id, {})[role] = data
+        for expert_id in pending:
+            payload = results[expert_id]
+            if self.payload_cache is not None:
+                self.payload_cache.put((layer_id, expert_id), payload)
+        return results
 
     @property
     def expert_payload_cache_stats(self) -> GLM5XExpertPayloadCacheStats:

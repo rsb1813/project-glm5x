@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import torch
 import pytest
+from types import SimpleNamespace
 from safetensors.torch import save_file
 
 from glm5x_converter.bundle import GLM5XExpertBundle, assemble_glm5x_expert_bundle
+from k3x_converter.format import DType
 from k3x_converter.reader import K3XReader
 from glm5x_converter.shard import convert_glm5x_shard
 from glm5x_ref.manifest import GLM5XTensorManifest
@@ -13,10 +15,46 @@ from glm5x_ref.layer10_moe import (
     GLM5XDenseMlpReference,
     GLM5XExpertWeights,
     GLM5XLayer10MoEReference,
+    GLM5XTrunkTensorCache,
 )
 from glm5x_ref.layer_reference import GLM5XDecoderLayerReference
 from glm5x_ref.mla_dsa import GLM5XMLAReference, GLM5XMLAWeights
 from glm5x_ref.official_dsa import GLM5XOfficialDSAIndexer
+
+
+def test_grouped_trunk_tensor_cache_reuses_decoded_values() -> None:
+    class Reader:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def read_tensor_extents_many(self, records):
+            self.reads += 1
+            return {
+                record.tensor_id: (torch.zeros(4, dtype=torch.int16).numpy().tobytes(), b"")
+                for record in records
+            }
+
+    reader = Reader()
+    record = SimpleNamespace(
+        tensor_id=7,
+        quantization=SimpleNamespace(name="NONE"),
+        dtype=DType.BF16,
+        dimensions=(4,),
+    )
+    cache = GLM5XTrunkTensorCache(1024)
+    refs = {"layer.weight": (reader, record)}
+
+    first = GLM5XLayer10MoEReference._read_tensors(
+        refs, ("layer.weight",), tensor_cache=cache
+    )
+    second = GLM5XLayer10MoEReference._read_tensors(
+        refs, ("layer.weight",), tensor_cache=cache
+    )
+
+    torch.testing.assert_close(first["layer.weight"], second["layer.weight"])
+    assert reader.reads == 1
+    assert cache.stats.hits == 1
+    assert cache.stats.misses == 1
 
 
 def _make_layer() -> tuple[GLM5XDecoderLayerReference, torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
