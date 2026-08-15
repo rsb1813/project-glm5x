@@ -198,6 +198,14 @@ The strict reference path is always available. Any adaptive Top-K, proxy, prunin
 - GLM MTP tensors use layer IDs after the 78 main decoder layers. The reader therefore admits tensor layer IDs below `hidden_layers + mtp_layers`, while `LAYR` and `EXPT` directory records remain strictly scoped to the main transformer-layer directory. This matches official shards 270 and 271 without weakening payload CRC or artifact identity checks.
 - B-0005 generated a `1,454,984`-byte index for 282 artifacts and 59,585 tensors in `5.29 s`. C++ opened all referenced metadata and read layer 10 expert 48 in `3.31 s`; its `75,497,472` payload bytes and three role SHA-256 values matched the Python bundle path exactly.
 - This is implemented storage/runtime ingress, not a full GLM decoder. C++ layer construction, natural routing, MLA/DSA state, final logits, resident FP4/BF16 placement, and asynchronous H2D scheduling are still separate integration steps. No decode tok/s follows from the index gate.
+
+## 2026-08-16 -- Implemented index-backed learned CUDA MoE boundary
+
+- `Glm5xRuntimeIndex::read_tensor_with_metadata()` returns the validated K3X `TensorRecord` together with its CRC-checked payload. `contains_tensor()` performs metadata-only membership checks. These APIs preserve `read_tensor()` and are the minimal source contract needed by later decoder-layer construction.
+- `k3x_cuda_glm5x_real_expert_bench` accepts exactly one of `--artifact-dir` and `--runtime-index`. The former remains the five-artifact control; the latter opens the official 282-artifact `.gxi`. Both feed the unchanged sigmoid natural Top-8 router, expert-major raw-BF16 CUDA path, shared expert, GLM SiLU, device accumulation, and optional GLM5XACT comparator.
+- Source telemetry is additive: `source_kind`, `source_artifact_count`, `source_read_calls`, and `source_read_bytes`. Existing host payload, cold/warm H2D, residency, routes, contributions, and numerical-error fields remain unchanged.
+- B-0006 selected identical expert IDs and contributions for both two-token rows. Both performed 53 reads and `1,286,603,776` source bytes, admitted `1,283,457,024` weight bytes, moved zero warm weight bytes, and reported the same `0.00152439018711` BF16-boundary relative error.
+- The index path's one paired host-load measurement was `15.602 s` versus `16.467 s` for the bounded directory control, while warm CUDA medians were `2.069 ms` versus `1.980 ms`. These opposing small differences are not promotion evidence. The architectural result is exact source integration; storage volume and full decoder integration remain the bottlenecks.
 # 2026-08-15 performance-path update
 
 ## Implemented experimental INT4 expert path

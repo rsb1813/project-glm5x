@@ -66,7 +66,7 @@
 - Modify: `context-notes.md`
 - Modify last: `PROJECT_STATE.md`
 
-- [ ] Preserve raw control/index outputs and verify their SHA-256 digests.
-- [ ] Run focused regressions, applicable CTest/Pytest, and `git diff --check`.
-- [ ] Record B-0006 as a bounded MoE-layer result with no tok/s extrapolation.
+- [x] Preserve raw control/index outputs and verify their SHA-256 digests.
+- [x] Run focused regressions, applicable CTest/Pytest, and `git diff --check`.
+- [x] Record B-0006 as a bounded MoE-layer result with no tok/s extrapolation.
 - [ ] Update `PROJECT_STATE.md` last, commit, push outside the sandbox, and open a stacked draft PR.

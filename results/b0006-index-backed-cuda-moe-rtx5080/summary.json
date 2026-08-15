@@ -1,0 +1,78 @@
+{
+  "benchmark_id": "B-0006",
+  "date": "2026-08-16",
+  "implementation_commit": "91604c7",
+  "hardware": {
+    "cpu": "AMD Ryzen 7 9800X3D",
+    "gpu": "NVIDIA GeForce RTX 5080 16 GB",
+    "environment": "WSL2 Ubuntu-24.04, CUDA 13"
+  },
+  "model": "official GLM-5.2 layer-10 learned MoE boundary",
+  "runtime_index_sha256": "c69cd3a4ab22f1424c201a87f014dedff9bd3b78e90d8690b0f97efb72561485",
+  "runner_sha256": "6b80be292c48073617ec4ad8f70150ff30ffd759303ed5caedd60341c263253f",
+  "configuration": {
+    "tokens": 2,
+    "routing": "natural-top-8",
+    "precision": "bf16-rounded",
+    "output": "fp32",
+    "device_expert_accumulate": true,
+    "fused_shared": true,
+    "resident_budget_bytes": 2147483648,
+    "warmup": 5,
+    "iterations": 20
+  },
+  "artifact_directory": {
+    "source_artifact_count": 5,
+    "source_read_calls": 53,
+    "source_read_bytes": 1286603776,
+    "host_load_nanoseconds": 16466508213,
+    "cold_latency_nanoseconds": 409237743,
+    "warm_latency_nanoseconds_median": 1979903,
+    "cold_weight_h2d_bytes": 1283457024,
+    "warm_weight_h2d_bytes": 0,
+    "resident_weight_bytes": 1283457024,
+    "raw": "artifact-directory.json",
+    "raw_sha256": "2a68cae8668d768da85c58b95644718ca62617bb7f07ac63fb398601706473a0"
+  },
+  "runtime_index": {
+    "source_artifact_count": 282,
+    "source_read_calls": 53,
+    "source_read_bytes": 1286603776,
+    "host_load_nanoseconds": 15602102977,
+    "cold_latency_nanoseconds": 427015884,
+    "warm_latency_nanoseconds_median": 2069471,
+    "cold_weight_h2d_bytes": 1283457024,
+    "warm_weight_h2d_bytes": 0,
+    "resident_weight_bytes": 1283457024,
+    "raw": "runtime-index.json",
+    "raw_sha256": "0ca233f60564f9c43cea84573c8ed604f9318ef8c33e5f5c3a9bcffc99ec7b30"
+  },
+  "parity": {
+    "route_experts_equal": true,
+    "route_contributions_equal": true,
+    "source_read_bytes_equal": true,
+    "resident_and_h2d_bytes_equal": true,
+    "gpu_cpu_max_absolute_error": 0.0000180910574272,
+    "gpu_cpu_max_relative_error": 0.00045266628149,
+    "expected_max_absolute_error": 0.00006103515625,
+    "expected_max_relative_error": 0.00152439018711
+  },
+  "comparison": {
+    "host_load_reduction_percent": 5.24947502420439,
+    "warm_latency_change_percent": 4.52385798698219,
+    "cold_latency_change_percent": 4.34420854481157,
+    "evidence_strength": "one paired bounded run; execution timing differences are treated as noise, not promotion evidence"
+  },
+  "unmeasured": [
+    "decode tok/s",
+    "prefill tok/s",
+    "TTFT",
+    "process peak VRAM",
+    "system RAM peak",
+    "physical NVMe GB/token",
+    "full-model H2D GB/token",
+    "coding quality",
+    "speculative acceptance"
+  ],
+  "decision": "Accept the official runtime index as an exact weight source for the existing C++ learned-MoE CUDA boundary. Continue to complete decoder-layer and final-logit integration; do not infer token throughput from B-0006."
+}

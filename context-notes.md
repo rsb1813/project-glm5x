@@ -678,3 +678,12 @@
 - The first integration deliberately reuses `k3x_cuda_glm5x_real_expert_bench` rather than creating another execution engine. Only router/shared/expert tensor acquisition changes from bounded shard scans to the official `.gxi`.
 - The artifact-directory path remains the control. Natural routing, selected experts, contributions, raw BF16 views, resident CUDA execution, GLM5XACT input/output, and numerical thresholds must remain identical.
 - A small metadata-plus-payload runtime-index API is preferred over a new general tensor-source abstraction. This keeps the change reversible and directly useful to the later decoder-layer loader.
+
+## 2026-08-16 -- Index-backed CUDA MoE result
+
+- Added `Glm5xTensorLoad`, `read_tensor_with_metadata()`, and `contains_tensor()` with a compile-RED then focused-GREEN C++/Python contract. Payload validation still flows through `read_tensor()`.
+- Added `--runtime-index FILE` as an exact alternative to `--artifact-dir DIR` in the existing real GLM CUDA benchmark. Missing or dual sources are rejected; the directory path remains the control.
+- B-0006 used the same layer-10 two-token GLM5XACT artifacts, natural routes, resident budget, accumulation/fusion switches, warmups, and iterations for both rows. Routes, contributions, source bytes, resident/H2D bytes, and all error fields matched.
+- Runtime-index host payload load measured `15.602 s` versus `16.467 s` for the five-artifact control, but its warm CUDA median measured `2.069 ms` versus `1.980 ms`. One opposite-direction pair is not a throughput result; only the exact source integration is accepted.
+- The index path still reads `1,286,603,776` bytes for one two-token layer-10 MoE union before residency. This confirms that the next performance work must reuse/overlap weights across actual decoder execution rather than optimize tensor lookup alone.
+- Verification completed with CUDA CTest `27/27`, focused Python `5 passed`, CPU CTest `15/15`, full Python `374 passed, 125 skipped` in `97.24 s`, and B-0006 raw/summary parity.

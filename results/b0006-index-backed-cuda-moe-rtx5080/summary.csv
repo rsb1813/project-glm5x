@@ -1,0 +1,3 @@
+source,source_artifact_count,source_read_calls,source_read_bytes,host_load_nanoseconds,cold_latency_nanoseconds,warm_latency_nanoseconds_median,cold_weight_h2d_bytes,warm_weight_h2d_bytes,resident_weight_bytes,route_parity,expected_relative_error,decode_tok_s,quality_status
+artifact_directory,5,53,1286603776,16466508213,409237743,1979903,1283457024,0,1283457024,true,0.00152439018711,,bounded-moe-parity
+runtime_index,282,53,1286603776,15602102977,427015884,2069471,1283457024,0,1283457024,true,0.00152439018711,,bounded-moe-parity

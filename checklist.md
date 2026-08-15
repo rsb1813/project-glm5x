@@ -92,7 +92,7 @@
 - [ ] Add exact route-stable multi-layer residency policy that materially lowers full-model logical expert bytes/token.
 - [x] Add a validated C++ `.gxi` runtime index for constant-time official 282-shard tensor ownership and exact payload reads.
 - [ ] Connect exact decoder-layer trunk/expert construction and bounded final-logit parity to the official `.gxi` index.
-- [ ] Run the existing learned layer-10 CUDA MoE/GLM5XACT parity gate directly through `.gxi` before full decoder integration.
+- [x] Run the existing learned layer-10 CUDA MoE/GLM5XACT parity gate directly through `.gxi` before full decoder integration.
 - [x] Re-run a fresh full-model quality/throughput gate after packed sidecar/residency work; record the mixed-NVFP4 token divergence and keep it default-off.
 - [x] Add an experimental fingerprinted MXFP4 `.pm4` sidecar and reference-only pack/decode path; keep FP4 default-off pending calibration/native CUDA execution.
 - [x] Add the experimental RTX 5080 NVFP4 blocked-scale CUDA path and `.pn4`/`.pgu` sidecars; keep both modes default-off pending calibration and final-logit quality.
