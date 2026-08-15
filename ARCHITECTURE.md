@@ -159,6 +159,13 @@ The strict reference path is always available. Any adaptive Top-K, proxy, prunin
 - `GLM5XPackedExpertCache` now has an opt-in page-locked staging pool. `pinned_staging_capacity_bytes > 0` plus `non_blocking=True` stores validated sidecar sections in pooled pinned host tensors and enqueues non-blocking CUDA copies. Event completion is waited on before a pinned section is evicted. The Python integration restricts this mode to one reader to avoid stream lifetime races; BF16 and zero-capacity reference paths do not silently change behavior.
 - The benchmark CLI exposes this as `--expert-packed-pinned-staging-bytes N`; the default remains zero and synchronous. A real layer-10 direct probe showed a slower first forward (`5.606441 s` pinned versus `4.130233 s` synchronous) and a slightly faster second forward (`3.370938 s` versus `3.469007 s`). A separate transport probe reduced CUDA event time from about `1.358 ms` to `0.588 ms` but increased wall time when each sample allocated its own staging buffer, so pooled staging and overlap are not yet proven.
 - This architecture does not yet provide next-layer lookahead, physical NVMe telemetry, or a full-model asynchronous schedule. Concurrent forwards sharing one backend resident table are not a supported contract until the access context is made per-forward or the session is serialized. The next gate is route-stable multi-layer residency with sidecar/H2D counters and final-logit parity.
+
+## 2026-08-15 -- Implemented packed-sidecar traffic telemetry
+
+- `GLM5XPackedExpertCache(telemetry_enabled=True)` now records whole-sidecar file reads, validated role payload bytes, CPU-to-CUDA bytes, host submission time, and CUDA-event transfer time. A host-cache hit does not count as a file read, while repeated decode and H2D work remain visible.
+- The reference benchmark exposes the instrumentation through `--expert-packed-telemetry`. It emits separate prefill/decode deltas and requires both a packed sidecar directory and packed expert precision. The flag is diagnostic and default-off because CUDA-event synchronization changes timing behavior.
+- Routing, expert selection, cache admission, tensor representation, and default benchmark fields are unchanged. The counters distinguish sidecar traffic from logical K3X artifact reads, but they are not physical NVMe device counters.
+- A real layer-10 `.pgu` expert showed that pooled pinned staging reduces warm H2D event time, but every nonresident expert still transfers `39,321,608` bytes. Therefore the next architectural boundary remains exact multi-layer residency and lookahead; transfer acceleration alone cannot establish a 10 tok/s full-model path.
 # 2026-08-15 performance-path update
 
 ## Implemented experimental INT4 expert path

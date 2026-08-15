@@ -30,28 +30,28 @@
 - Produces additive cache stats for sidecar read calls/bytes, decoded payload bytes, H2D bytes, and H2D elapsed nanoseconds.
 - Existing `GLM5XPackedExpertCacheStats` fields and `get/get_many` return values remain compatible.
 
-- [ ] **Step 1: Write the failing test** that admits one sidecar and asserts the new counters are present and zero-capacity/default behavior remains valid.
-- [ ] **Step 2: Run the focused test** with `PYTHONPATH=reference:converter ... -m pytest tests/python/test_glm5x_packed_cache.py -q` and confirm the missing fields fail.
-- [ ] **Step 3: Add counters at the exact boundaries**: bytes read from the sidecar file, bytes decoded from validated sections, bytes submitted to `.to(device=...)`, and CUDA-event or wall-clock duration for the transfer. Do not count a host-cache hit as a file read.
-- [ ] **Step 4: Run the focused cache tests** and confirm CPU-safe tests pass while CUDA-only timing tests skip cleanly without CUDA.
-- [ ] **Step 5: Run `py_compile`** on the modified cache and test modules.
+- [x] **Step 1: Write the failing test** that admits one sidecar and asserts the new counters are present and zero-capacity/default behavior remains valid.
+- [x] **Step 2: Run the focused test** with `PYTHONPATH=reference:converter ... -m pytest tests/python/test_glm5x_packed_cache.py -q` and confirm the missing fields fail.
+- [x] **Step 3: Add counters at the exact boundaries**: bytes read from the sidecar file, bytes decoded from validated sections, bytes submitted to `.to(device=...)`, and CUDA-event or wall-clock duration for the transfer. Do not count a host-cache hit as a file read.
+- [x] **Step 4: Run the focused cache tests** and confirm CPU-safe tests pass while CUDA-only timing tests skip cleanly without CUDA.
+- [x] **Step 5: Run `py_compile`** on the modified cache and test modules.
 
 ### Task 2: Expose phase-separated benchmark telemetry
 
 **Files:**
-- Modify: `reference/glm5x_ref/layer10_moe.py`
+- Modify: `reference/glm5x_ref/model_reference.py`
 - Modify: `tools/benchmark_glm5x_reference.py`
 - Test: `tests/python/test_benchmark_schema.py`
 
 **Interfaces:**
-- Adds prefill/decode JSON fields for packed sidecar read calls/bytes, decoded bytes, H2D bytes, and H2D nanoseconds.
-- Existing JSON/CSV fields and default values remain stable when the packed cache is disabled.
+- Adds opt-in prefill/decode JSON fields for packed sidecar read calls/bytes, decoded bytes, H2D bytes, submission time, and CUDA-event time.
+- Existing JSON/CSV fields remain unchanged when telemetry is disabled.
 
-- [ ] **Step 1: Write the schema regression** requiring the new keys with numeric zero defaults when no packed cache is configured.
-- [ ] **Step 2: Run the schema test** and confirm it fails only for the missing fields.
-- [ ] **Step 3: Snapshot cache stats** before and after prefill/decode, compute non-negative deltas, and emit the new fields without conflating them with `storage_read_*` logical K3X counters.
-- [ ] **Step 4: Run the focused benchmark/schema suite** and the existing packed-cache suite.
-- [ ] **Step 5: Run the complete WSL Python suite** and `git diff --check`.
+- [x] **Step 1: Write the schema regression** requiring telemetry to name a packed sidecar directory and precision.
+- [x] **Step 2: Run the schema test** and confirm it fails only for the missing fields.
+- [x] **Step 3: Snapshot cache stats** before and after prefill/decode, compute non-negative deltas, and emit the new fields without conflating them with `storage_read_*` logical K3X counters.
+- [x] **Step 4: Run the focused benchmark/schema suite** and the existing packed-cache suite.
+- [x] **Step 5: Run the complete WSL Python suite** and `git diff --check`.
 
 ### Task 3: Record the bounded measurement and decide the next scheduler boundary
 
@@ -61,7 +61,7 @@
 - Modify: `PROJECT_STATE.md`
 - Modify: `DECISIONS.md`
 
-- [ ] **Step 1: Run one bounded real layer-10 sidecar comparison** with the exact synchronous path and the opt-in pinned path, using the same worker count and sidecar set.
-- [ ] **Step 2: Record sidecar bytes, decoded bytes, H2D bytes/time, cache hits, route IDs, and output parity**; explicitly mark physical NVMe as unmeasured unless an independent device counter exists.
-- [ ] **Step 3: Accept or reject the next prefetch/residency change** from the measured bottleneck, without projecting full-model TPS.
-- [ ] **Step 4: Update the persistent documents last** and record the commit/test state.
+- [x] **Step 1: Run one bounded real layer-10 sidecar comparison** with the exact synchronous path and the opt-in pinned path, using the same expert sidecar and host-cache state.
+- [x] **Step 2: Record sidecar bytes, decoded bytes, H2D bytes/time, cache hits, and tensor parity**; physical NVMe remains explicitly unmeasured.
+- [x] **Step 3: Accept or reject the next prefetch/residency change** from the measured bottleneck, without projecting full-model TPS.
+- [x] **Step 4: Update the persistent documents last** and record the commit/test state.

@@ -101,4 +101,5 @@
 - [x] Add explicit C++ resident access-set protection and byte-bounded eviction safety for selected expert keys.
 - [x] Add opt-in pooled pinned sidecar staging with non-blocking CUDA copies and event-safe eviction.
 - [x] Run the full WSL verification after the residency/staging change (`356 passed, 124 skipped`; CTest `27/27`).
+- [x] Add opt-in packed-sidecar file/decode/H2D telemetry and record one bounded RTX 5080 measurement.
 - [ ] Measure pooled next-layer prefetch with sidecar/H2D/physical-NVMe telemetry and final-logit parity.

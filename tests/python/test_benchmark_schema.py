@@ -12,6 +12,10 @@ from k3x_ref.config import SyntheticK3Config
 from k3x_ref.fixtures import write_source_checkpoint
 from tools.ablate_cuda_residency import cuda_residency_matrix, run_ablation
 from tools.ablate_cuda_ffn import ffn_boundary_matrix, run_ffn_ablation
+from tools.benchmark_glm5x_reference import (
+    _build_parser as build_glm5x_reference_parser,
+    measure as measure_glm5x_reference,
+)
 from tools.benchmark_synthetic import BenchmarkRecord, benchmark_once, write_results
 
 
@@ -78,6 +82,24 @@ def _record() -> BenchmarkRecord:
         token_ids=(43, 32, 28, 49, 9, 28),
         routed_experts=(),
     )
+
+
+def test_glm5x_packed_telemetry_requires_sidecar_directory(tmp_path: Path) -> None:
+    arguments = build_glm5x_reference_parser().parse_args(
+        [
+            "--bundle",
+            str(tmp_path / "missing-bundle.json"),
+            "--config",
+            str(tmp_path / "missing-config.json"),
+            "--prompt",
+            "1",
+            "--expert-precision",
+            "nvfp4",
+            "--expert-packed-telemetry",
+        ]
+    )
+    with pytest.raises(ValueError, match="requires expert-packed-cache-dir"):
+        measure_glm5x_reference(arguments)
 
 
 def test_benchmark_json_and_csv_preserve_schema(tmp_path: Path) -> None:

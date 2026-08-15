@@ -762,3 +762,11 @@
 - Evidence: the focused Python suite and full suite passed (`356 passed, 124 skipped`). On a real layer-10 bounded probe, the pinned path was slower on first use (`5.606441 s` versus `4.130233 s`) and slightly faster on the repeated forward (`3.370938 s` versus `3.469007 s`). A standalone RTX 5080 transport probe reduced GPU event time (`1.358 ms` to `0.588 ms`) but increased wall time when staging allocation was not pooled.
 - Accepted because: the feature creates a measurable, correctness-preserving boundary for future overlap while keeping the exact synchronous reference path unchanged.
 - Revisit: after pooled reuse across a layer window reports physical sidecar bytes, H2D bytes/time, host RSS, cache hits, and final-logit parity. It is not evidence for 10--20 tok/s by itself.
+
+## D-0096 -- Keep packed-sidecar telemetry opt-in and separate from performance gates
+
+- Decision: add exact additive counters for sidecar file reads, validated payload bytes, H2D bytes, host submission time, and CUDA-event transfer time, but enable them only through an explicit diagnostic flag.
+- Alternatives: infer sidecar traffic from logical K3X reads, enable event timing unconditionally, or wait for a system-wide physical NVMe profiler before instrumenting the cache.
+- Evidence: on one real layer-10 expert-48 `.pgu`, five warm paired samples moved `39,321,608` bytes per call with bit-exact tensor parity. Pageable H2D event median was `3,060,958 ns`; pooled pinned median was `1,033,468 ns`. Wall medians were `17,895,936 ns` and `11,424,774 ns` respectively.
+- Accepted because: the counters identify the actual sidecar/H2D boundary without conflating it with logical artifact reads, while default execution and benchmark output remain unchanged.
+- Revisit: replace forced event synchronization with asynchronous completion accounting when the layer-window scheduler exists, and add independent physical NVMe sampling before interpreting file bytes as device traffic.
