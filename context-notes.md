@@ -702,3 +702,19 @@
 - The warm two-token layer median was `475.927299 ms`, with zero warm weight H2D and `1,632,239,616` resident weight bytes. This is much slower than the per-layer budget required for 10 tok/s and is not full-model throughput.
 - The current path intentionally favors a complete correctness boundary over a premature public API: CUDA matvec calls are token-by-token, normalization/softmax remain host-side, and state ends with the invocation. The next implementation target is batched/fused resident trunk execution across multiple layers, then final-logit parity.
 - Final verification passed CUDA CTest `27/27`, CPU CTest `15/15`, focused Python `5 passed`, and full CPU-build Python `375 passed, 126 skipped`. The earlier two failures under a CUDA `K3X_BUILD_DIR` were test-environment selection errors and disappeared under the standard CPU build.
+
+## 2026-08-16 -- Resident dense-hit fast-path start
+
+- Nsight Systems on the unchanged B-0007 path measured about `39.06 ms` of aggregate GPU kernel time across the profiled full-layer calls, while the two-token warm wall median remained `510.918 ms`. Warm weight H2D was already zero.
+- `dense_matvec()` still converts every complete FP32 host weight view to BF16 before asking `ResidentWeightTable` whether the tensor is already resident. For the official layer-10 trunk this repeatedly scans approximately `348.8 MB` of BF16 output payload per layer invocation.
+- The bounded fix will add an internal resident lookup that returns the existing device pointer before host conversion. Misses retain the current conversion, validation, admission, and exact fallback. The full GPU-resident decoder graph remains a separate architectural decision after B-0008 exposes the residual kernel/control cost.
+- Work continues directly without subagents on `codex/index-backed-cuda-moe`; no public runtime API or routing/quality behavior is changing in this step.
+
+## 2026-08-16 -- Resident dense-hit fast-path result
+
+- Commit `3b7a35a` adds a validated resident lookup before full host-weight BF16 conversion. A miss retains the prior convert, validate, admit, and transient fallback path; a hit returns the existing device pointer and updates LRU/protection state.
+- A CUDA regression proves that the first call converts one weight payload and the second resident call converts zero additional weight bytes while preserving exact output and warm H2D. Invalid lookup keys are rejected before table access.
+- B-0008 reduced the official two-token layer-10 warm median from B-0007's `475.927299 ms` to `5.503443 ms`, an `86.4781x` bounded speedup with the same DSA/expert-set boundary, the same `0.0042016809` expected-output relative error, and zero warm weight H2D.
+- The separate one-token gate measured `2.756654 ms/layer-token` (`362.7586 layer-tokens/s`) with `0.0043478259` expected-output relative error. Multiplying that one layer by 78 gives an optimistic `215.019 ms/token` or `4.6508 tok/s` bound before final norm, logits, runtime control, storage, and heterogeneous-layer effects. This is derived, not measured full-model TPS.
+- Nsight after the fix attributes approximately `87.9%` of aggregate GPU kernel time to BF16 GEMV kernels, while stream synchronization is small. The next performance boundary is therefore native calibrated FP4 or a similarly large weight-traffic reduction, not another host conversion or cache-policy tweak.
+- Verification passed CUDA CTest `27/27`, CPU CTest `15/15`, focused Python `5 passed`, both 100-iteration raw result gates, and `git diff --check` before evidence publication.

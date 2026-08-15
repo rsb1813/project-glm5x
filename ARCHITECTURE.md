@@ -214,6 +214,14 @@ The strict reference path is always available. Any adaptive Top-K, proxy, prunin
 - The current attention integration is deliberately benchmark-local. Dense projections are issued per token through the existing CUDA matvec API, softmax and normalization remain host-side reference operations, and recurrent state is bounded to the two-token invocation. The `<=2048` token gate matches GLM-5.2's DSA Top-2048 boundary, so every valid causal key participates; persistent multi-call MLA/DSA state is not claimed.
 - B-0007 matched the Python DSA Top-K and both selected expert sets. Near-tied BF16 router scores changed the order inside each selected set; contribution values paired by expert differed by at most `0.000188679`. The final BF16 boundary differed by at most `0.015625` absolute and `0.00420168` relative. This is accepted as bounded numerical integration, not bitwise route-trace parity.
 - With all selected layer weights resident, the two-token warm median was `475.927299 ms`, or `237.963650 ms/token` for this one layer. Warm weight H2D was zero. This cannot be reported as full-model tok/s; the next architecture boundary is batched/fused resident projection ownership across multiple layers, followed by final-logit parity and phase-separated asynchronous I/O.
+
+## 2026-08-16 -- Implemented resident raw-BF16 dense-hit lookup
+
+- `ResidentWeightTable::find()` validates the dense key and returns a protected/touched resident acquisition without requiring a host payload. It is an internal CUDA ownership primitive; no public graph or routing API changed.
+- `CudaBackend::dense_matvec()` still converts the activation every call, but it now checks the resident table before converting the complete FP32 host weight view to BF16. A miss keeps the previous conversion, admission, capacity, and transient fallback behavior.
+- Runtime statistics separately count full host-weight BF16 conversions and converted bytes. CUDA regression coverage proves that a repeated resident call changes neither counter, produces exact repeated output, and performs no additional weight H2D.
+- B-0008 measured `5.503443 ms` for two official layer-10 tokens and `2.756654 ms` for one token after residency. The unchanged numerical boundary and zero warm H2D make this an accepted exact optimization. The remaining profiled kernel cost is dominated by BF16 GEMV, so further host-cache policy tuning is not the next compute architecture.
+- The derived 78-layer value of `4.650752 tok/s` is deliberately marked as an optimistic extrapolation, not measured model throughput. Native calibrated FP4, fused/packed resident projections, multi-layer state ownership, and final-logit parity remain proposed work.
 # 2026-08-15 performance-path update
 
 ## Implemented experimental INT4 expert path
