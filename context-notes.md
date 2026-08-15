@@ -511,3 +511,12 @@
 - Commit `5fc8d07` groups the non-expert tensors needed to construct one decoder layer by backing K3X reader and uses one grouped extent read per artifact.
 - The RED regression showed `19` single reads before the change. The GREEN path showed zero single reads during construction and retained exact layer/route behavior.
 - This is an exact open/read reduction only. Full-model storage and tok/s evidence remains pending the live 282-shard bundle.
+
+## 2026-08-15 -- Full bundle gate and coordinator failure diagnosis
+
+- The three disjoint local workers completed all `282/282` GLM-5.2 shards. Lazy assembly succeeded without a payload copy: `282` artifacts, `59,585` tensors, and `19,456` complete experts.
+- The first exact full-model cold run on RTX 5080/WSL2 used natural Top-16 BF16 routing and 16 expert readers. It measured `306.93307032898883 s` prefill, `302.68789011100307 s` decode, `609.6209604399919 s` TTFT, `0.0033037330949489767` decode tok/s, and `79,763,152,896` logical artifact bytes per token. This is the first measured full-model baseline and is not an optimized target.
+- The cached two-token run with 8 GiB host and 4 GiB device expert caches measured `0.0032712558027912816` tok/s, zero hits, `1,800` misses, and `159,526,305,792` decode bytes. The cache working set is larger than the configured capacity and does not retain non-expert trunk tensors.
+- The repeated local gate error was reproduced from `build-glm5x-full-gate-v2.err.log`: `tools/monitor_glm5x_full_gate.sh: line 27: syntax error near unexpected token 'then'`. The script contained Bash-only `[[`/`(( ))` syntax but no shebang and had been invoked through `sh`; it is now POSIX-`sh` compatible with a CUDA-venv Python selector, and both `sh -n` and `bash -n` pass. The local WSL image exposes CUDA Python at `/home/jolib/.venvs/k3x-m1/bin/python`, not as bare `python`.
+- GitHub verification remains clean on `6e8c289`: correctness `31858950666` and CodeQL `31858950671` succeeded. The red notification is the stale `31795400168`/`b94c8b8` run with absent historical evidence, not a current-main failure. Dependabot PRs `#1`--`#4` are closed, while security-alert enumeration is disabled and returns `403`/`404`; no CVE count was inferred.
+- Next engineering step is resident non-expert trunk reuse plus pinned/asynchronous layer staging. Do not enable mixed precision, proxy, adaptive Top-K, or speculative modes based on the baseline alone.

@@ -81,4 +81,7 @@
 - [x] Reuse the exact FP32 LM-head preparation across reference logits calls and record its VRAM trade-off.
 - [x] Add a dimension-derived GLM-5.2 traffic model that clearly separates bounds from measured TPS.
 - [ ] Add calibrated outlier or mixed-precision expert storage and a real-layer quality gate before converter integration.
-- [ ] Finish the 282-shard local stream and assemble the full expert bundle.
+- [x] Finish the 282-shard local stream and assemble the full expert bundle.
+- [x] Run the exact full 78-layer cold and cached CUDA reference gates and record storage/VRAM telemetry.
+- [x] Diagnose and repair the Bash/Python-path failure in the local full-gate coordinator.
+- [ ] Implement exact resident non-expert trunk reuse and layer-aware pinned/asynchronous staging; re-run full parity and throughput gates.

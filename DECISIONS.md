@@ -601,3 +601,19 @@
 - Evidence: the new regression test failed before the change with `19` single tensor reads during one synthetic layer construction. After the change, the same test observed `0` single reads and at least one grouped read; the focused layer/bundle/model suite passed `18/18`, and the complete Python suite passed `327 passed, 124 skipped`. No end-to-end throughput or quality number was inferred from this metadata/open-path result.
 - Accepted because: grouped reads preserve record order, payload bytes, dtype/shape checks, and lazy CRC validation while removing repeated artifact-file opens. It is an exact, disable-free reference-path optimization with no routing or precision change.
 - Revisit: after the 282-shard full bundle records construction latency, logical/physical storage traffic, host memory, and full-layer output parity. A full-model regression or storage contention can justify reverting or narrowing the grouping.
+
+## D-0076 -- Treat exact full-model storage reload as the primary performance blocker
+
+- Decision: keep the exact BF16 natural Top-16 path as the correctness baseline, but prioritize resident non-expert trunk reuse and layer-aware asynchronous staging before promoting quantization, proxy, adaptive Top-K, or speculation.
+- Alternatives: tune CUDA kernels first, enlarge the bounded expert cache without changing trunk residency, or report the dimension-derived traffic model as a TPS estimate.
+- Evidence: the first full `GLM-5.2` bundle gate completed over `78` layers and measured `0.0033037330949489767` decode tok/s with `79,763,152,896` logical artifact-read bytes per token. The cached two-token gate measured `0.0032712558027912816` tok/s, zero expert-cache hits, and `159,526,305,792` decode bytes because the current capacities evicted the working set and the trunk was not cached.
+- Accepted because: the result is an exact, measured baseline that identifies storage reload as dominant while preserving routing and output semantics for future comparisons. It does not claim physical NVMe throughput or production quality.
+- Revisit: after an exact resident-trunk/pinned-staging implementation records output parity, H2D bytes/token, physical device traffic, VRAM/RAM pressure, and a fresh end-to-end gate.
+
+## D-0077 -- Make the local full-gate coordinator POSIX-sh and environment-aware
+
+- Decision: declare `tools/monitor_glm5x_full_gate.sh` with a POSIX `sh` shebang, remove Bash-only syntax, and select the known CUDA Python venv first, with `K3X_PYTHON` override and `python3`/`python` fallback.
+- Alternatives: require callers to invoke `bash` manually, keep Bash-only arithmetic and tests, or hard-code a Windows Python interpreter.
+- Evidence: the prior invocation reached all `282/282` markers but exited before assembly with `line 27: syntax error near unexpected token 'then'` because Bash arithmetic syntax was parsed by `sh`; the WSL image also has no bare `python`, while `/home/jolib/.venvs/k3x-m1/bin/python` has CUDA 13.0 and RTX 5080 support. `bash -n` passes after the repair.
+- Accepted because: the coordinator only needs POSIX tests and arithmetic; removing Bash-only `[[`, `(( ))`, `BASH_SOURCE`, and `pipefail` makes both direct and `sh script` invocation safe while changing no conversion or model semantics.
+- Revisit: if the project adds a containerized Linux runner, make the Python path a documented container default and keep the explicit override.

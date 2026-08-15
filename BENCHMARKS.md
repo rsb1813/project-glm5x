@@ -811,3 +811,38 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 - Result: the pre-change RED test observed `19` individual `read_tensor_extents()` calls. The grouped path observed `0` individual calls and at least one `read_tensor_extents_many()` call, while the layer output and expert route assertions remained green.
 - Verification: focused bundle/layer/MoE/model suite `18 passed`; complete Python suite `327 passed, 124 skipped`; `py_compile` passed for the changed modules.
 - Boundary: no decode tok/s, prefill tok/s, TTFT, physical NVMe GB/token, H2D GB/token, VRAM, or task-quality result was measured. This is an exact metadata/open-path optimization pending the full 282-shard gate.
+
+## 2026-08-15 -- Full 282-shard exact BF16 CUDA cold gate
+
+- Date: 2026-08-15.
+- Commit: local measurement from public base `6e8c289`; monitor shebang/Python-path repair was not included in this baseline.
+- Hardware: NVIDIA GeForce RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.0, C: NVMe workspace; target CPU/RAM were not independently sampled.
+- Model/checkpoint: official `zai-org/GLM-5.2`; `282` `.k3x` artifacts, `59,585` tensors, `19,456` complete experts; `78` layers; natural Top-16; exact BF16 payloads; lazy bundle admission; `EXPERT_LOAD_WORKERS=16`; no host/device expert cache.
+- Context/mode: prompt token `[0]`, one prefill token and one greedy decode token, `execution_mode=loop`, `layer_cache_capacity=0`, `sparse_topk_attention=false`.
+- Decode: `302.68789011100307 s`, `0.0033037330949489767 tok/s`.
+- Prefill: `306.93307032898883 s`, `0.003258039281750062 tok/s`.
+- TTFT: `609.6209604399919 s`.
+- Logical storage reads: prefill `79,763,152,896` bytes over `813` calls; decode `79,763,152,896` bytes over `815` calls; `79,763,152,896` logical bytes/token. These are artifact-file requests, not physical NVMe counters.
+- VRAM: peak allocated `8,083,474,944` bytes; peak reserved `9,267,314,688` bytes. System RAM, physical NVMe GB/token, H2D GB/token, quality score, and speculative acceptance were not measured by this CLI.
+- Result: correctness baseline completed and generated token `[565]`. The `0.0033 tok/s` number is measured exact reference performance, not an optimized target or a promise. The dominant observed cost is repeated storage reload.
+
+## 2026-08-15 -- Full 282-shard exact BF16 CUDA cached gate
+
+- Date: 2026-08-15.
+- Commit: local measurement from public base `6e8c289`.
+- Hardware/model: same RTX 5080/WSL2 and official GLM-5.2 full bundle as the cold gate; exact BF16 natural Top-16; `78` layers; `EXPERT_LOAD_WORKERS=16`.
+- Cache/mode: prompt token `[0]`, one prefill token plus two decode tokens, `execution_mode=loop`, host expert cache `8,589,934,592` bytes, device expert cache `4,294,967,296` bytes, `layer_cache_capacity=0`, lazy bundle admission.
+- Decode: `611.385999924998 s` total, `0.0032712558027912816 tok/s`; step tok/s were `0.003265396166870458` and `0.0032771365063288043`.
+- Prefill: `303.5853812530113 s`, `0.003293966250524393 tok/s`; TTFT `609.8269363040163 s`.
+- Logical storage reads: prefill `79,763,152,896` bytes; decode `159,526,305,792` bytes (`79,763,152,896` per token); decode read calls `1,625`.
+- Cache telemetry: host hit rate `0.0`, `1,800` misses, `1,687` evictions, `8,531,214,336` resident bytes; device hit rate `0.0`, `1,800` misses, `1,744` evictions, `4,227,858,432` resident bytes. The configured capacities do not hold the full expert working set and do not retain non-expert trunk tensors.
+- VRAM: peak allocated `12,312,381,952` bytes; peak reserved `13,042,188,288` bytes. Generated tokens were `[565, 8009]`; no quality benchmark or physical device traffic measurement was run.
+- Result: enabling the bounded expert caches did not improve this workload. The next benchmark must change residency policy, not merely raise the same small cache, and must re-run exact output parity before any fast mode is enabled.
+
+## 2026-08-15 -- Public CI and dependency-alert verification
+
+- Public head: `6e8c289`.
+- Correctness run `31858950666`: completed successfully.
+- CodeQL run `31858950671`: completed successfully.
+- The recurring red `correctness / Linux (push)` notification is historical run `31795400168` on stale commit `b94c8b8`; its Python step lacked 50 migrated historical `results/b0006..b0024` files. It is not an active failure on current `main`.
+- Dependabot PRs `#1`--`#4` are closed; no open update PR is present. Dependabot security alerts and vulnerability alerts are disabled at the repository endpoint (`403`/`404`), so no CVE count can be verified from the alarm banner.
