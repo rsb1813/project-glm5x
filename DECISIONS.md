@@ -690,3 +690,19 @@
 - Evidence: the full 78-layer RTX 5080 gate with a 40 GiB trunk cache measured NVFP4 prefill `0.002230757197422688 tok/s`, TTFT `631.1266474290169 s`, and decode `0.005469012467235659 tok/s`; the paired BF16 control measured `0.003236382626324253` prefill tok/s, TTFT `412.11868096899707 s`, and `0.00969633691172072` decode tok/s. NVFP4 generated `[154820]` while BF16 generated `[565]`. K3X bundle reads fell to `0` during decode and `33,396,272,640` bytes during prefill, but sidecar I/O was not included in those counters.
 - Accepted because: it preserves the exact correctness contract and records the real result instead of mistaking lower logical reads for higher end-to-end speed or quality.
 - Revisit: after outlier/residual calibration, sidecar-to-VRAM prefetch/device residency, multi-token reuse, and full-logit/coding-quality parity.
+
+## D-0087 -- Do not rely on a larger plain LRU expert device cache
+
+- Decision: keep the existing device cache opt-in, but do not treat a larger plain LRU budget as the next performance solution. Add layer-aware/protected residency and sidecar-I/O telemetry before another full gate.
+- Alternatives: increase the cache to 4 GiB and accept the eviction pattern, disable the cache entirely, or pin every selected expert from the preceding token.
+- Evidence: the 4 GiB NVFP4 two-token gate recorded `1,800` misses, `0` hits, `1,691` evictions, and `109` resident entries. Decode averaged `0.0029452347553256177 tok/s`, with sidecar misses/writes still occurring. The layer-10 repeated-call probe, where the eight-expert working set fits, recorded `8` hits and a second-call time of `0.00870082201436162 s`; the full-model working set does not fit.
+- Accepted because: it separates the proven small-working-set resident reuse from the full-model cache-thrash result and avoids claiming that capacity alone solves route-stable residency.
+- Revisit: after hot-bank scoring, per-layer quotas/protection, transition-aware prefetch, and clean warm-sidecar gates.
+
+## D-0088 -- Share dynamic activation quantization for NVFP4 gate/up
+
+- Decision: use `linear_nvfp4_pair` whenever gate and up projections are both NVFP4. Quantize the shared hidden activation once, then submit both scaled GEMMs; retain the independent path for mixed/non-NVFP4 inputs.
+- Alternatives: keep two independent activation quantizations, prequantize all activations globally, or fuse gate/up with the full SiLU/down projection before a correctness boundary exists.
+- Evidence: resident RTX 5080 GLM-shaped microbenchmark averaged `0.0007789301977027208 s` paired versus `0.0014070075005292893 s` independent (`1.8063332307297124x`); parity test passed and the full suite was `341 passed, 124 skipped`.
+- Accepted because: it is local, correctness-preserving, and removes duplicated activation work without changing routing or quantized weights.
+- Revisit: after a full clean NVFP4 gate; the microbenchmark is not an end-to-end TPS claim.

@@ -8,6 +8,7 @@ from glm5x_ref.nvfp4 import (
     GLM5XNVFP4Weight,
     dequantize_nvfp4,
     linear_nvfp4,
+    linear_nvfp4_pair,
     quantize_nvfp4_weight,
 )
 
@@ -42,3 +43,20 @@ def test_nvfp4_cuda_linear_matches_dequantized_reference() -> None:
     assert actual.shape == reference.shape
     assert torch.isfinite(actual).all()
     assert relative < 0.01
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_nvfp4_gate_up_pair_reuses_activation_quantization() -> None:
+    torch.manual_seed(47)
+    gate = quantize_nvfp4_weight(
+        torch.randn(128, 256, dtype=torch.bfloat16, device="cuda"), device="cuda"
+    )
+    up = quantize_nvfp4_weight(
+        torch.randn(128, 256, dtype=torch.bfloat16, device="cuda"), device="cuda"
+    )
+    hidden = torch.randn(2, 256, dtype=torch.bfloat16, device="cuda")
+    paired_gate, paired_up = linear_nvfp4_pair(hidden, gate, up)
+    individual_gate = linear_nvfp4(hidden, gate)
+    individual_up = linear_nvfp4(hidden, up)
+    assert torch.allclose(paired_gate, individual_gate, atol=2e-2, rtol=2e-2)
+    assert torch.allclose(paired_up, individual_up, atol=2e-2, rtol=2e-2)

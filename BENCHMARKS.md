@@ -21,6 +21,21 @@
 - Paired resident-trunk BF16 control: prefill `308.986951007013 s` (`0.003236382626324253 tok/s`), TTFT `412.11868096899707 s`; decode `103.13172996198409 s` (`0.00969633691172072 tok/s`), with `78,694,755,840` prefill and `45,298,483,200` decode logical bytes/token. NVFP4 reduced measured K3X reads but was slower and changed the token; sidecar I/O and native FP4 execution overhead are the next bottlenecks.
 - Decision: reject `nvfp4_gate_up` as a quality/default mode for now. Keep the implementation opt-in while calibration, residual/outlier preservation, sidecar prefetch/device residency, and final-logit parity are developed. This gate does not support a 10--20 tok/s claim.
 
+## 2026-08-15 -- NVFP4 4 GiB device-cache thrash gate
+
+- Commit: working tree after `5d5b328`; model/checkpoint and hardware match the full NVFP4 gate above. Mode: `expert_precision=nvfp4_gate_up`, `.pgu` sidecars, `trunk_cache_bytes=42,949,672,960`, `expert_device_cache_bytes=4,294,967,296`, two generated tokens.
+- Measured prefill `428.7349084460002 s` (`0.002332443615623969 tok/s`), TTFT `613.2144331090094 s`; two-token decode `679.0630174330145 s` (`0.0029452347553256177 tok/s`). Per-token decode was `0.005420655771022346` then `0.0020219033077697704 tok/s`.
+- Device cache telemetry: `1,800` misses, `0` hits, `1,691` evictions, `109` resident entries, `4,286,055,272` resident bytes. The simple LRU cache cannot retain enough layer/expert working set and is not a path to 10 tok/s.
+- Packed sidecar telemetry: `1,327` hits, `473` misses, `473` writes; decode K3X reads were `35,710,304,256` bytes (`17,855,152,128` per token). The missing sidecars were populated during this run, so this is not a clean warm-sidecar comparison.
+- Quality: generated tokens `[154820, 474]`; the first token still diverges from exact BF16 `[565]`. Peak allocated VRAM `12,379,602,432` bytes; reserved peak `13,082,034,176` bytes.
+- Decision: reject increasing the plain LRU device-cache budget as the next optimization. The next cache design must be layer-aware/protected and must report sidecar I/O separately from K3X bundle reads.
+
+## 2026-08-15 -- NVFP4 gate/up activation-sharing microbenchmark
+
+- Commit: working tree after `5d5b328`; RTX 5080 16 GB, WSL2 CUDA 13.0/PyTorch 2.13.0; resident GLM-shaped synthetic weights, `M=1`, `K=6144`, `N=2048`.
+- Two independent `linear_nvfp4` calls averaged `0.0014070075005292893 s`; `linear_nvfp4_pair` quantized the shared activation once and averaged `0.0007789301977027208 s` (`1.8063332307297124x` speedup).
+- Correctness: the focused pair parity test and full Python suite passed; this measurement does not claim layer or model tok/s.
+
 ## 2026-08-15 -- Experimental MXFP4 sidecar quality/bytes gate
 
 - Commit: working tree based on public `ee186c7` with the FP4 extension uncommitted at measurement time.

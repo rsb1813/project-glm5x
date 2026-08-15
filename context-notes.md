@@ -572,3 +572,9 @@
 - The first detached full 78-layer gate reused `1,200` `.pgu` sidecars and a 40 GiB trunk cache. It measured prefill `0.002230757197422688 tok/s`, TTFT `631.1266474290169 s`, decode `0.005469012467235659 tok/s`, `33,396,272,640` prefill K3X bytes/token, and `0` decode K3X bytes/token.
 - The paired resident-trunk BF16 control measured prefill `0.003236382626324253 tok/s`, TTFT `412.11868096899707 s`, and decode `0.00969633691172072 tok/s`. NVFP4 generated `[154820]` versus BF16 `[565]` for the same prompt, so the mode is rejected as a quality/default path.
 - The logical K3X counters exclude `.pgu` sidecar file reads. The next bottleneck is therefore sidecar-to-VRAM traffic and native FP4 execution overhead in addition to calibration/residual quality.
+
+## 2026-08-15 -- NVFP4 activation-sharing and cache-thrash follow-up
+
+- Added `linear_nvfp4_pair` and routed both all-NVFP4 and gate/up-only NVFP4 MLPs through it. The shared hidden activation is quantized once for gate/up. The pair parity test passed; the full suite is now `341 passed, 124 skipped` in `173.77 s`.
+- Resident GLM-shaped CUDA microbenchmark: independent gate/up calls `1.4070075005292893 ms`; paired call `0.7789301977027208 ms`; `1.8063x` speedup.
+- A full two-token 4 GiB NVFP4 device-cache gate recorded `0` device-cache hits and `1,691` evictions. The full-model working set is too large for plain LRU; the next design is layer-aware protected residency and explicit sidecar-I/O counters.

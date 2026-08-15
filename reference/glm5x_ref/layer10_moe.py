@@ -17,7 +17,12 @@ from k3x_converter.reader import K3XReader
 from glm5x_converter.bundle import GLM5XExpertBundle
 
 from .int4 import GLM5XInt4Weight, linear, quantize_int4_weight, weight_shape
-from .nvfp4 import GLM5XNVFP4Weight, linear_nvfp4, quantize_nvfp4_weight
+from .nvfp4 import (
+    GLM5XNVFP4Weight,
+    linear_nvfp4,
+    linear_nvfp4_pair,
+    quantize_nvfp4_weight,
+)
 from k3x_ref.mxfp4 import decode_mxfp4, encode_mxfp4
 from .packed_cache import GLM5XPackedExpertCache
 
@@ -658,11 +663,15 @@ class GLM5XLayer10MoEReference:
             assert isinstance(expert.gate_proj, GLM5XNVFP4Weight)
             assert isinstance(expert.up_proj, GLM5XNVFP4Weight)
             assert isinstance(expert.down_proj, GLM5XNVFP4Weight)
-            gate = linear_nvfp4(hidden, expert.gate_proj)
-            up = linear_nvfp4(hidden, expert.up_proj)
+            gate, up = linear_nvfp4_pair(hidden, expert.gate_proj, expert.up_proj)
             return linear_nvfp4(F.silu(gate) * up, expert.down_proj)
-        gate = linear(hidden, expert.gate_proj)
-        up = linear(hidden, expert.up_proj)
+        if isinstance(expert.gate_proj, GLM5XNVFP4Weight) and isinstance(
+            expert.up_proj, GLM5XNVFP4Weight
+        ):
+            gate, up = linear_nvfp4_pair(hidden, expert.gate_proj, expert.up_proj)
+        else:
+            gate = linear(hidden, expert.gate_proj)
+            up = linear(hidden, expert.up_proj)
         return linear(F.silu(gate) * up, expert.down_proj)
 
     def _route(self, hidden: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

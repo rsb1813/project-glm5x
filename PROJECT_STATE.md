@@ -1,6 +1,6 @@
 # GLM5X Project State
 
-Latest verified complete Python regression: `340 passed, 124 skipped` in `196.52 s`. The prior milestone text below retains historical counts for context.
+Latest verified complete Python regression: `341 passed, 124 skipped` in `173.77 s`. The prior milestone text below retains historical counts for context.
 
 ## Current milestone
 
@@ -8,16 +8,16 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 
 ## Current live snapshot -- 2026-08-15
 
-- FP4 direction: native NVFP4 scaled-GEMM and `.pn4`/`.pgu` sidecars are implemented and pushed in `1db2e0a`. Focused verification is `21 passed`; the first full 78-layer gate completed but is rejected as a default because it changed the final token and measured `0.005469` decode tok/s versus `0.009696` for the paired resident-trunk BF16 control.
+- FP4 direction: native NVFP4 scaled-GEMM and `.pn4`/`.pgu` sidecars are implemented and pushed in `1db2e0a`. The latest selected NVFP4/layer/cache group is `17 passed`; the first full 78-layer gate completed but is rejected as a default because it changed the final token and measured `0.005469` decode tok/s versus `0.009696` for the paired resident-trunk BF16 control.
 
 - Local source/output: `build-glm5x-full-source` -> `build-glm5x-full-k3x`; the three disjoint workers finished and no conversion restart is required.
 - Materialization: `282/282` `.k3x` artifacts and `282/282` atomic source-deleted markers are present; no active conversion partials remain. The final bundle index contains `59,585` tensors and `19,456` complete experts.
 - Storage: the source manifest totals `1,506,659,919,872` bytes. The raw-BF16 artifact set is therefore approximately `1.507 TB` decimal before any future derived/quantized copy. Free-space headroom must be checked before any second representation is created.
 - Full-gate result: exact cold one-token run took `306.933 s` prefill plus `302.688 s` decode, with `79.763 GB` of logical artifact reads per token and `8.083 GB` peak allocated VRAM. The cached two-token run took `303.585 s` prefill and `611.386 s` decode, with zero expert-cache hits because the configured cache capacity evicted the working set.
-- Current bottleneck: the exact reference is still limited by storage/reload, while the first NVFP4 full gate exposes additional sidecar I/O/native FP4 overhead and final-token divergence. NVFP4 reduced counted K3X bundle reads but was slower than the resident-trunk BF16 control and generated a different token. The next target is calibrated FP4 residual handling, sidecar-to-VRAM prefetch/device residency, and final-logit parity before another throughput gate.
+- Current bottleneck: the exact reference is still limited by storage/reload, while the first NVFP4 full gate exposes additional sidecar I/O/native FP4 overhead and final-token divergence. A 4 GiB plain LRU device cache had `0` hits and `1,691` evictions, so the next target is layer-aware protected residency and explicit sidecar-to-VRAM prefetch, followed by calibrated FP4 residual handling and final-logit parity.
 - Reduced-routing/proxy gate: the real layer-10 four-token shared Top-4 proxy measured `5.043440291978186 s` versus natural Top-8 `12.43729756900575 s`, but relative L2 drift was `0.8120684623718262`; the proxy is default-off and does not count toward the TPS target.
-- Verification: the latest complete WSL Python suite passed `340 passed, 124 skipped` in `196.52 s`; the focused NVFP4/layer/cache/model group passed `21 passed`. These are current local results; no full-model speed claim changed.
-- GitHub: public head `bb85223` contains the native NVFP4 path, full-gate measurements, and documentation. The latest local verification is `340 passed, 124 skipped`; the recurring red `correctness / Linux (push)` notification is stale run `31795400168` on `b94c8b8`, where 50 historical evidence files were absent; it is not an active failure on `main`.
+- Verification: the latest complete WSL Python suite passed `341 passed, 124 skipped` in `173.77 s`; the focused NVFP4/layer/cache/model group passed `17 passed` for the selected follow-up set. These are current local results; no full-model speed claim changed.
+- GitHub: public head `bb85223` contains the native NVFP4 path, full-gate measurements, and documentation. The latest local verification is `341 passed, 124 skipped`; the recurring red `correctness / Linux (push)` notification is stale run `31795400168` on `b94c8b8`, where 50 historical evidence files were absent; it is not an active failure on `main`.
 - Dependency status: Dependabot update PRs `#1`--`#4` are closed and no open Dependabot PR exists. The repository security-alert endpoints are disabled (`403`/`404`), so the visible alarm cannot be converted into a verified CVE count.
 
 ## Completed

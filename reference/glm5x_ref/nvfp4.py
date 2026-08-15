@@ -217,6 +217,31 @@ def dequantize_nvfp4(weight: GLM5XNVFP4Weight) -> torch.Tensor:
     ).reshape(rows, cols)
 
 
+def _scaled_mm_nvfp4(
+    activation_packed: torch.Tensor,
+    activation_blocked_scales: torch.Tensor,
+    activation_global_scale: torch.Tensor,
+    weight: GLM5XNVFP4Weight,
+) -> torch.Tensor:
+    result = torch._scaled_mm(
+        activation_packed.view(torch.float4_e2m1fn_x2),
+        weight.packed.view(torch.float4_e2m1fn_x2).t(),
+        scale_a=activation_blocked_scales,
+        scale_b=weight.scales,
+        out_dtype=torch.bfloat16,
+    )
+    return result * (activation_global_scale * weight.global_scale).to(torch.bfloat16)
+
+
+def _quantize_cuda_activation(
+    flat: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    packed, raw_scales, global_scale = _quantize_payload(
+        flat, scale_mode="max_abs"
+    )
+    return packed, _to_blocked(raw_scales), global_scale
+
+
 def linear_nvfp4(
     values: torch.Tensor,
     weight: GLM5XNVFP4Weight,
@@ -229,16 +254,33 @@ def linear_nvfp4(
     if flat.device.type != "cuda" or weight.device.type != "cuda":
         decoded = dequantize_nvfp4(weight).to(device=flat.device, dtype=flat.dtype)
         return F.linear(flat, decoded).reshape(*original_shape, weight.shape[0])
-    activation_packed, activation_scales, activation_global = _quantize_payload(
-        flat, scale_mode="max_abs"
-    )
-    activation_blocked = _to_blocked(activation_scales)
-    result = torch._scaled_mm(
-        activation_packed.view(torch.float4_e2m1fn_x2),
-        weight.packed.view(torch.float4_e2m1fn_x2).t(),
-        scale_a=activation_blocked,
-        scale_b=weight.scales,
-        out_dtype=torch.bfloat16,
-    )
-    result = result * (activation_global * weight.global_scale).to(torch.bfloat16)
-    return result.reshape(*original_shape, weight.shape[0])
+    activation_packed, activation_blocked, activation_global = _quantize_cuda_activation(flat)
+    return _scaled_mm_nvfp4(
+        activation_packed, activation_blocked, activation_global, weight
+    ).reshape(*original_shape, weight.shape[0])
+
+
+def linear_nvfp4_pair(
+    values: torch.Tensor,
+    gate_weight: GLM5XNVFP4Weight,
+    up_weight: GLM5XNVFP4Weight,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run gate/up NVFP4 GEMMs while quantizing the shared activation once."""
+    if values.shape[-1] != gate_weight.shape[1] or values.shape[-1] != up_weight.shape[1]:
+        raise ValueError("GLM5X_NVFP4_LINEAR_PAIR_SHAPE")
+    original_shape = values.shape[:-1]
+    flat = values.reshape(-1, values.shape[-1])
+    if (
+        flat.device.type != "cuda"
+        or gate_weight.device.type != "cuda"
+        or up_weight.device.type != "cuda"
+    ):
+        return linear_nvfp4(values, gate_weight), linear_nvfp4(values, up_weight)
+    activation_packed, activation_blocked, activation_global = _quantize_cuda_activation(flat)
+    gate = _scaled_mm_nvfp4(
+        activation_packed, activation_blocked, activation_global, gate_weight
+    ).reshape(*original_shape, gate_weight.shape[0])
+    up = _scaled_mm_nvfp4(
+        activation_packed, activation_blocked, activation_global, up_weight
+    ).reshape(*original_shape, up_weight.shape[0])
+    return gate, up
