@@ -815,7 +815,7 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 ## 2026-08-15 -- Full 282-shard exact BF16 CUDA cold gate
 
 - Date: 2026-08-15.
-- Commit: local measurement from public base `6e8c289`; monitor shebang/Python-path repair was not included in this baseline.
+- Commit: local measurement from public base `6e8c289`; the later monitor repair was documentation/runner-only and does not change this measured model path.
 - Hardware: NVIDIA GeForce RTX 5080 16 GB, WSL2 Ubuntu-24.04, CUDA 13.0, C: NVMe workspace; target CPU/RAM were not independently sampled.
 - Model/checkpoint: official `zai-org/GLM-5.2`; `282` `.k3x` artifacts, `59,585` tensors, `19,456` complete experts; `78` layers; natural Top-16; exact BF16 payloads; lazy bundle admission; `EXPERT_LOAD_WORKERS=16`; no host/device expert cache.
 - Context/mode: prompt token `[0]`, one prefill token and one greedy decode token, `execution_mode=loop`, `layer_cache_capacity=0`, `sparse_topk_attention=false`.
@@ -841,8 +841,8 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 
 ## 2026-08-15 -- Public CI and dependency-alert verification
 
-- Public head: `6e8c289`.
-- Correctness run `31858950666`: completed successfully.
-- CodeQL run `31858950671`: completed successfully.
+- Public head: `5dfe036`.
+- Correctness run `31863769799`: completed successfully in about `3m02s`.
+- CodeQL run `31863769798`: completed successfully in about `3m46s`.
 - The recurring red `correctness / Linux (push)` notification is historical run `31795400168` on stale commit `b94c8b8`; its Python step lacked 50 migrated historical `results/b0006..b0024` files. It is not an active failure on current `main`.
 - Dependabot PRs `#1`--`#4` are closed; no open update PR is present. Dependabot security alerts and vulnerability alerts are disabled at the repository endpoint (`403`/`404`), so no CVE count can be verified from the alarm banner.
