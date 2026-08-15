@@ -23,7 +23,7 @@ This bound explains why a naive BF16 out-of-core loop cannot meet the 10 tok/s o
 ## Resident-memory implications
 
 - The BF16 embedding and LM head each occupy about 1.90 GiB at the configured vocabulary and hidden size.
-- The exact FP32 logits path now lazily retains an additional 3,806,330,880-byte LM-head matrix after its first use. This avoids a repeated full-vocabulary conversion but must be included in the 16 GiB VRAM budget.
+- The exact FP32 logits path now lazily promotes a 3,806,330,880-byte LM-head matrix after its first use and releases the BF16 source from the active model object. This avoids repeated full-vocabulary conversion; the first-use peak includes both matrices and the steady-state FP32 residency must be included in the 16 GiB VRAM budget.
 - Keeping the complete BF16 trunk resident is not possible on the target GPU. The path toward 10 tok/s requires a measured mixed-precision trunk representation, fused dequantization/GEMM, or a different resident partition; expert streaming alone cannot overcome the trunk traffic bound.
 
 ## Measurement gates

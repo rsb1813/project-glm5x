@@ -499,7 +499,7 @@
 ## 2026-08-15 -- Exact LM-head preparation reuse
 
 - TDD: added a regression that requires the reference model to reuse one prepared FP32 LM-head tensor across forwards; it failed before implementation and passed after the cache was added.
-- The isolated RTX 5080 full-vocabulary probe measured `61.629 ms` median for a fresh BF16-to-FP32 conversion versus microseconds for reuse. The optimization preserves FP32 logits but adds about `3.81 GB` of resident VRAM, so the complete-model gate must decide whether the trade-off fits.
+- The isolated RTX 5080 full-vocabulary probe measured `61.629 ms` median for a fresh BF16-to-FP32 conversion versus microseconds for reuse. The active model head now replaces the BF16 source after preparation, so steady-state residency is the `3.81 GB` FP32 matrix while the first-use peak still includes both tensors.
 
 ## 2026-08-15 -- Dimension-derived traffic boundary
 

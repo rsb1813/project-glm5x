@@ -582,8 +582,8 @@
 
 - Decision: lazily convert `lm_head.weight` to FP32 once per model/device and reuse that matrix for later logits calls. Keep FP32 logits as the correctness path; do not switch to BF16 logits implicitly.
 - Alternatives: convert on every forward, keep only BF16 and accept a fast-mode quality change, or keep the FP32 matrix on CPU and copy it for every token.
-- Evidence: at the real GLM shape `(154880, 6144)` on the RTX 5080, a fresh BF16-to-FP32 conversion took a `0.061629 s` median and allocated a `3,806,330,880`-byte matrix. Reuse of the prepared transpose view measured `3.13 us` median. The model/reference parity suite passed `9/9` after the change.
-- Accepted because: output arithmetic and token routing are unchanged, while repeated full-vocabulary conversion is removed from the decode hot path. The extra approximately `3.81 GB` VRAM must be included in the full-model pressure result.
+- Evidence: at the real GLM shape `(154880, 6144)` on the RTX 5080, a fresh BF16-to-FP32 conversion took a `0.061629 s` median and allocated a `3,806,330,880`-byte matrix. Reuse of the prepared transpose view measured `3.13 us` median. The model/reference parity suite passed `9/9` after the change, and the active head now replaces the BF16 source after preparation.
+- Accepted because: output arithmetic and token routing are unchanged, while repeated full-vocabulary conversion is removed from the decode hot path and steady-state VRAM retains only the FP32 head. The temporary conversion peak and final approximately `3.81 GB` FP32 residency must be included in the full-model pressure result.
 - Revisit: after the complete bundle gate records peak VRAM and decode tok/s. If 16 GB pressure is material, add an explicitly opt-in BF16 logits mode with a separate quality gate rather than silently changing default precision.
 
 ## D-0074 -- Treat the BF16 traffic model as a constraint, not a performance result

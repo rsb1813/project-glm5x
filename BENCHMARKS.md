@@ -799,6 +799,6 @@ The current focused correctness smoke run is recorded in `PROJECT_STATE.md` as 2
 ## 2026-08-15 -- Exact FP32 LM-head reuse microbenchmark
 
 - Shape: GLM-5.2 `lm_head.weight` shape `(154880, 6144)` on RTX 5080, BF16 source.
-- Fresh conversion: `0.061629 s` median over three synchronized conversions; FP32 resident bytes `3,806,330,880` and peak allocation for BF16 plus FP32 `5,710,544,896` bytes in the isolated probe.
+- Fresh conversion: `0.061629 s` median over three synchronized conversions; FP32 resident bytes `3,806,330,880` and temporary peak allocation for BF16 plus FP32 `5,710,544,896` bytes in the isolated probe. The steady-state model head replaces the BF16 source after preparation.
 - Reuse: prepared transpose-view access `3.13 us` median over ten synchronized accesses. This is a bounded component measurement, not end-to-end tok/s.
 - Correctness: model-reference focused suite `9 passed`; full-model logits and quality remain pending the 282-shard bundle.

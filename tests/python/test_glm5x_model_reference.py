@@ -57,6 +57,7 @@ def test_model_reuses_prepared_fp32_lm_head() -> None:
     assert prepared is not None
     second = model.forward_tokens(torch.tensor([2]))
     assert model.prepared_lm_head is prepared
+    assert model.lm_head is prepared
     assert prepared.dtype == torch.float32
     assert prepared.device == first.logits.device
     assert second.logits.shape == first.logits.shape

@@ -471,6 +471,7 @@ class GLM5XDecoderModelReference:
             prepared_lm_head = self.lm_head.to(
                 device=normalized.device, dtype=torch.float32
             )
+            self.lm_head = prepared_lm_head
             self._prepared_lm_head = prepared_lm_head
         logits = torch.matmul(normalized.to(torch.float32), prepared_lm_head.t())
         return GLM5XModelForward(
