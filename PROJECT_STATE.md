@@ -19,7 +19,7 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 - Reduced-routing/proxy gate: the real layer-10 four-token shared Top-4 proxy measured `5.043440291978186 s` versus natural Top-8 `12.43729756900575 s`, but relative L2 drift was `0.8120684623718262`; the proxy is default-off and does not count toward the TPS target.
 - Verification: the latest complete WSL Python suite passed `354 passed, 124 skipped` in `79.53 s`; the focused packed-cache/benchmark regression passed `8` selected tests. These are current local results; no full-model speed claim changed.
 - GitHub: public head `bb85223` contains the native NVFP4 path, full-gate measurements, and documentation. The latest local verification is `341 passed, 124 skipped`; the recurring red `correctness / Linux (push)` notification is stale run `31795400168` on `b94c8b8`, where 50 historical evidence files were absent; it is not an active failure on `main`.
-- Public PR `#5` (`agent/nvfp4-grouped-cache`) now points to `9d8ea4e` and contains the grouped NVFP4, protected-cache, host packed-tier, benchmark-repair, and documentation updates. Linux and CodeQL checks are queued/in progress; no merge was performed.
+- Public PR `#5` (`agent/nvfp4-grouped-cache`) now points to `8f39912` and contains the grouped NVFP4, protected-cache, host packed-tier, benchmark-repair, and documentation updates. Linux correctness and C++/Python CodeQL checks all pass; the PR remains draft and unmerged.
 - Dependency status: Dependabot update PRs `#1`--`#4` are closed and no open Dependabot PR exists. The repository security-alert endpoints are disabled (`403`/`404`), so the visible alarm cannot be converted into a verified CVE count.
 
 ## Completed
@@ -302,4 +302,4 @@ GLM-5.2 shape/manifest boundary, exact cross-shard raw-BF16 loading, the exact q
 ## 2026-08-15 -- Linux CUDA-less INT4 guard repair
 
 - GitHub correctness run `31884496150` exposed a CPU-only CI mismatch: the INT4 helper returned `RuntimeError(GLM5X_INT4_CUDA_UNAVAILABLE)` before the public CPU-target `ValueError(GLM5X_INT4_CUDA_REQUIRED)` contract. The explicit target/availability guard is fixed in `0d5621d`.
-- Local focused INT4/packed-cache/benchmark tests passed `9`, and the complete WSL Python suite passed `354 passed, 124 skipped` in `78.52 s`. A new public CI run is in progress for `0d5621d`.
+- Local focused INT4/packed-cache/benchmark tests passed `9`, and the complete WSL Python suite passed `354 passed, 124 skipped` in `78.52 s`. Public correctness and CodeQL all pass for `8f39912`.
