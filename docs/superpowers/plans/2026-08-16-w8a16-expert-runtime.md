@@ -30,7 +30,7 @@ quality and warm latency on the official GLM-5.2 layer-10 RTX 5080 gate.
 
 ## Task 4: Decision gate and publication
 
-- [ ] Accept only if layer relative L2 is at most 1.0%, warm routed H2D is zero,
+- [x] Accept only if layer relative L2 is at most 1.0%, warm routed H2D is zero,
   and latency materially improves over B-0008.
 - [ ] If accepted, add fingerprinted `.pw8` sidecar manufacturing and then run
   a final-logit/greedy-token gate before any full 78-layer artifact build.

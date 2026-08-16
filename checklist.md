@@ -121,3 +121,5 @@
 - [x] Implement the fixed W8A16-G128 host pack/decode contract.
 - [x] Implement and measure the resident W8A16 expert-major CUDA path on RTX 5080.
 - [x] Require exact natural routes, at most one-percent layer L2, zero warm routed H2D, and a BF16 fallback before sidecar manufacturing.
+- [x] Record B-0009 W8A16 layer-10 one-token/two-token raw evidence and compare it with B-0008 BF16.
+- [ ] Add fingerprinted persistent `.pw8` manufacturing and prove multi-layer final-logit/greedy-token parity before a full artifact build.

@@ -726,3 +726,11 @@
 - Natural Top-8 router contributions were nearly uniform. FP8 for all routed experts measured `4.657%` layer L2; keeping seven of eight in BF16 still measured `1.591%` and retained about `93.8%` of BF16 bytes.
 - Symmetric W8A16 with group size 128 and BF16-rounded scales measured `0.8926288%` official layer-10 relative L2 at an ideal `50.78125%` expert-weight byte ratio. W6A16-G32 measured `2.722%` and was rejected for the low-loss mode.
 - The accepted first implementation is fixed W8A16-G128 routed experts with BF16 activations, exact BF16 shared expert/trunk, natural Top-8, and an always-available BF16 fallback. Persistent sidecar manufacturing waits for the resident CUDA quality and latency gate.
+
+## 2026-08-16 -- W8A16 resident runtime result
+
+- Commit `51ca9bc` integrates deterministic W8A16-G128 routed-expert views with the existing official `.gxi` learned-MoE and complete decoder-layer runner. Natural Top-8 IDs/contributions, BF16 activations, BF16 shared expert/trunk, and the BF16 control path are unchanged.
+- B-0009 measured the two-token layer-10 warm median at `4.520669 ms` versus B-0008 BF16's `5.503443 ms`, a `17.857%` latency reduction. Routed payload bytes fell from `1,207,959,552` to `613,416,960` (`49.21875%` reduction), and warm weight H2D remained zero.
+- The single-token layer gate measured `2.223067 ms/layer-token`. The derived 78-layer value is `5.767 tok/s`, not measured full-model throughput. The exact full-model result remains `0.010559 tok/s`, and the 10 tok/s target remains open.
+- The complete-layer GPU-versus-CPU relative L2 was `0.02295%` for two tokens and `0.02331%` for one token; route IDs and contributions matched BF16 exactly. This accepts the bounded runtime candidate but does not justify default enablement.
+- A heterogeneous projection-grouping experiment regressed the bounded path from about `4.198 ms` to `5.420 ms` and was fully removed. The next performance boundary is a device-resident attention/trunk graph, followed by persistent `.pw8` artifacts and multi-layer final-logit parity.
