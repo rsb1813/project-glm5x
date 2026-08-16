@@ -718,3 +718,11 @@
 - The separate one-token gate measured `2.756654 ms/layer-token` (`362.7586 layer-tokens/s`) with `0.0043478259` expected-output relative error. Multiplying that one layer by 78 gives an optimistic `215.019 ms/token` or `4.6508 tok/s` bound before final norm, logits, runtime control, storage, and heterogeneous-layer effects. This is derived, not measured full-model TPS.
 - Nsight after the fix attributes approximately `87.9%` of aggregate GPU kernel time to BF16 GEMV kernels, while stream synchronization is small. The next performance boundary is therefore native calibrated FP4 or a similarly large weight-traffic reduction, not another host conversion or cache-policy tweak.
 - Verification passed CUDA CTest `27/27`, CPU CTest `15/15`, focused Python `5 passed`, both 100-iteration raw result gates, and `git diff --check` before evidence publication.
+
+## 2026-08-16 -- W8A16 quality design
+
+- B-0008 showed that resident BF16 GEMV owns about `87.9%` of aggregate GPU kernel time, so the next accepted boundary must reduce weight traffic rather than extend cache-policy bookkeeping.
+- Official layer-10 decomposition measured all-NVFP4 expert-output relative L2 `21.52%`, weight-only NVFP4 `14.34%`, and activation-only NVFP4 `16.05%`. Dual-NVFP4 residual reached only the activation-error floor, while SmoothQuant, low-rank, and row/column outlier residual probes remained far above one percent.
+- Natural Top-8 router contributions were nearly uniform. FP8 for all routed experts measured `4.657%` layer L2; keeping seven of eight in BF16 still measured `1.591%` and retained about `93.8%` of BF16 bytes.
+- Symmetric W8A16 with group size 128 and BF16-rounded scales measured `0.8926288%` official layer-10 relative L2 at an ideal `50.78125%` expert-weight byte ratio. W6A16-G32 measured `2.722%` and was rejected for the low-loss mode.
+- The accepted first implementation is fixed W8A16-G128 routed experts with BF16 activations, exact BF16 shared expert/trunk, natural Top-8, and an always-available BF16 fallback. Persistent sidecar manufacturing waits for the resident CUDA quality and latency gate.
