@@ -21,6 +21,12 @@ int test_representation_identity() {
         7, k3x::cuda::WeightRepresentation::dense_fp32, 2, 3, 0};
     const k3x::cuda::ResidentWeightKey bf16_key{
         7, k3x::cuda::WeightRepresentation::dense_bf16, 2, 3, 0};
+    const auto invalid_lookup = table.find({
+        8, k3x::cuda::WeightRepresentation::dense_bf16, 0, 3, 0});
+    if (invalid_lookup ||
+        invalid_lookup.error() != k3x::ErrorCode::invalid_extent) {
+        return 6;
+    }
     const auto first = table.acquire(
         fp32_key, std::as_bytes(std::span(fp32)), {});
     if (!first || first.value().disposition !=
@@ -274,6 +280,35 @@ int test_mxfp4_backend_residency() {
     return 0;
 }
 
+int test_w8a16_residency() {
+    k3x::BackendMemoryStats memory;
+    k3x::BackendRuntimeStats runtime;
+    k3x::cuda::ResidentWeightTable table(130, &memory, &runtime, nullptr);
+    std::array<std::int8_t, 128> values{};
+    const std::array<std::byte, 2> scales{std::byte{0x80}, std::byte{0x3c}};
+    const k3x::cuda::ResidentWeightKey key{
+        401, k3x::cuda::WeightRepresentation::w8a16, 1, 128, 128};
+    const auto first = table.acquire(
+        key, std::as_bytes(std::span(values)), scales);
+    const auto hit = table.acquire(
+        key, std::as_bytes(std::span(values)), scales);
+    if (!first || !hit || first.value().disposition !=
+                            k3x::cuda::ResidentDisposition::admitted ||
+        hit.value().disposition != k3x::cuda::ResidentDisposition::hit ||
+        runtime.resident_weight_bytes != 130 ||
+        runtime.weight_cache_misses != 1 || runtime.weight_cache_hits != 1) {
+        return 50;
+    }
+    const auto malformed = table.acquire(
+        {402, k3x::cuda::WeightRepresentation::w8a16, 1, 128, 128},
+        std::as_bytes(std::span(values)),
+        std::span<const std::byte>(scales).first(1));
+    if (malformed || malformed.error() != k3x::ErrorCode::invalid_extent) {
+        return 51;
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -283,5 +318,8 @@ int main() {
     if (lru != 0) return lru;
     const auto dense = test_dense_backend_residency();
     if (dense != 0) return dense;
-    return test_mxfp4_backend_residency();
+    const auto mxfp4 = test_mxfp4_backend_residency();
+    if (mxfp4 != 0) return mxfp4;
+    const auto w8a16 = test_w8a16_residency();
+    return w8a16;
 }

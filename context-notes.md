@@ -671,3 +671,66 @@
 - C++ opened the full metadata set and loaded layer 10 expert 48 in `3.31 s`, `86,784 KiB` maximum RSS, and exactly `75,497,472` payload bytes. Python measured `3.36 s`, `210,184 KiB`, and the same bytes. All three role SHA-256 digests matched.
 - No wrapper benchmark script was added because the converter CLI and JSON-emitting C++ contract executable already provide the complete reproducible boundary; adding a second orchestration layer would duplicate parsing without exercising new product code.
 - This milestone does not execute a full decoder token. Exact full-model decode remains `0.010559 tok/s`; 10 tok/s is still unachieved. The next integration is exact trunk/layer construction and bounded final-logit parity through `.gxi`, followed by resident/asynchronous H2D scheduling.
+
+## 2026-08-16 -- Index-backed CUDA MoE start
+
+- Work continues directly without subagents on `codex/index-backed-cuda-moe`, stacked above runtime-index publication commit `450743e`.
+- The first integration deliberately reuses `k3x_cuda_glm5x_real_expert_bench` rather than creating another execution engine. Only router/shared/expert tensor acquisition changes from bounded shard scans to the official `.gxi`.
+- The artifact-directory path remains the control. Natural routing, selected experts, contributions, raw BF16 views, resident CUDA execution, GLM5XACT input/output, and numerical thresholds must remain identical.
+- A small metadata-plus-payload runtime-index API is preferred over a new general tensor-source abstraction. This keeps the change reversible and directly useful to the later decoder-layer loader.
+
+## 2026-08-16 -- Index-backed CUDA MoE result
+
+- Added `Glm5xTensorLoad`, `read_tensor_with_metadata()`, and `contains_tensor()` with a compile-RED then focused-GREEN C++/Python contract. Payload validation still flows through `read_tensor()`.
+- Added `--runtime-index FILE` as an exact alternative to `--artifact-dir DIR` in the existing real GLM CUDA benchmark. Missing or dual sources are rejected; the directory path remains the control.
+- B-0006 used the same layer-10 two-token GLM5XACT artifacts, natural routes, resident budget, accumulation/fusion switches, warmups, and iterations for both rows. Routes, contributions, source bytes, resident/H2D bytes, and all error fields matched.
+- Runtime-index host payload load measured `15.602 s` versus `16.467 s` for the five-artifact control, but its warm CUDA median measured `2.069 ms` versus `1.980 ms`. One opposite-direction pair is not a throughput result; only the exact source integration is accepted.
+- The index path still reads `1,286,603,776` bytes for one two-token layer-10 MoE union before residency. This confirms that the next performance work must reuse/overlap weights across actual decoder execution rather than optimize tensor lookup alone.
+- Verification completed with CUDA CTest `27/27`, focused Python `5 passed`, CPU CTest `15/15`, full Python `374 passed, 125 skipped` in `97.24 s`, and B-0006 raw/summary parity.
+
+## 2026-08-16 -- Index-backed decoder-layer start
+
+- Work continues directly without subagents on `codex/index-backed-cuda-moe`; GitHub access is verified outside the sandbox and the branch is synchronized with origin.
+- The minimum accepted next boundary is official layer 10 from full-layer BF16 input through its full DSA indexer, MLA, both residuals, natural Top-8 learned MoE, and full-layer BF16 output.
+- The first implementation reuses the existing validated `.gxi`, `GLM5XACT`, and resident raw-BF16 CUDA MoE path. A new general device-resident attention API is deferred until this complete correctness gate passes.
+- The first oracle uses two tokens and empty recurrent state. Incremental MLA/DSA state serialization remains the immediate follow-up, not an unverified claim in this milestone.
+
+## 2026-08-16 -- Index-backed decoder-layer result
+
+- Commit `902f551` adds the separate full-layer oracle export mode and the benchmark-local `.gxi` decoder path. It loads 14 trunk/indexer tensors, computes the full two-token DSA/MLA attention boundary, and hands its post-attention norm into the existing learned routed/shared CUDA MoE.
+- B-0007 matched Python DSA Top-K and both selected expert sets. Route ordering was not bitwise-identical because near-tied BF16 router scores crossed within the selected set; paired contribution values differed by at most `0.0001886785`. Final BF16-boundary error was `0.015625` absolute and `0.0042016809` relative.
+- The warm two-token layer median was `475.927299 ms`, with zero warm weight H2D and `1,632,239,616` resident weight bytes. This is much slower than the per-layer budget required for 10 tok/s and is not full-model throughput.
+- The current path intentionally favors a complete correctness boundary over a premature public API: CUDA matvec calls are token-by-token, normalization/softmax remain host-side, and state ends with the invocation. The next implementation target is batched/fused resident trunk execution across multiple layers, then final-logit parity.
+- Final verification passed CUDA CTest `27/27`, CPU CTest `15/15`, focused Python `5 passed`, and full CPU-build Python `375 passed, 126 skipped`. The earlier two failures under a CUDA `K3X_BUILD_DIR` were test-environment selection errors and disappeared under the standard CPU build.
+
+## 2026-08-16 -- Resident dense-hit fast-path start
+
+- Nsight Systems on the unchanged B-0007 path measured about `39.06 ms` of aggregate GPU kernel time across the profiled full-layer calls, while the two-token warm wall median remained `510.918 ms`. Warm weight H2D was already zero.
+- `dense_matvec()` still converts every complete FP32 host weight view to BF16 before asking `ResidentWeightTable` whether the tensor is already resident. For the official layer-10 trunk this repeatedly scans approximately `348.8 MB` of BF16 output payload per layer invocation.
+- The bounded fix will add an internal resident lookup that returns the existing device pointer before host conversion. Misses retain the current conversion, validation, admission, and exact fallback. The full GPU-resident decoder graph remains a separate architectural decision after B-0008 exposes the residual kernel/control cost.
+- Work continues directly without subagents on `codex/index-backed-cuda-moe`; no public runtime API or routing/quality behavior is changing in this step.
+
+## 2026-08-16 -- Resident dense-hit fast-path result
+
+- Commit `3b7a35a` adds a validated resident lookup before full host-weight BF16 conversion. A miss retains the prior convert, validate, admit, and transient fallback path; a hit returns the existing device pointer and updates LRU/protection state.
+- A CUDA regression proves that the first call converts one weight payload and the second resident call converts zero additional weight bytes while preserving exact output and warm H2D. Invalid lookup keys are rejected before table access.
+- B-0008 reduced the official two-token layer-10 warm median from B-0007's `475.927299 ms` to `5.503443 ms`, an `86.4781x` bounded speedup with the same DSA/expert-set boundary, the same `0.0042016809` expected-output relative error, and zero warm weight H2D.
+- The separate one-token gate measured `2.756654 ms/layer-token` (`362.7586 layer-tokens/s`) with `0.0043478259` expected-output relative error. Multiplying that one layer by 78 gives an optimistic `215.019 ms/token` or `4.6508 tok/s` bound before final norm, logits, runtime control, storage, and heterogeneous-layer effects. This is derived, not measured full-model TPS.
+- Nsight after the fix attributes approximately `87.9%` of aggregate GPU kernel time to BF16 GEMV kernels, while stream synchronization is small. The next performance boundary is therefore native calibrated FP4 or a similarly large weight-traffic reduction, not another host conversion or cache-policy tweak.
+- Verification passed CUDA CTest `27/27`, CPU CTest `15/15`, focused Python `5 passed`, both 100-iteration raw result gates, and `git diff --check` before evidence publication.
+
+## 2026-08-16 -- W8A16 quality design
+
+- B-0008 showed that resident BF16 GEMV owns about `87.9%` of aggregate GPU kernel time, so the next accepted boundary must reduce weight traffic rather than extend cache-policy bookkeeping.
+- Official layer-10 decomposition measured all-NVFP4 expert-output relative L2 `21.52%`, weight-only NVFP4 `14.34%`, and activation-only NVFP4 `16.05%`. Dual-NVFP4 residual reached only the activation-error floor, while SmoothQuant, low-rank, and row/column outlier residual probes remained far above one percent.
+- Natural Top-8 router contributions were nearly uniform. FP8 for all routed experts measured `4.657%` layer L2; keeping seven of eight in BF16 still measured `1.591%` and retained about `93.8%` of BF16 bytes.
+- Symmetric W8A16 with group size 128 and BF16-rounded scales measured `0.8926288%` official layer-10 relative L2 at an ideal `50.78125%` expert-weight byte ratio. W6A16-G32 measured `2.722%` and was rejected for the low-loss mode.
+- The accepted first implementation is fixed W8A16-G128 routed experts with BF16 activations, exact BF16 shared expert/trunk, natural Top-8, and an always-available BF16 fallback. Persistent sidecar manufacturing waits for the resident CUDA quality and latency gate.
+
+## 2026-08-16 -- W8A16 resident runtime result
+
+- Commit `51ca9bc` integrates deterministic W8A16-G128 routed-expert views with the existing official `.gxi` learned-MoE and complete decoder-layer runner. Natural Top-8 IDs/contributions, BF16 activations, BF16 shared expert/trunk, and the BF16 control path are unchanged.
+- B-0009 measured the two-token layer-10 warm median at `4.520669 ms` versus B-0008 BF16's `5.503443 ms`, a `17.857%` latency reduction. Routed payload bytes fell from `1,207,959,552` to `613,416,960` (`49.21875%` reduction), and warm weight H2D remained zero.
+- The single-token layer gate measured `2.223067 ms/layer-token`. The derived 78-layer value is `5.767 tok/s`, not measured full-model throughput. The exact full-model result remains `0.010559 tok/s`, and the 10 tok/s target remains open.
+- The complete-layer GPU-versus-CPU relative L2 was `0.02295%` for two tokens and `0.02331%` for one token; route IDs and contributions matched BF16 exactly. This accepts the bounded runtime candidate but does not justify default enablement.
+- A heterogeneous projection-grouping experiment regressed the bounded path from about `4.198 ms` to `5.420 ms` and was fully removed. The next performance boundary is a device-resident attention/trunk graph, followed by persistent `.pw8` artifacts and multi-layer final-logit parity.

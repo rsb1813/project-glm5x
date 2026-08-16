@@ -146,24 +146,129 @@ def export_moe_activation(
     }
 
 
+def export_layer_activation(
+    bundle_path: str | Path,
+    layer_input_path: str | Path,
+    layer_output_path: str | Path,
+    *,
+    token_count: int = 2,
+    seed: int = 17,
+    layer_id: int = 10,
+    rope_theta: float = 8_000_000.0,
+    device: torch.device | str | None = None,
+    verify_bundle: bool = True,
+) -> dict[str, object]:
+    """Export one complete official decoder-layer input/output oracle."""
+    if token_count <= 0:
+        raise ValueError("token_count must be positive")
+    if rope_theta <= 0.0:
+        raise ValueError("rope_theta must be positive")
+    target = torch.device("cpu" if device is None else device)
+    torch.manual_seed(seed)
+    hidden = torch.randn((1, token_count, 6144), dtype=torch.float32).bfloat16().to(target)
+    position_ids = torch.arange(
+        token_count, dtype=torch.long, device=target
+    ).view(1, -1)
+    position_embeddings = tuple(
+        value.to(target)
+        for value in _position_embeddings(token_count, rope_theta=rope_theta)
+    )
+    layer = GLM5XDecoderLayerReference.from_bundle(
+        bundle_path,
+        layer_id=layer_id,
+        cache_experts=False,
+        device=target,
+        verify_payloads=verify_bundle,
+        verify_root=verify_bundle,
+    )
+    result = layer(
+        hidden,
+        position_embeddings,
+        position_ids=position_ids,
+    )
+    layer_input = hidden[0].detach().to(torch.bfloat16).cpu()
+    layer_output = result.output[0].detach().to(torch.bfloat16).cpu()
+    write_bf16_activation(layer_input_path, layer_input)
+    write_bf16_activation(layer_output_path, layer_output)
+    metadata: dict[str, object] = {
+        "boundary": "decoder_layer",
+        "bundle": str(bundle_path),
+        "layer_id": layer_id,
+        "token_count": token_count,
+        "hidden_size": int(layer_input.shape[-1]),
+        "seed": seed,
+        "rope_theta": float(rope_theta),
+        "device": str(target),
+        "bundle_verification": "full" if verify_bundle else "metadata_only",
+        "input_dtype": str(layer_input.dtype),
+        "output_dtype": str(layer_output.dtype),
+        "layer_input": str(layer_input_path),
+        "layer_output": str(layer_output_path),
+    }
+    if hasattr(result, "attention_state"):
+        metadata["mla_state_length"] = int(result.attention_state.length)
+    if getattr(result, "dsa_state", None) is not None:
+        metadata["dsa_state_length"] = int(result.dsa_state.length)
+    if getattr(result, "topk_indices", None) is not None:
+        metadata["dsa_topk_indices"] = [
+            [int(value) for value in row]
+            for row in result.topk_indices[0].tolist()
+        ]
+    if getattr(result, "moe", None) is not None:
+        metadata["route_experts"] = [
+            [int(value) for value in row]
+            for row in result.moe.topk_indices[0].tolist()
+        ]
+        metadata["route_contributions"] = [
+            [float(value) for value in row]
+            for row in result.moe.topk_weights[0].tolist()
+        ]
+    return metadata
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", required=True, type=Path)
-    parser.add_argument("--moe-input", required=True, type=Path)
-    parser.add_argument("--moe-output", required=True, type=Path)
+    parser.add_argument("--boundary", choices=("moe", "decoder-layer"), default="moe")
+    parser.add_argument("--moe-input", type=Path)
+    parser.add_argument("--moe-output", type=Path)
+    parser.add_argument("--layer-input", type=Path)
+    parser.add_argument("--layer-output", type=Path)
     parser.add_argument("--tokens", type=int, default=2)
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--layer", type=int, default=10)
+    parser.add_argument("--rope-theta", type=float, default=8_000_000.0)
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument("--lazy-bundle", action="store_true")
     parser.add_argument("--metadata", type=Path)
     args = parser.parse_args()
-    metadata = export_moe_activation(
-        args.bundle,
-        args.moe_input,
-        args.moe_output,
-        token_count=args.tokens,
-        seed=args.seed,
-        layer_id=args.layer,
-    )
+    if args.boundary == "moe":
+        if args.moe_input is None or args.moe_output is None:
+            parser.error("--boundary moe requires --moe-input and --moe-output")
+        metadata = export_moe_activation(
+            args.bundle,
+            args.moe_input,
+            args.moe_output,
+            token_count=args.tokens,
+            seed=args.seed,
+            layer_id=args.layer,
+        )
+    else:
+        if args.layer_input is None or args.layer_output is None:
+            parser.error(
+                "--boundary decoder-layer requires --layer-input and --layer-output"
+            )
+        metadata = export_layer_activation(
+            args.bundle,
+            args.layer_input,
+            args.layer_output,
+            token_count=args.tokens,
+            seed=args.seed,
+            layer_id=args.layer,
+            rope_theta=args.rope_theta,
+            device=args.device,
+            verify_bundle=not args.lazy_bundle,
+        )
     encoded = json.dumps(metadata, indent=2, sort_keys=True) + "\n"
     if args.metadata is None:
         print(encoded, end="")

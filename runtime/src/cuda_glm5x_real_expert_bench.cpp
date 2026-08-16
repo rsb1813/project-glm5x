@@ -4,7 +4,9 @@
 #include "k3x/format.hpp"
 #include "k3x/glm5x_bundle.hpp"
 #include "k3x/glm5x_activation.hpp"
+#include "k3x/glm5x_runtime_index.hpp"
 #include "k3x/routing_policy.hpp"
+#include "k3x/w8a16.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,6 +17,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <iomanip>
 #include <initializer_list>
 #include <iostream>
@@ -31,9 +34,19 @@ namespace {
 
 constexpr std::size_t kHiddenSize = 6144;
 constexpr std::size_t kIntermediateSize = 2048;
+constexpr std::size_t kAttentionHeads = 64;
+constexpr std::size_t kQRank = 2048;
+constexpr std::size_t kKvRank = 512;
+constexpr std::size_t kQkNopeDim = 192;
+constexpr std::size_t kRopeDim = 64;
+constexpr std::size_t kValueDim = 256;
+constexpr std::size_t kIndexerHeads = 32;
+constexpr std::size_t kIndexerHeadDim = 128;
+constexpr double kRopeTheta = 8000000.0;
 
 struct Arguments {
     std::filesystem::path artifact_dir;
+    std::filesystem::path runtime_index;
     std::uint32_t layer{};
     std::uint32_t expert{};
     std::size_t experts{1};
@@ -76,6 +89,8 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
         const std::string value = argv[index + 1];
         if (key == "--artifact-dir") {
             result.artifact_dir = value;
+        } else if (key == "--runtime-index") {
+            result.runtime_index = value;
         } else if (key == "--layer") {
             const auto parsed = parse_u32(value);
             if (!parsed) return std::nullopt;
@@ -136,9 +151,11 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
             return std::nullopt;
         }
     }
-    if (result.artifact_dir.empty() || result.precision == "" ||
+    if (result.artifact_dir.empty() == result.runtime_index.empty() ||
+        result.precision == "" ||
         result.output == "") return std::nullopt;
-    if (result.precision != "fp32" && result.precision != "bf16-rounded") {
+    if (result.precision != "fp32" && result.precision != "bf16-rounded" &&
+        result.precision != "w8a16-g128") {
         return std::nullopt;
     }
     if (result.output != "fp32" && result.output != "bf16") {
@@ -148,18 +165,28 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
         result.input_mode != "sparse-packed" &&
         result.input_mode != "expert-major" &&
         result.input_mode != "learned-expert-major" &&
-        result.input_mode != "learned-moe-layer") {
+        result.input_mode != "learned-moe-layer" &&
+        result.input_mode != "learned-decoder-layer") {
         return std::nullopt;
     }
-    if (result.precision != "bf16-rounded" && result.output != "fp32") {
+    if (result.precision != "bf16-rounded" &&
+        result.precision != "w8a16-g128" && result.output != "fp32") {
         return std::nullopt;
     }
     if (!result.expected_bf16.empty() && result.input_bf16.empty()) {
         return std::nullopt;
     }
     if (result.fuse_shared &&
-        (result.input_mode != "learned-moe-layer" ||
+        ((result.input_mode != "learned-moe-layer" &&
+          result.input_mode != "learned-decoder-layer") ||
          !result.device_accumulate || result.output != "fp32")) {
+        return std::nullopt;
+    }
+    if (result.precision == "w8a16-g128" &&
+        ((result.input_mode != "learned-moe-layer" &&
+          result.input_mode != "learned-decoder-layer") ||
+         !result.device_accumulate || !result.fuse_shared ||
+         result.output != "fp32")) {
         return std::nullopt;
     }
     return result;
@@ -171,9 +198,11 @@ struct RealExpertFixture {
     std::array<std::vector<float>, 3> weights;
     k3x::DenseMlpView dense{};
     k3x::RawBf16MlpView raw{};
+    std::array<k3x::W8A16PackedWeight, 3> w8a16;
 };
 
 struct NamedTensorPayload {
+    std::uint64_t tensor_id{};
     std::uint16_t dtype{};
     std::uint8_t rank{};
     std::array<std::uint64_t, 4> dimensions{};
@@ -267,9 +296,37 @@ k3x::Result<NamedTensorPayload> load_named_tensor(
     }
     NamedTensorPayload result;
     result.dtype = record->dtype;
+    result.tensor_id = tensor_id;
     result.rank = record->rank;
     result.dimensions = record->dimensions;
     result.bytes = payload.value();
+    return k3x::Result<NamedTensorPayload>::success(std::move(result));
+}
+
+k3x::Result<NamedTensorPayload> load_named_tensor(
+    const k3x::Glm5xRuntimeIndex& runtime_index,
+    std::string_view name) {
+    const std::string owned_name(name);
+    const auto tensor_id = k3x::fnv1a64(owned_name.c_str());
+    auto loaded = runtime_index.read_tensor_with_metadata(tensor_id);
+    if (!loaded) {
+        return k3x::Result<NamedTensorPayload>::failure(
+            loaded.error(), loaded.message());
+    }
+    const auto& record = loaded.value().record;
+    if (record.quantization != 0 ||
+        record.logical_length != record.data_length ||
+        record.auxiliary_length != 0 || record.auxiliary_offset != 0 ||
+        record.auxiliary_crc32c != 0) {
+        return k3x::Result<NamedTensorPayload>::failure(
+            k3x::ErrorCode::invalid_directory, "invalid named GLM tensor");
+    }
+    NamedTensorPayload result;
+    result.tensor_id = tensor_id;
+    result.dtype = record.dtype;
+    result.rank = record.rank;
+    result.dimensions = record.dimensions;
+    result.bytes = std::move(loaded.value().payload);
     return k3x::Result<NamedTensorPayload>::success(std::move(result));
 }
 
@@ -282,6 +339,433 @@ bool has_shape(
         if (tensor.dimensions[index++] != value) return false;
     }
     return true;
+}
+
+struct DecodedBf16Tensor {
+    std::uint64_t tensor_id{};
+    std::size_t rows{};
+    std::size_t cols{};
+    std::vector<float> values;
+
+    k3x::DenseWeightView matrix() const {
+        return {tensor_id, values, rows, cols};
+    }
+};
+
+struct DecoderLayerWeights {
+    DecodedBf16Tensor input_norm;
+    DecodedBf16Tensor post_attention_norm;
+    DecodedBf16Tensor q_a;
+    DecodedBf16Tensor q_a_norm;
+    DecodedBf16Tensor q_b;
+    DecodedBf16Tensor kv_a;
+    DecodedBf16Tensor kv_a_norm;
+    DecodedBf16Tensor kv_b;
+    DecodedBf16Tensor o;
+    DecodedBf16Tensor index_wq;
+    DecodedBf16Tensor index_wk;
+    DecodedBf16Tensor index_k_norm_weight;
+    DecodedBf16Tensor index_k_norm_bias;
+    DecodedBf16Tensor index_weights;
+    std::uint64_t payload_bytes{};
+};
+
+struct DecoderAttentionForward {
+    std::vector<float> post_attention;
+    std::vector<float> moe_input;
+    std::vector<std::vector<std::uint32_t>> dsa_topk;
+};
+
+using NamedTensorLoader = std::function<
+    k3x::Result<NamedTensorPayload>(std::string_view)>;
+
+k3x::Result<DecodedBf16Tensor> load_bf16_tensor(
+    const NamedTensorLoader& loader, std::string_view name,
+    std::initializer_list<std::uint64_t> shape) {
+    auto loaded = loader(name);
+    if (!loaded) {
+        return k3x::Result<DecodedBf16Tensor>::failure(
+            loaded.error(), loaded.message());
+    }
+    if (loaded.value().dtype != 3 || !has_shape(loaded.value(), shape)) {
+        return k3x::Result<DecodedBf16Tensor>::failure(
+            k3x::ErrorCode::invalid_directory, std::string(name));
+    }
+    auto values = decode_bf16(loaded.value().bytes);
+    if (values.empty()) {
+        return k3x::Result<DecodedBf16Tensor>::failure(
+            k3x::ErrorCode::invalid_directory, std::string(name));
+    }
+    const auto rows = shape.size() == 1 ? 1 : *shape.begin();
+    const auto cols = shape.size() == 1 ? *shape.begin() : *(shape.begin() + 1);
+    return k3x::Result<DecodedBf16Tensor>::success({
+        loaded.value().tensor_id,
+        static_cast<std::size_t>(rows),
+        static_cast<std::size_t>(cols),
+        std::move(values),
+    });
+}
+
+k3x::Result<DecoderLayerWeights> load_decoder_layer_weights(
+    const NamedTensorLoader& loader, std::uint32_t layer) {
+    const auto prefix = "model.layers." + std::to_string(layer);
+    const auto attention = prefix + ".self_attn";
+    const auto indexer = attention + ".indexer";
+    auto input_norm = load_bf16_tensor(
+        loader, prefix + ".input_layernorm.weight", {kHiddenSize});
+    auto post_norm = load_bf16_tensor(
+        loader, prefix + ".post_attention_layernorm.weight", {kHiddenSize});
+    auto q_a = load_bf16_tensor(
+        loader, attention + ".q_a_proj.weight", {kQRank, kHiddenSize});
+    auto q_a_norm = load_bf16_tensor(
+        loader, attention + ".q_a_layernorm.weight", {kQRank});
+    auto q_b = load_bf16_tensor(
+        loader, attention + ".q_b_proj.weight",
+        {kAttentionHeads * (kQkNopeDim + kRopeDim), kQRank});
+    auto kv_a = load_bf16_tensor(
+        loader, attention + ".kv_a_proj_with_mqa.weight",
+        {kKvRank + kRopeDim, kHiddenSize});
+    auto kv_a_norm = load_bf16_tensor(
+        loader, attention + ".kv_a_layernorm.weight", {kKvRank});
+    auto kv_b = load_bf16_tensor(
+        loader, attention + ".kv_b_proj.weight",
+        {kAttentionHeads * (kQkNopeDim + kValueDim), kKvRank});
+    auto o = load_bf16_tensor(
+        loader, attention + ".o_proj.weight",
+        {kHiddenSize, kAttentionHeads * kValueDim});
+    auto index_wq = load_bf16_tensor(
+        loader, indexer + ".wq_b.weight",
+        {kIndexerHeads * kIndexerHeadDim, kQRank});
+    auto index_wk = load_bf16_tensor(
+        loader, indexer + ".wk.weight", {kIndexerHeadDim, kHiddenSize});
+    auto index_k_norm_weight = load_bf16_tensor(
+        loader, indexer + ".k_norm.weight", {kIndexerHeadDim});
+    auto index_k_norm_bias = load_bf16_tensor(
+        loader, indexer + ".k_norm.bias", {kIndexerHeadDim});
+    auto index_weights = load_bf16_tensor(
+        loader, indexer + ".weights_proj.weight",
+        {kIndexerHeads, kHiddenSize});
+    const std::array<bool, 14> valid{
+        static_cast<bool>(input_norm), static_cast<bool>(post_norm),
+        static_cast<bool>(q_a), static_cast<bool>(q_a_norm),
+        static_cast<bool>(q_b), static_cast<bool>(kv_a),
+        static_cast<bool>(kv_a_norm), static_cast<bool>(kv_b),
+        static_cast<bool>(o), static_cast<bool>(index_wq),
+        static_cast<bool>(index_wk), static_cast<bool>(index_k_norm_weight),
+        static_cast<bool>(index_k_norm_bias), static_cast<bool>(index_weights),
+    };
+    if (std::find(valid.begin(), valid.end(), false) != valid.end()) {
+        return k3x::Result<DecoderLayerWeights>::failure(
+            k3x::ErrorCode::invalid_directory,
+            "invalid GLM decoder layer tensor");
+    }
+    DecoderLayerWeights result{
+        std::move(input_norm.value()),
+        std::move(post_norm.value()),
+        std::move(q_a.value()),
+        std::move(q_a_norm.value()),
+        std::move(q_b.value()),
+        std::move(kv_a.value()),
+        std::move(kv_a_norm.value()),
+        std::move(kv_b.value()),
+        std::move(o.value()),
+        std::move(index_wq.value()),
+        std::move(index_wk.value()),
+        std::move(index_k_norm_weight.value()),
+        std::move(index_k_norm_bias.value()),
+        std::move(index_weights.value()),
+        0,
+    };
+    for (const auto* tensor : {
+             &result.input_norm, &result.post_attention_norm, &result.q_a,
+             &result.q_a_norm, &result.q_b, &result.kv_a,
+             &result.kv_a_norm, &result.kv_b, &result.o, &result.index_wq,
+             &result.index_wk, &result.index_k_norm_weight,
+             &result.index_k_norm_bias, &result.index_weights}) {
+        result.payload_bytes += tensor->values.size() * 2ULL;
+    }
+    return k3x::Result<DecoderLayerWeights>::success(std::move(result));
+}
+
+void round_bf16_in_place(std::span<float> values) {
+    for (auto& value : values) value = round_to_bf16(value);
+}
+
+std::vector<float> rms_norm_bf16(
+    std::span<const float> input, std::size_t token_count,
+    std::size_t width, std::span<const float> weight, float epsilon) {
+    std::vector<float> output(input.size());
+    for (std::size_t token = 0; token < token_count; ++token) {
+        const auto offset = token * width;
+        double squares = 0.0;
+        for (std::size_t column = 0; column < width; ++column) {
+            const auto value = input[offset + column];
+            squares += static_cast<double>(value) * value;
+        }
+        const auto inverse = static_cast<float>(
+            1.0 / std::sqrt(squares / static_cast<double>(width) + epsilon));
+        for (std::size_t column = 0; column < width; ++column) {
+            output[offset + column] = round_to_bf16(
+                input[offset + column] * inverse * weight[column]);
+        }
+    }
+    return output;
+}
+
+std::vector<float> layer_norm_bf16(
+    std::span<const float> input, std::size_t token_count,
+    std::size_t width, std::span<const float> weight,
+    std::span<const float> bias, float epsilon) {
+    std::vector<float> output(input.size());
+    for (std::size_t token = 0; token < token_count; ++token) {
+        const auto offset = token * width;
+        double sum = 0.0;
+        for (std::size_t column = 0; column < width; ++column) {
+            sum += input[offset + column];
+        }
+        const auto mean = static_cast<float>(sum / static_cast<double>(width));
+        double squares = 0.0;
+        for (std::size_t column = 0; column < width; ++column) {
+            const auto centered = input[offset + column] - mean;
+            squares += static_cast<double>(centered) * centered;
+        }
+        const auto inverse = static_cast<float>(
+            1.0 / std::sqrt(squares / static_cast<double>(width) + epsilon));
+        for (std::size_t column = 0; column < width; ++column) {
+            output[offset + column] = round_to_bf16(
+                (input[offset + column] - mean) * inverse * weight[column] +
+                bias[column]);
+        }
+    }
+    return output;
+}
+
+k3x::Result<std::vector<float>> linear_tokens_bf16(
+    k3x::ComputeBackend& backend, std::span<const float> input,
+    std::size_t token_count, const DecodedBf16Tensor& weight,
+    std::uint32_t layer) {
+    if (input.size() != token_count * weight.cols) {
+        return k3x::Result<std::vector<float>>::failure(
+            k3x::ErrorCode::invalid_extent);
+    }
+    std::vector<float> output;
+    output.reserve(token_count * weight.rows);
+    for (std::size_t token = 0; token < token_count; ++token) {
+        auto projected = backend.dense_matvec(
+            input.subspan(token * weight.cols, weight.cols), weight.matrix(),
+            layer, k3x::ProfilePhase::decode);
+        if (!projected) return projected;
+        round_bf16_in_place(projected.value());
+        output.insert(output.end(), projected.value().begin(),
+                      projected.value().end());
+    }
+    return k3x::Result<std::vector<float>>::success(std::move(output));
+}
+
+void apply_interleaved_rope(
+    std::span<float> values, std::size_t token_count,
+    std::size_t groups, std::size_t width, std::size_t rope_offset) {
+    constexpr auto half = kRopeDim / 2;
+    std::array<float, kRopeDim> rotated{};
+    for (std::size_t token = 0; token < token_count; ++token) {
+        for (std::size_t group = 0; group < groups; ++group) {
+            const auto base = (token * groups + group) * width + rope_offset;
+            for (std::size_t pair = 0; pair < half; ++pair) {
+                const auto exponent = static_cast<double>(pair * 2) /
+                                      static_cast<double>(kRopeDim);
+                const auto angle = static_cast<double>(token) /
+                                   std::pow(kRopeTheta, exponent);
+                const auto cosine = static_cast<float>(std::cos(angle));
+                const auto sine = static_cast<float>(std::sin(angle));
+                const auto even = values[base + pair * 2];
+                const auto odd = values[base + pair * 2 + 1];
+                rotated[pair] = even * cosine - odd * sine;
+                rotated[half + pair] = odd * cosine + even * sine;
+            }
+            std::copy(rotated.begin(), rotated.end(), values.begin() + base);
+        }
+    }
+}
+
+k3x::Result<DecoderAttentionForward> run_decoder_attention(
+    k3x::ComputeBackend& backend, const DecoderLayerWeights& weights,
+    std::span<const float> hidden, std::size_t token_count,
+    std::uint32_t layer) {
+    if (token_count == 0 || token_count > 2048 ||
+        hidden.size() != token_count * kHiddenSize) {
+        return k3x::Result<DecoderAttentionForward>::failure(
+            k3x::ErrorCode::invalid_extent);
+    }
+    auto normalized = rms_norm_bf16(
+        hidden, token_count, kHiddenSize, weights.input_norm.values, 1.0e-5F);
+    auto q_resid = linear_tokens_bf16(
+        backend, normalized, token_count, weights.q_a, layer);
+    if (!q_resid) {
+        return k3x::Result<DecoderAttentionForward>::failure(
+            q_resid.error(), q_resid.message());
+    }
+    q_resid.value() = rms_norm_bf16(
+        q_resid.value(), token_count, kQRank, weights.q_a_norm.values,
+        1.0e-5F);
+
+    auto index_q = linear_tokens_bf16(
+        backend, q_resid.value(), token_count, weights.index_wq, layer);
+    auto index_k = linear_tokens_bf16(
+        backend, normalized, token_count, weights.index_wk, layer);
+    auto index_weights = linear_tokens_bf16(
+        backend, normalized, token_count, weights.index_weights, layer);
+    if (!index_q || !index_k || !index_weights) {
+        return k3x::Result<DecoderAttentionForward>::failure(
+            k3x::ErrorCode::backend_unavailable,
+            "GLM DSA projection failed");
+    }
+    index_k.value() = layer_norm_bf16(
+        index_k.value(), token_count, kIndexerHeadDim,
+        weights.index_k_norm_weight.values, weights.index_k_norm_bias.values,
+        1.0e-6F);
+    apply_interleaved_rope(
+        index_q.value(), token_count, kIndexerHeads, kIndexerHeadDim, 0);
+    apply_interleaved_rope(
+        index_k.value(), token_count, 1, kIndexerHeadDim, 0);
+    const auto index_scale = 1.0F / std::sqrt(
+        static_cast<float>(kIndexerHeadDim));
+    const auto head_scale = 1.0F / std::sqrt(
+        static_cast<float>(kIndexerHeads));
+    std::vector<std::vector<std::uint32_t>> dsa_topk(token_count);
+    for (std::size_t query = 0; query < token_count; ++query) {
+        std::vector<std::pair<float, std::uint32_t>> scores;
+        scores.reserve(token_count);
+        for (std::size_t key = 0; key < token_count; ++key) {
+            float combined = -INFINITY;
+            if (key <= query) {
+                combined = 0.0F;
+                for (std::size_t head = 0; head < kIndexerHeads; ++head) {
+                    float dot = 0.0F;
+                    const auto q_offset =
+                        (query * kIndexerHeads + head) * kIndexerHeadDim;
+                    const auto k_offset = key * kIndexerHeadDim;
+                    for (std::size_t column = 0;
+                         column < kIndexerHeadDim; ++column) {
+                        dot += index_q.value()[q_offset + column] *
+                               index_k.value()[k_offset + column];
+                    }
+                    combined += std::max(dot * index_scale, 0.0F) *
+                        index_weights.value()[query * kIndexerHeads + head] *
+                        head_scale;
+                }
+            }
+            scores.emplace_back(combined, static_cast<std::uint32_t>(key));
+        }
+        std::stable_sort(
+            scores.begin(), scores.end(),
+            [](const auto& left, const auto& right) {
+                return left.first > right.first;
+            });
+        auto& selected = dsa_topk[query];
+        selected.reserve(scores.size());
+        for (const auto& [score, key] : scores) {
+            static_cast<void>(score);
+            selected.push_back(key);
+        }
+    }
+
+    auto q_states = linear_tokens_bf16(
+        backend, q_resid.value(), token_count, weights.q_b, layer);
+    auto compressed = linear_tokens_bf16(
+        backend, normalized, token_count, weights.kv_a, layer);
+    if (!q_states || !compressed) {
+        return k3x::Result<DecoderAttentionForward>::failure(
+            k3x::ErrorCode::backend_unavailable,
+            "GLM MLA projection failed");
+    }
+
+    std::vector<float> kv_nope(token_count * kKvRank);
+    for (std::size_t token = 0; token < token_count; ++token) {
+        const auto source = token * (kKvRank + kRopeDim);
+        std::copy_n(compressed.value().begin() + source, kKvRank,
+                    kv_nope.begin() + token * kKvRank);
+    }
+    kv_nope = rms_norm_bf16(
+        kv_nope, token_count, kKvRank, weights.kv_a_norm.values, 1.0e-5F);
+    apply_interleaved_rope(
+        q_states.value(), token_count, kAttentionHeads,
+        kQkNopeDim + kRopeDim, kQkNopeDim);
+    apply_interleaved_rope(
+        compressed.value(), token_count, 1, kKvRank + kRopeDim, kKvRank);
+    auto expanded = linear_tokens_bf16(
+        backend, kv_nope, token_count, weights.kv_b, layer);
+    if (!expanded) {
+        return k3x::Result<DecoderAttentionForward>::failure(
+            expanded.error(), expanded.message());
+    }
+    constexpr auto qk_width = kQkNopeDim + kRopeDim;
+    constexpr auto kv_width = kQkNopeDim + kValueDim;
+    const auto attention_scale = 1.0F / std::sqrt(
+        static_cast<float>(qk_width));
+    std::vector<float> attended(
+        token_count * kAttentionHeads * kValueDim, 0.0F);
+    std::vector<float> logits(token_count);
+    std::vector<float> probabilities(token_count);
+    for (std::size_t query = 0; query < token_count; ++query) {
+        for (std::size_t head = 0; head < kAttentionHeads; ++head) {
+            float maximum = -INFINITY;
+            for (std::size_t key = 0; key <= query; ++key) {
+                float dot = 0.0F;
+                const auto q_offset = (query * kAttentionHeads + head) * qk_width;
+                const auto kv_offset =
+                    (key * kAttentionHeads + head) * kv_width;
+                const auto rot_offset = key * (kKvRank + kRopeDim) + kKvRank;
+                for (std::size_t column = 0; column < kQkNopeDim; ++column) {
+                    dot += q_states.value()[q_offset + column] *
+                           expanded.value()[kv_offset + column];
+                }
+                for (std::size_t column = 0; column < kRopeDim; ++column) {
+                    dot += q_states.value()[q_offset + kQkNopeDim + column] *
+                           compressed.value()[rot_offset + column];
+                }
+                logits[key] = dot * attention_scale;
+                maximum = std::max(maximum, logits[key]);
+            }
+            float denominator = 0.0F;
+            for (std::size_t key = 0; key <= query; ++key) {
+                probabilities[key] = std::exp(logits[key] - maximum);
+                denominator += probabilities[key];
+            }
+            for (std::size_t key = 0; key <= query; ++key) {
+                probabilities[key] = round_to_bf16(
+                    probabilities[key] / denominator);
+            }
+            const auto output_offset =
+                (query * kAttentionHeads + head) * kValueDim;
+            for (std::size_t column = 0; column < kValueDim; ++column) {
+                float sum = 0.0F;
+                for (std::size_t key = 0; key <= query; ++key) {
+                    const auto value_offset =
+                        (key * kAttentionHeads + head) * kv_width +
+                        kQkNopeDim + column;
+                    sum += probabilities[key] * expanded.value()[value_offset];
+                }
+                attended[output_offset + column] = round_to_bf16(sum);
+            }
+        }
+    }
+    auto attention_output = linear_tokens_bf16(
+        backend, attended, token_count, weights.o, layer);
+    if (!attention_output) {
+        return k3x::Result<DecoderAttentionForward>::failure(
+            attention_output.error(), attention_output.message());
+    }
+    DecoderAttentionForward result;
+    result.post_attention.resize(hidden.size());
+    for (std::size_t index = 0; index < hidden.size(); ++index) {
+        result.post_attention[index] = round_to_bf16(
+            hidden[index] + attention_output.value()[index]);
+    }
+    result.moe_input = rms_norm_bf16(
+        result.post_attention, token_count, kHiddenSize,
+        weights.post_attention_norm.values, 1.0e-5F);
+    result.dsa_topk = std::move(dsa_topk);
+    return k3x::Result<DecoderAttentionForward>::success(std::move(result));
 }
 
 std::vector<k3x::ExpertMajorTokenRoute> build_learned_routes(
@@ -350,6 +834,21 @@ float maximum_absolute_value(std::span<const float> values) {
     return result;
 }
 
+float relative_l2_difference(
+    std::span<const float> left, std::span<const float> right) {
+    if (left.size() != right.size() || left.empty()) return INFINITY;
+    double difference = 0.0;
+    double reference = 0.0;
+    for (std::size_t index = 0; index < left.size(); ++index) {
+        const auto delta = static_cast<double>(left[index]) - right[index];
+        difference += delta * delta;
+        reference += static_cast<double>(right[index]) * right[index];
+    }
+    return reference == 0.0
+        ? (difference == 0.0 ? 0.0F : INFINITY)
+        : static_cast<float>(std::sqrt(difference / reference));
+}
+
 std::vector<std::filesystem::path> artifact_paths(
     const std::filesystem::path& directory) {
     std::vector<std::filesystem::path> result;
@@ -366,53 +865,115 @@ std::vector<std::filesystem::path> artifact_paths(
 
 int main(int argc, char** argv) {
     const auto arguments = parse_arguments(argc, argv);
-    if (!arguments || !std::filesystem::is_directory(arguments->artifact_dir)) {
-        std::cerr << "usage: --artifact-dir DIR --layer N --expert N "
+    if (!arguments ||
+        (!arguments->artifact_dir.empty() &&
+         !std::filesystem::is_directory(arguments->artifact_dir)) ||
+        (!arguments->runtime_index.empty() &&
+         !std::filesystem::is_regular_file(arguments->runtime_index))) {
+        std::cerr << "usage: (--artifact-dir DIR | --runtime-index FILE) "
+                     "--layer N --expert N "
                      "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
-                     "[--workspace-bytes N] [--resident-bytes N] [--precision fp32|bf16-rounded] "
-                     "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major|learned-expert-major|learned-moe-layer] "
+                     "[--workspace-bytes N] [--resident-bytes N] [--precision fp32|bf16-rounded|w8a16-g128] "
+                     "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major|learned-expert-major|learned-moe-layer|learned-decoder-layer] "
                      "[--device-accumulate 0|1] "
                      "[--fuse-shared 0|1] "
                      "[--input-bf16 FILE] [--expected-bf16 FILE]\n";
         return 2;
     }
-    const auto paths = artifact_paths(arguments->artifact_dir);
-    if (paths.empty()) return 3;
     k3x::ReaderOptions reader_options;
     reader_options.verify = k3x::VerifyMode::metadata_only;
+    std::vector<std::filesystem::path> paths;
     std::vector<k3x::Reader> readers;
-    readers.reserve(paths.size());
-    for (const auto& path : paths) {
-        auto reader = k3x::Reader::open(path, reader_options);
-        if (!reader) {
-            std::cerr << k3x::error_code_name(reader.error()) << ": "
-                      << reader.message() << '\n';
+    std::vector<const k3x::Reader*> shard_views;
+    std::optional<k3x::Glm5xRuntimeIndex> runtime_index;
+    if (!arguments->artifact_dir.empty()) {
+        paths = artifact_paths(arguments->artifact_dir);
+        if (paths.empty()) return 3;
+        readers.reserve(paths.size());
+        for (const auto& path : paths) {
+            auto reader = k3x::Reader::open(path, reader_options);
+            if (!reader) {
+                std::cerr << k3x::error_code_name(reader.error()) << ": "
+                          << reader.message() << '\n';
+                return 4;
+            }
+            readers.push_back(std::move(reader.value()));
+        }
+        shard_views.reserve(readers.size());
+        for (const auto& reader : readers) shard_views.push_back(&reader);
+    } else {
+        auto opened = k3x::Glm5xRuntimeIndex::open(
+            arguments->runtime_index, reader_options);
+        if (!opened) {
+            std::cerr << k3x::error_code_name(opened.error()) << ": "
+                      << opened.message() << '\n';
             return 4;
         }
-        readers.push_back(std::move(reader.value()));
+        runtime_index.emplace(std::move(opened.value()));
     }
-    std::vector<const k3x::Reader*> shard_views;
-    shard_views.reserve(readers.size());
-    for (const auto& reader : readers) shard_views.push_back(&reader);
     std::set<std::uint32_t> available_experts;
-    for (const auto& reader : readers) {
-        for (const auto& record : reader.tensors()) {
-            if (record.layer_id == static_cast<std::int32_t>(arguments->layer) &&
-                record.expert_id >= 0) {
-                available_experts.insert(static_cast<std::uint32_t>(record.expert_id));
+    if (runtime_index) {
+        for (std::uint32_t expert_id = 0; expert_id < 256; ++expert_id) {
+            const auto prefix =
+                "model.layers." + std::to_string(arguments->layer) +
+                ".mlp.experts." + std::to_string(expert_id) + ".";
+            if (runtime_index->contains_tensor(
+                    k3x::fnv1a64((prefix + "gate_proj.weight").c_str())) &&
+                runtime_index->contains_tensor(
+                    k3x::fnv1a64((prefix + "up_proj.weight").c_str())) &&
+                runtime_index->contains_tensor(
+                    k3x::fnv1a64((prefix + "down_proj.weight").c_str()))) {
+                available_experts.insert(expert_id);
+            }
+        }
+    } else {
+        for (const auto& reader : readers) {
+            for (const auto& record : reader.tensors()) {
+                if (record.layer_id ==
+                        static_cast<std::int32_t>(arguments->layer) &&
+                    record.expert_id >= 0) {
+                    available_experts.insert(
+                        static_cast<std::uint32_t>(record.expert_id));
+                }
             }
         }
     }
+    const auto load_source_tensor = [&](std::string_view name) {
+        return runtime_index
+            ? load_named_tensor(*runtime_index, name)
+            : load_named_tensor(shard_views, name);
+    };
+    const auto load_source_expert = [&](std::uint32_t expert_id) {
+        return runtime_index
+            ? runtime_index->read_expert(
+                  arguments->layer, expert_id,
+                  kHiddenSize, kIntermediateSize)
+            : k3x::load_glm5x_bf16_expert(
+                  shard_views, arguments->layer, expert_id,
+                  kHiddenSize, kIntermediateSize);
+    };
     const bool sparse_packed = arguments->input_mode == "sparse-packed";
     const bool expert_major = arguments->input_mode == "expert-major";
     const bool learned_expert_major =
         arguments->input_mode == "learned-expert-major";
     const bool learned_moe_layer =
         arguments->input_mode == "learned-moe-layer";
-    const bool learned_route_mode = learned_expert_major || learned_moe_layer;
+    const bool learned_decoder_layer =
+        arguments->input_mode == "learned-decoder-layer";
+    const bool learned_route_mode =
+        learned_expert_major || learned_moe_layer || learned_decoder_layer;
+    if (learned_decoder_layer &&
+        (arguments->runtime_index.empty() || arguments->input_bf16.empty() ||
+         arguments->expected_bf16.empty() || arguments->tokens > 2048)) {
+        std::cerr << "learned decoder layer requires runtime index, input, "
+                     "expected output, and at most 2048 tokens\n";
+        return 7;
+    }
     if (learned_route_mode &&
-        (arguments->precision != "bf16-rounded" || arguments->tokens == 0)) {
-        std::cerr << "learned GLM modes require --precision bf16-rounded\n";
+        ((arguments->precision != "bf16-rounded" &&
+          arguments->precision != "w8a16-g128") ||
+         arguments->tokens == 0)) {
+        std::cerr << "learned GLM modes require BF16 or W8A16 precision\n";
         return 7;
     }
     const auto logical_token_count = arguments->tokens;
@@ -421,11 +982,15 @@ int main(int argc, char** argv) {
     std::vector<float> input(input_value_count);
     for (std::size_t index = 0; index < input.size(); ++index) {
         input[index] = static_cast<float>(static_cast<int>(index % 29) - 14) * 0.01F;
-        if (arguments->precision == "bf16-rounded") input[index] = round_to_bf16(input[index]);
+        if (arguments->precision == "bf16-rounded" ||
+            arguments->precision == "w8a16-g128") {
+            input[index] = round_to_bf16(input[index]);
+        }
     }
     if (!arguments->input_bf16.empty()) {
-        if (arguments->precision != "bf16-rounded") {
-            std::cerr << "--input-bf16 requires --precision bf16-rounded\n";
+        if (arguments->precision != "bf16-rounded" &&
+            arguments->precision != "w8a16-g128") {
+            std::cerr << "--input-bf16 requires BF16-compatible precision\n";
             return 7;
         }
         const auto activation = k3x::load_glm5x_bf16_activation(
@@ -459,17 +1024,69 @@ int main(int argc, char** argv) {
             return 7;
         }
     }
+    k3x::BackendOptions options;
+    options.kind = k3x::BackendKind::cuda_custom;
+    options.dense_precision =
+        (arguments->precision == "bf16-rounded" ||
+         arguments->precision == "w8a16-g128")
+        ? k3x::DensePrecision::bf16_rounded : k3x::DensePrecision::fp32;
+    options.cuda_allocation = k3x::CudaAllocationMode::reused;
+    options.cuda_weights = k3x::CudaWeightMode::resident;
+    const auto use_grid = arguments->precision == "bf16-rounded" ||
+                          arguments->precision == "w8a16-g128";
+    options.cuda_batching = use_grid
+        ? k3x::CudaBatchingMode::resident_grid : k3x::CudaBatchingMode::scalar;
+    options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
+    options.cuda_transfer = k3x::CudaTransferMode::synchronous;
+    options.cuda_cublas_workspace_bytes = arguments->workspace_bytes;
+    options.cuda_bf16_output = arguments->output == "bf16"
+        ? k3x::CudaBf16OutputMode::bf16 : k3x::CudaBf16OutputMode::fp32;
+    options.cuda_expert_major_device_accumulate = arguments->device_accumulate;
+    options.cuda_weight_validation = k3x::CudaWeightValidationMode::admission;
+    options.cuda_resident_bytes = arguments->resident_bytes;
+    auto cuda = k3x::make_cuda_backend(options);
+    if (!cuda) {
+        std::cerr << k3x::error_code_name(cuda.error()) << ": "
+                  << cuda.message() << '\n';
+        return 7;
+    }
+    std::optional<DecoderLayerWeights> decoder_weights;
+    std::optional<DecoderAttentionForward> initial_attention;
+    std::vector<float> decoder_layer_input;
+    std::uint64_t decoder_prepare_nanoseconds = 0;
+    if (learned_decoder_layer) {
+        const auto decoder_started = std::chrono::steady_clock::now();
+        auto loaded = load_decoder_layer_weights(
+            NamedTensorLoader(load_source_tensor), arguments->layer);
+        if (!loaded) {
+            std::cerr << "invalid GLM decoder layer tensor\n";
+            return 5;
+        }
+        decoder_weights.emplace(std::move(loaded.value()));
+        decoder_layer_input = input;
+        auto forwarded = run_decoder_attention(
+            *cuda.value(), *decoder_weights, decoder_layer_input,
+            arguments->tokens, arguments->layer);
+        if (!forwarded) {
+            std::cerr << k3x::error_code_name(forwarded.error()) << ": "
+                      << forwarded.message() << '\n';
+            return 5;
+        }
+        initial_attention.emplace(std::move(forwarded.value()));
+        input = initial_attention->moe_input;
+        decoder_prepare_nanoseconds = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - decoder_started).count());
+    }
     std::vector<k3x::ExpertMajorTokenRoute> learned_routes;
     std::vector<std::uint32_t> expert_ids;
     std::uint64_t router_payload_bytes = 0;
     const auto host_start = std::chrono::steady_clock::now();
     if (learned_route_mode) {
-        const auto router = load_named_tensor(
-            shard_views,
+        const auto router = load_source_tensor(
             "model.layers." + std::to_string(arguments->layer) +
                 ".mlp.gate.weight");
-        const auto bias = load_named_tensor(
-            shard_views,
+        const auto bias = load_source_tensor(
             "model.layers." + std::to_string(arguments->layer) +
                 ".mlp.gate.e_score_correction_bias");
         if (!router || !bias || router.value().dtype != 3 ||
@@ -511,9 +1128,7 @@ int main(int argc, char** argv) {
     fixtures.reserve(expert_ids.size());
     std::uint64_t host_payload_bytes = 0;
     for (const auto expert_id : expert_ids) {
-        auto loaded = k3x::load_glm5x_bf16_expert(
-            shard_views, arguments->layer, expert_id,
-            kHiddenSize, kIntermediateSize);
+        auto loaded = load_source_expert(expert_id);
         if (!loaded) {
             std::cerr << k3x::error_code_name(loaded.error()) << ": "
                       << loaded.message() << '\n';
@@ -550,6 +1165,23 @@ int main(int argc, char** argv) {
             {up_id, fixture.payload.roles[1], kIntermediateSize, kHiddenSize},
             {down_id, fixture.payload.roles[2], kHiddenSize, kIntermediateSize},
         };
+        if (arguments->precision == "w8a16-g128") {
+            const std::array shapes{
+                std::array<std::size_t, 2>{kIntermediateSize, kHiddenSize},
+                std::array<std::size_t, 2>{kIntermediateSize, kHiddenSize},
+                std::array<std::size_t, 2>{kHiddenSize, kIntermediateSize},
+            };
+            for (std::size_t index = 0; index < fixture.w8a16.size(); ++index) {
+                auto packed = k3x::pack_w8a16_bf16(
+                    fixture.payload.roles[index], shapes[index][0],
+                    shapes[index][1], 128);
+                if (!packed) {
+                    std::cerr << "W8A16 expert packing failed\n";
+                    return 7;
+                }
+                fixture.w8a16[index] = std::move(packed.value());
+            }
+        }
         if (needs_float_view) {
             fixture.dense = {
                 {gate_id, fixture.weights[0], kIntermediateSize, kHiddenSize},
@@ -561,7 +1193,7 @@ int main(int argc, char** argv) {
     }
     SharedExpertFixture shared_fixture;
     std::uint64_t shared_payload_bytes = 0;
-    if (learned_moe_layer) {
+    if (learned_moe_layer || learned_decoder_layer) {
         const auto layer_prefix =
             "model.layers." + std::to_string(arguments->layer) +
             ".mlp.shared_experts.";
@@ -576,7 +1208,7 @@ int main(int argc, char** argv) {
             {kHiddenSize, kIntermediateSize},
         }};
         for (std::size_t index = 0; index < names.size(); ++index) {
-            auto payload = load_named_tensor(shard_views, names[index]);
+            auto payload = load_source_tensor(names[index]);
             if (!payload || payload.value().dtype != 3 ||
                 !has_shape(payload.value(),
                            {shapes[index][0], shapes[index][1]})) {
@@ -615,6 +1247,18 @@ int main(int argc, char** argv) {
     const auto host_load_ns = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - host_start).count());
+    k3x::ReadCounters source_reads;
+    if (runtime_index) {
+        source_reads = runtime_index->counters();
+    } else {
+        for (const auto& reader : readers) {
+            const auto counters = reader.counters();
+            source_reads.calls += counters.calls;
+            source_reads.completed_bytes += counters.completed_bytes;
+        }
+    }
+    const auto source_artifact_count = runtime_index
+        ? runtime_index->artifact_count() : paths.size();
     if (sparse_packed &&
         (arguments->precision != "bf16-rounded" || arguments->tokens != 2)) {
         std::cerr << "sparse-packed requires --precision bf16-rounded --tokens 2\n";
@@ -628,9 +1272,11 @@ int main(int argc, char** argv) {
         return 7;
     }
     if (learned_route_mode &&
-        (arguments->precision != "bf16-rounded" || arguments->tokens == 0 ||
+        ((arguments->precision != "bf16-rounded" &&
+          arguments->precision != "w8a16-g128") ||
+         arguments->tokens == 0 ||
          fixtures.size() < 2)) {
-        std::cerr << "learned GLM modes require BF16 precision and at least "
+        std::cerr << "learned GLM modes require BF16-compatible precision and at least "
                      "two selected experts\n";
         return 7;
     }
@@ -638,6 +1284,23 @@ int main(int argc, char** argv) {
     raw_views.reserve(fixtures.size());
     for (const auto& fixture : fixtures) {
         raw_views.push_back(fixture.raw);
+    }
+    std::vector<k3x::W8A16MlpView> w8a16_views;
+    if (arguments->precision == "w8a16-g128") {
+        w8a16_views.reserve(fixtures.size());
+        for (const auto& fixture : fixtures) {
+            const auto view = [](const k3x::W8A16PackedWeight& weight,
+                                 std::uint64_t tensor_id) {
+                return k3x::W8A16WeightView{
+                    tensor_id, weight.values, weight.scales, weight.rows,
+                    weight.cols, weight.group_size};
+            };
+            w8a16_views.push_back({
+                view(fixture.w8a16[0], fixture.raw.gate.tensor_id),
+                view(fixture.w8a16[1], fixture.raw.up.tensor_id),
+                view(fixture.w8a16[2], fixture.raw.down.tensor_id),
+            });
+        }
     }
     std::optional<k3x::ExpertMajorPackedPlan> expert_major_plan;
     std::vector<k3x::RawBf16MlpView> expert_major_views;
@@ -673,6 +1336,8 @@ int main(int argc, char** argv) {
         }
         expert_major_plan = std::move(built.value());
         expert_major_views.reserve(expert_major_plan->groups.size());
+        std::vector<k3x::W8A16MlpView> ordered_w8a16_views;
+        ordered_w8a16_views.reserve(expert_major_plan->groups.size());
         for (const auto& group : expert_major_plan->groups) {
             const auto fixture = std::find_if(
                 fixtures.begin(), fixtures.end(),
@@ -681,6 +1346,14 @@ int main(int argc, char** argv) {
                 });
             if (fixture == fixtures.end()) return 8;
             expert_major_views.push_back(fixture->raw);
+            if (arguments->precision == "w8a16-g128") {
+                const auto index = static_cast<std::size_t>(
+                    std::distance(fixtures.begin(), fixture));
+                ordered_w8a16_views.push_back(w8a16_views[index]);
+            }
+        }
+        if (arguments->precision == "w8a16-g128") {
+            w8a16_views = std::move(ordered_w8a16_views);
         }
     }
     std::vector<float> packed_input;
@@ -691,29 +1364,6 @@ int main(int argc, char** argv) {
             std::copy_n(input.begin() + token * kHiddenSize, kHiddenSize,
                         packed_input.begin() + expert * kHiddenSize);
         }
-    }
-    k3x::BackendOptions options;
-    options.kind = k3x::BackendKind::cuda_custom;
-    options.dense_precision = arguments->precision == "bf16-rounded"
-        ? k3x::DensePrecision::bf16_rounded : k3x::DensePrecision::fp32;
-    options.cuda_allocation = k3x::CudaAllocationMode::reused;
-    options.cuda_weights = k3x::CudaWeightMode::resident;
-    const auto use_grid = arguments->precision == "bf16-rounded";
-    options.cuda_batching = use_grid
-        ? k3x::CudaBatchingMode::resident_grid : k3x::CudaBatchingMode::scalar;
-    options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
-    options.cuda_transfer = k3x::CudaTransferMode::synchronous;
-    options.cuda_cublas_workspace_bytes = arguments->workspace_bytes;
-    options.cuda_bf16_output = arguments->output == "bf16"
-        ? k3x::CudaBf16OutputMode::bf16 : k3x::CudaBf16OutputMode::fp32;
-    options.cuda_expert_major_device_accumulate = arguments->device_accumulate;
-    options.cuda_weight_validation = k3x::CudaWeightValidationMode::admission;
-    options.cuda_resident_bytes = arguments->resident_bytes;
-    auto cuda = k3x::make_cuda_backend(options);
-    if (!cuda) {
-        std::cerr << k3x::error_code_name(cuda.error()) << ": "
-                  << cuda.message() << '\n';
-        return 7;
     }
     auto cpu = k3x::make_cpu_backend();
     constexpr auto activation = k3x::MlpActivation::silu;
@@ -744,7 +1394,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        if (learned_moe_layer) {
+        if (learned_moe_layer || learned_decoder_layer) {
             for (std::size_t token = 0; token < arguments->tokens; ++token) {
                 const auto token_input = std::span<const float>(input).subspan(
                     token * kHiddenSize, kHiddenSize);
@@ -771,23 +1421,43 @@ int main(int argc, char** argv) {
         cpu_reference.insert(cpu_reference.end(), reference.value().begin(),
                              reference.value().end());
     }
-    const auto execute = [&]() {
-        if (learned_moe_layer) {
+    if (learned_decoder_layer) {
+        if (!initial_attention || cpu_reference.size() !=
+                                      initial_attention->post_attention.size()) {
+            return 8;
+        }
+        for (std::size_t index = 0; index < cpu_reference.size(); ++index) {
+            cpu_reference[index] = round_to_bf16(
+                initial_attention->post_attention[index] +
+                round_to_bf16(cpu_reference[index]));
+        }
+    }
+    const auto execute_learned_moe = [&]
+        (std::span<const float> current_input,
+         const k3x::ExpertMajorPackedPlan& current_plan)
+        -> k3x::Result<std::vector<float>> {
+        if (arguments->precision == "w8a16-g128") {
+            return cuda.value()->w8a16_silu_mlp_expert_major_with_shared(
+                current_input, arguments->tokens, current_plan,
+                w8a16_views, shared_fixture.raw, arguments->layer,
+                k3x::ProfilePhase::decode);
+        }
+        if (learned_moe_layer || learned_decoder_layer) {
             if (arguments->fuse_shared) {
                 return cuda.value()->raw_bf16_situ_mlp_expert_major_with_shared(
-                    input, arguments->tokens, *expert_major_plan,
+                    current_input, arguments->tokens, current_plan,
                     expert_major_views, shared_fixture.raw, 1.0F, std::nullopt,
                     arguments->layer, k3x::ProfilePhase::decode, activation);
             }
             auto routed = cuda.value()->raw_bf16_situ_mlp_expert_major(
-                input, arguments->tokens, *expert_major_plan,
+                current_input, arguments->tokens, current_plan,
                 expert_major_views, 1.0F, std::nullopt, arguments->layer,
                 k3x::ProfilePhase::decode, activation);
             if (!routed) return routed;
             const std::array<k3x::RawBf16MlpView, 1> shared_views{
                 shared_fixture.raw};
             auto shared = cuda.value()->raw_bf16_situ_mlp_grid(
-                input, arguments->tokens, shared_views, 1.0F, std::nullopt,
+                current_input, arguments->tokens, shared_views, 1.0F, std::nullopt,
                 arguments->layer, k3x::ProfilePhase::decode, activation);
             if (!shared) {
                 return k3x::Result<std::vector<float>>::failure(
@@ -804,11 +1474,52 @@ int main(int argc, char** argv) {
             }
             return routed;
         }
+        return cuda.value()->raw_bf16_situ_mlp_expert_major(
+            current_input, arguments->tokens, current_plan,
+            expert_major_views, 1.0F, std::nullopt, arguments->layer,
+            k3x::ProfilePhase::decode, activation);
+    };
+    const auto execute = [&]() -> k3x::Result<std::vector<float>> {
+        if (learned_decoder_layer) {
+            auto attention = run_decoder_attention(
+                *cuda.value(), *decoder_weights, decoder_layer_input,
+                arguments->tokens, arguments->layer);
+            if (!attention) {
+                return k3x::Result<std::vector<float>>::failure(
+                    attention.error(), attention.message());
+            }
+            auto plan = k3x::build_expert_major_packed_plan(
+                attention.value().moe_input, arguments->tokens, kHiddenSize,
+                learned_routes);
+            if (!plan || plan.value().groups.size() !=
+                             expert_major_views.size()) {
+                return k3x::Result<std::vector<float>>::failure(
+                    k3x::ErrorCode::invalid_state,
+                    "decoder layer route plan changed");
+            }
+            auto moe = execute_learned_moe(
+                attention.value().moe_input, plan.value());
+            if (!moe) {
+                return moe;
+            }
+            if (moe.value().size() !=
+                attention.value().post_attention.size()) {
+                return k3x::Result<std::vector<float>>::failure(
+                    k3x::ErrorCode::invalid_extent,
+                    "decoder layer MoE output shape mismatch");
+            }
+            for (std::size_t index = 0; index < moe.value().size(); ++index) {
+                moe.value()[index] = round_to_bf16(
+                    attention.value().post_attention[index] +
+                    round_to_bf16(moe.value()[index]));
+            }
+            return moe;
+        }
+        if (learned_moe_layer) {
+            return execute_learned_moe(input, *expert_major_plan);
+        }
         if (expert_major || learned_expert_major) {
-            return cuda.value()->raw_bf16_situ_mlp_expert_major(
-                input, arguments->tokens, *expert_major_plan,
-                expert_major_views, 1.0F, std::nullopt, arguments->layer,
-                k3x::ProfilePhase::decode, activation);
+            return execute_learned_moe(input, *expert_major_plan);
         }
         if (use_grid) {
             auto outputs = sparse_packed
@@ -844,6 +1555,7 @@ int main(int argc, char** argv) {
         }
         return k3x::Result<std::vector<float>>::success(std::move(last));
     };
+    const auto stats_before_cold = cuda.value()->runtime_stats();
     const auto cold_start = std::chrono::steady_clock::now();
     const auto cold = execute();
     const auto cold_ns = static_cast<std::uint64_t>(
@@ -875,6 +1587,7 @@ int main(int argc, char** argv) {
     const auto stats_after = cuda.value()->runtime_stats();
     const auto cpu_abs = maximum_absolute_difference(actual, cpu_reference);
     const auto cpu_scale = std::max(maximum_absolute_value(cpu_reference), 1.0e-6F);
+    const auto cpu_relative_l2 = relative_l2_difference(actual, cpu_reference);
     std::optional<float> cpu_expected_abs;
     std::optional<float> cpu_expected_rel;
     std::optional<float> expected_abs;
@@ -885,7 +1598,8 @@ int main(int argc, char** argv) {
             maximum_absolute_value(*expected_output), 1.0e-6F);
         cpu_expected_rel = *cpu_expected_abs / cpu_expected_scale;
         auto expected_actual = actual;
-        if (arguments->precision == "bf16-rounded") {
+        if (arguments->precision == "bf16-rounded" ||
+            arguments->precision == "w8a16-g128") {
             for (auto& value : expected_actual) value = round_to_bf16(value);
         }
         expected_abs = maximum_absolute_difference(
@@ -920,22 +1634,57 @@ int main(int argc, char** argv) {
         }
         std::cout << ']';
     };
+    const auto emit_decoder_telemetry = [&]() {
+        if (!initial_attention) return;
+        std::cout << ",\"dsa_topk_indices\":[";
+        for (std::size_t token = 0;
+             token < initial_attention->dsa_topk.size(); ++token) {
+            if (token != 0) std::cout << ',';
+            std::cout << '[';
+            for (std::size_t slot = 0;
+                 slot < initial_attention->dsa_topk[token].size(); ++slot) {
+                if (slot != 0) std::cout << ',';
+                std::cout << initial_attention->dsa_topk[token][slot];
+            }
+            std::cout << ']';
+        }
+        std::cout << ']';
+    };
+    std::uint64_t w8a16_payload_bytes = 0;
+    for (const auto& fixture : fixtures) {
+        for (const auto& weight : fixture.w8a16) {
+            w8a16_payload_bytes += weight.values.size() + weight.scales.size();
+        }
+    }
     std::cout << std::setprecision(12)
               << "{\"artifact_kind\":\""
-              << ((expert_major || learned_route_mode)
-                      ? (learned_moe_layer
-                             ? "glm5.2_real_bf16_learned_moe_layer"
-                             : (learned_expert_major
-                                    ? "glm5.2_real_bf16_learned_expert_major"
-                                    : "glm5.2_real_bf16_expert_major"))
-                      : "glm5.2_real_bf16_expert")
+              << (arguments->precision == "w8a16-g128"
+                      ? (learned_decoder_layer
+                             ? "glm5.2_real_w8a16_decoder_layer"
+                             : "glm5.2_real_w8a16_learned_moe_layer")
+                      : ((expert_major || learned_route_mode)
+                      ? (learned_decoder_layer
+                             ? "glm5.2_real_bf16_decoder_layer"
+                             : (learned_moe_layer
+                                    ? "glm5.2_real_bf16_learned_moe_layer"
+                                    : (learned_expert_major
+                                           ? "glm5.2_real_bf16_learned_expert_major"
+                                           : "glm5.2_real_bf16_expert_major")))
+                      : "glm5.2_real_bf16_expert"))
               << "\""
               << ",\"layer_id\":" << arguments->layer
               << ",\"expert_id\":" << expert_ids.front()
               << ",\"expert_count\":" << expert_ids.size()
               << ",\"token_count\":" << arguments->tokens
               << ",\"last_expert_id\":" << expert_ids.back()
-              << ",\"shard_count\":" << paths.size()
+              << ",\"shard_count\":" << source_artifact_count
+              << ",\"source_kind\":\""
+              << (runtime_index ? "runtime_index" : "artifact_directory")
+              << "\""
+              << ",\"source_artifact_count\":" << source_artifact_count
+              << ",\"source_read_calls\":" << source_reads.calls
+              << ",\"source_read_bytes\":"
+              << source_reads.completed_bytes
               << ",\"precision\":\"" << arguments->precision << "\""
               << ",\"output\":\"" << arguments->output << "\""
               << ",\"input_mode\":\"" << arguments->input_mode << "\""
@@ -944,6 +1693,7 @@ int main(int argc, char** argv) {
               << ",\"fused_shared\":"
               << (arguments->fuse_shared ? "true" : "false");
     emit_route_telemetry();
+    emit_decoder_telemetry();
     std::cout
               << ",\"route_group_count\":"
               << ((expert_major || learned_route_mode)
@@ -957,13 +1707,23 @@ int main(int argc, char** argv) {
               << ",\"resident_budget_bytes\":"
               << arguments->resident_bytes
               << ",\"host_payload_bytes\":" << host_payload_bytes
+              << ",\"w8a16_payload_bytes\":" << w8a16_payload_bytes
               << ",\"router_payload_bytes\":" << router_payload_bytes
               << ",\"shared_payload_bytes\":" << shared_payload_bytes
+              << ",\"decoder_trunk_payload_bytes\":"
+              << (decoder_weights ? decoder_weights->payload_bytes : 0)
+              << ",\"decoder_prepare_nanoseconds\":"
+              << decoder_prepare_nanoseconds
+              << ",\"mla_state_length\":"
+              << (learned_decoder_layer ? arguments->tokens : 0)
+              << ",\"dsa_state_length\":"
+              << (learned_decoder_layer ? arguments->tokens : 0)
               << ",\"host_load_nanoseconds\":" << host_load_ns
               << ",\"cold_latency_nanoseconds\":" << cold_ns
               << ",\"latency_nanoseconds_median\":" << median(samples)
               << ",\"gpu_cpu_max_absolute_error\":" << cpu_abs
               << ",\"gpu_cpu_max_relative_error\":" << cpu_abs / cpu_scale
+              << ",\"gpu_cpu_relative_l2_error\":" << cpu_relative_l2
               << ",\"cpu_expected_max_absolute_error\":";
     if (cpu_expected_abs) {
         std::cout << *cpu_expected_abs;
@@ -991,7 +1751,8 @@ int main(int argc, char** argv) {
     }
     std::cout
               << ",\"cold_weight_h2d_bytes\":"
-              << stats_after_cold.weight_h2d_bytes
+              << (stats_after_cold.weight_h2d_bytes -
+                  stats_before_cold.weight_h2d_bytes)
               << ",\"warm_weight_h2d_bytes\":"
               << (stats_after.weight_h2d_bytes - stats_before.weight_h2d_bytes)
               << ",\"resident_weight_bytes\":" << stats_after.resident_weight_bytes
@@ -1001,6 +1762,13 @@ int main(int argc, char** argv) {
               << stats_after.resident_grid_kernel_launches
               << ",\"resident_grid_descriptor_h2d_bytes\":"
               << stats_after.resident_grid_descriptor_h2d_bytes
+              << ",\"w8a16_calls\":" << stats_after.w8a16_calls
+              << ",\"w8a16_assignments\":"
+              << stats_after.w8a16_assignments
+              << ",\"w8a16_kernel_launches\":"
+              << stats_after.w8a16_kernel_launches
+              << ",\"w8a16_descriptor_h2d_bytes\":"
+              << stats_after.w8a16_descriptor_h2d_bytes
               << ",\"warmup\":" << arguments->warmup
               << ",\"iterations\":" << arguments->iterations << "}\n";
     return 0;

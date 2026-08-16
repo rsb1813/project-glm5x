@@ -59,6 +59,8 @@ struct BackendRuntimeStats {
     std::uint64_t weight_cache_hits{};
     std::uint64_t weight_cache_misses{};
     std::uint64_t weight_cache_bypasses{};
+    std::uint64_t dense_bf16_host_conversion_calls{};
+    std::uint64_t dense_bf16_host_conversion_bytes{};
     std::uint64_t resident_weight_bytes{};
     std::uint64_t peak_resident_weight_bytes{};
     std::uint64_t immutable_validation_scans{};
@@ -90,6 +92,10 @@ struct BackendRuntimeStats {
     std::uint64_t resident_moe_layer_contribution_h2d_bytes{};
     std::uint64_t fused_moe_calls{};
     std::uint64_t fused_moe_experts{};
+    std::uint64_t w8a16_calls{};
+    std::uint64_t w8a16_assignments{};
+    std::uint64_t w8a16_kernel_launches{};
+    std::uint64_t w8a16_descriptor_h2d_bytes{};
     std::uint64_t pinned_host_bytes{};
     std::uint64_t peak_pinned_host_bytes{};
     std::uint64_t async_prefetch_calls{};
@@ -137,6 +143,21 @@ struct RawBf16MlpView {
     RawBf16WeightView gate;
     RawBf16WeightView up;
     RawBf16WeightView down;
+};
+
+struct W8A16WeightView {
+    std::uint64_t tensor_id;
+    std::span<const std::int8_t> values;
+    std::span<const std::byte> scales;
+    std::size_t rows;
+    std::size_t cols;
+    std::size_t group_size;
+};
+
+struct W8A16MlpView {
+    W8A16WeightView gate;
+    W8A16WeightView up;
+    W8A16WeightView down;
 };
 
 struct DenseVectorView {
@@ -231,6 +252,14 @@ public:
         std::span<const RawBf16MlpView>, RawBf16MlpView, float,
         std::optional<float>, std::uint32_t, ProfilePhase,
         MlpActivation = MlpActivation::situ) {
+        return Result<std::vector<float>>::failure(
+            ErrorCode::backend_unavailable);
+    }
+    virtual Result<std::vector<float>>
+    w8a16_silu_mlp_expert_major_with_shared(
+        std::span<const float>, std::size_t, const ExpertMajorPackedPlan&,
+        std::span<const W8A16MlpView>, RawBf16MlpView, std::uint32_t,
+        ProfilePhase) {
         return Result<std::vector<float>>::failure(
             ErrorCode::backend_unavailable);
     }

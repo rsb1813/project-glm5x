@@ -335,6 +335,28 @@ Result<std::vector<std::byte>> Glm5xRuntimeIndex::read_tensor(
     return Result<std::vector<std::byte>>::success(std::move(payload));
 }
 
+Result<Glm5xTensorLoad> Glm5xRuntimeIndex::read_tensor_with_metadata(
+    std::uint64_t tensor_id) const {
+    const auto* locator = find(tensor_id);
+    if (locator == nullptr) {
+        return Result<Glm5xTensorLoad>::failure(ErrorCode::tensor_not_found);
+    }
+    auto payload = read_tensor(tensor_id);
+    if (!payload) {
+        return Result<Glm5xTensorLoad>::failure(
+            payload.error(), payload.message());
+    }
+    Glm5xTensorLoad result;
+    result.record = readers_[locator->artifact_index]
+                        .tensors()[locator->record_index];
+    result.payload = std::move(payload.value());
+    return Result<Glm5xTensorLoad>::success(std::move(result));
+}
+
+bool Glm5xRuntimeIndex::contains_tensor(std::uint64_t tensor_id) const {
+    return find(tensor_id) != nullptr;
+}
+
 Result<GlmBf16ExpertLoad> Glm5xRuntimeIndex::read_expert(
     std::uint32_t layer_id,
     std::uint32_t expert_id,

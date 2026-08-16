@@ -61,8 +61,8 @@
 - [ ] Implement packed paged-KV CUDA storage for RTX 5080.
 - [ ] Add MTP/DSpark expert-major verification to the GLM path.
 - [ ] Run real GLM-5.2 quality and throughput benchmarks.
-- [ ] Feed the exact layer-10 GLM router/MLA/DSA output into the CUDA expert-major plan and verify nonzero full-layer parity.
-- [ ] Feed the exact layer-10 MLA/DSA hidden state into the learned router benchmark and compare complete layer output against Python reference.
+- [x] Feed the exact layer-10 GLM router/MLA/DSA output into the CUDA expert-major plan and verify nonzero full-layer parity.
+- [x] Feed the exact layer-10 MLA/DSA hidden state into the learned router benchmark and compare complete layer output against Python reference.
 - [x] Evaluate prepared expert-major packed-bucket reuse; paired RTX 5080 medians showed no stable speedup, so it is not enabled by default.
 - [x] Add an opt-in parity-tested device-side expert-major accumulation path and measure it against the `f07d78c` baseline; keep default-off pending full-layer quality evidence.
 - [x] Add opt-in shared-expert device accumulation for the learned MoE path and benchmark it on the exact GLM5XACT handoff; keep default-off pending full-layer quality evidence.
@@ -92,6 +92,10 @@
 - [ ] Add exact route-stable multi-layer residency policy that materially lowers full-model logical expert bytes/token.
 - [x] Add a validated C++ `.gxi` runtime index for constant-time official 282-shard tensor ownership and exact payload reads.
 - [ ] Connect exact decoder-layer trunk/expert construction and bounded final-logit parity to the official `.gxi` index.
+- [x] Run the existing learned layer-10 CUDA MoE/GLM5XACT parity gate directly through `.gxi` before full decoder integration.
+- [x] Export one official layer-10 full-layer GLM5XACT input/output oracle without changing the existing MoE oracle.
+- [x] Run the complete C++ layer-10 DSA/MLA/residual/MoE path from the official `.gxi` and close bounded BF16 numerical parity.
+- [x] Record bounded layer traffic/latency and keep it separate from full-model TPS.
 - [x] Re-run a fresh full-model quality/throughput gate after packed sidecar/residency work; record the mixed-NVFP4 token divergence and keep it default-off.
 - [x] Add an experimental fingerprinted MXFP4 `.pm4` sidecar and reference-only pack/decode path; keep FP4 default-off pending calibration/native CUDA execution.
 - [x] Add the experimental RTX 5080 NVFP4 blocked-scale CUDA path and `.pn4`/`.pgu` sidecars; keep both modes default-off pending calibration and final-logit quality.
@@ -109,3 +113,13 @@
 - [x] Add and measure an exact per-layer stable hot-bank policy that bypasses transient device-cache admissions without changing routing or expert values.
 - [x] Run the 78-layer natural-routing stable hot-bank gate and compare it with a same-HEAD 4 GiB layer-balanced result before designing asynchronous replay prefetch.
 - [x] Add an exact adaptive hot-bank tier that preserves one base expert per layer and fills spare VRAM only with repeatedly observed experts.
+- [x] Add a resident dense-weight hit path that skips repeated FP32-to-BF16 host conversion.
+- [x] Prove with CUDA telemetry that a second resident dense call converts zero additional weight bytes.
+- [x] Re-run the exact official layer-10 decoder gate and record B-0008 without calling it full-model TPS.
+- [x] Compare NVFP4 residual, FP8, mixed BF16 rescue, and groupwise W8/W6 quality on the official layer-10 input.
+- [x] Select W8A16-G128 after its BF16-scale probe passed the bounded one-percent layer-L2 gate.
+- [x] Implement the fixed W8A16-G128 host pack/decode contract.
+- [x] Implement and measure the resident W8A16 expert-major CUDA path on RTX 5080.
+- [x] Require exact natural routes, at most one-percent layer L2, zero warm routed H2D, and a BF16 fallback before sidecar manufacturing.
+- [x] Record B-0009 W8A16 layer-10 one-token/two-token raw evidence and compare it with B-0008 BF16.
+- [ ] Add fingerprinted persistent `.pw8` manufacturing and prove multi-layer final-logit/greedy-token parity before a full artifact build.

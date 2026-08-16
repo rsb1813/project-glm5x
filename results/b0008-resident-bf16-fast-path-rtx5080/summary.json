@@ -1,0 +1,97 @@
+{
+  "benchmark_id": "B-0008",
+  "date": "2026-08-16",
+  "implementation_commit": "3b7a35a",
+  "hardware": {
+    "cpu": "AMD Ryzen 7 9800X3D",
+    "gpu": "NVIDIA GeForce RTX 5080 16 GB",
+    "environment": "WSL2 Ubuntu-24.04, CUDA 13"
+  },
+  "model": "official GLM-5.2 layer-10 complete decoder-layer boundary",
+  "change": "Look up resident raw-BF16 dense weights before converting the full FP32 host view to BF16.",
+  "runtime_index_sha256": "c69cd3a4ab22f1424c201a87f014dedff9bd3b78e90d8690b0f97efb72561485",
+  "optimized_runner_sha256": "41cbfec09cb204ce712760c9c3aa447e71ef3cdf1a6e2849935d665447945dcd",
+  "configuration": {
+    "routing": "natural-top-8",
+    "precision": "bf16-rounded",
+    "output": "fp32",
+    "device_expert_accumulate": true,
+    "fused_shared": true,
+    "resident_budget_bytes": 2147483648,
+    "cublas_workspace_bytes": 67108864
+  },
+  "baseline_two_token": {
+    "implementation_commit": "902f551",
+    "runner_sha256": "17a2dde27227021d0129bc3b3ef06bb270b5e722709ac69b4093ee13edfe12ac",
+    "raw": "../b0007-index-backed-decoder-layer-rtx5080/full-layer.json",
+    "raw_sha256": "6d4052f9e25775888dd8030ddb1d1b8f2d938c0fd96bbc1ec5c474a017ee5763",
+    "token_count": 2,
+    "warmup": 3,
+    "iterations": 7,
+    "warm_latency_nanoseconds_median": 475927299,
+    "warm_milliseconds_per_token": 237.9636495,
+    "bounded_layer_tokens_per_second": 4.202322691,
+    "warm_weight_h2d_bytes": 0,
+    "expected_max_relative_error": 0.00420168088749
+  },
+  "optimized_two_token": {
+    "raw": "optimized.json",
+    "raw_sha256": "28838e6de06bcc4bd1d26a5e78bfcede0ce9fe75726ccc73590a51c38cee97ec",
+    "oracle_input_sha256": "35f7562d0f82299439bd84a9dd1e918584452e9b8facec3de67b281382acdc01",
+    "oracle_output_sha256": "6c3fa144f74057b5a8d52127ef9965ae425e6e7763a77dc927eae505783358ba",
+    "oracle_metadata_sha256": "629ad68646c8cf5c2a3715568f96d968a391f1e0860e2982c500ae8cfffdf2cb",
+    "token_count": 2,
+    "warmup": 10,
+    "iterations": 100,
+    "warm_latency_nanoseconds_median": 5503443,
+    "warm_milliseconds_per_token": 2.7517215,
+    "bounded_layer_tokens_per_second": 363.408869684,
+    "warm_weight_h2d_bytes": 0,
+    "expected_max_relative_error": 0.00420168088749
+  },
+  "optimized_single_token": {
+    "raw": "single-token.json",
+    "raw_sha256": "f23a409779fc642c99f5bf3e2a7e24a93d5f688bdab96cc1b7309af749202983",
+    "oracle_input_sha256": "c8040fc56024e155a2c3060b2036bec1bce4af5144fa891bbac9e26d39468c5f",
+    "oracle_output_sha256": "56695a38a40964276562b4332e1461b992a7b695339238d4d6b6c215902f8564",
+    "oracle_metadata_sha256": "2b839b1f9a1e7ac05915f5bce6905a6f84a7f661b4f2ef3195933288ca18aa00",
+    "token_count": 1,
+    "warmup": 10,
+    "iterations": 100,
+    "warm_latency_nanoseconds_median": 2756654,
+    "warm_milliseconds_per_token": 2.756654,
+    "bounded_layer_tokens_per_second": 362.758619689,
+    "warm_weight_h2d_bytes": 0,
+    "expected_max_relative_error": 0.00434782588854
+  },
+  "comparison": {
+    "two_token_speedup": 86.478100891,
+    "two_token_latency_reduction_percent": 98.843637881,
+    "single_vs_two_token_per_token_delta_percent": 0.179251425,
+    "derived_78_layer_time_milliseconds_from_single_layer": 215.019012,
+    "derived_78_layer_upper_bound_tokens_per_second": 4.650751534,
+    "derived_additional_speedup_required_for_10_tokens_per_second": 2.15019012,
+    "derived_bound_is_measured_full_model": false
+  },
+  "parity": {
+    "dsa_topk_equal": true,
+    "expert_set_equal": true,
+    "route_order_equal": false,
+    "optimized_two_token_expected_max_absolute_error": 0.015625,
+    "optimized_two_token_expected_max_relative_error": 0.00420168088749,
+    "optimized_single_token_expected_max_absolute_error": 0.015625,
+    "optimized_single_token_expected_max_relative_error": 0.00434782588854
+  },
+  "unmeasured": [
+    "full-model decode tok/s",
+    "prefill tok/s",
+    "TTFT",
+    "process peak VRAM",
+    "system RAM peak",
+    "physical NVMe GB/token",
+    "full-model H2D GB/token",
+    "coding quality",
+    "speculative acceptance"
+  ],
+  "decision": "Accept the resident-hit lookup as an exact bounded optimization. The remaining warm layer cost is dominated by BF16 GEMV kernels. The derived 78-layer value is an optimistic extrapolation, not measured full-model throughput, and shows that native calibrated FP4 or a comparably large weight-traffic reduction is still required for 10 tok/s."
+}

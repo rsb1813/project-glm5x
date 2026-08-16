@@ -18,13 +18,20 @@ bool is_dense(WeightRepresentation representation) {
            representation == WeightRepresentation::dense_bf16;
 }
 
-bool valid_payload(ResidentWeightKey key,
-                   std::span<const std::byte> primary,
-                   std::span<const std::byte> secondary) {
+bool valid_key(ResidentWeightKey key) {
     if (!key.rows || !key.cols ||
         key.rows > std::numeric_limits<std::uint64_t>::max() / key.cols) {
         return false;
     }
+    if (is_dense(key.representation)) return key.group_size == 0;
+    return key.group_size != 0 && key.cols % key.group_size == 0 &&
+           key.cols % 2 == 0;
+}
+
+bool valid_payload(ResidentWeightKey key,
+                   std::span<const std::byte> primary,
+                   std::span<const std::byte> secondary) {
+    if (!valid_key(key)) return false;
     const auto elements = key.rows * key.cols;
     if (key.representation == WeightRepresentation::dense_fp32) {
         return key.group_size == 0 && secondary.empty() &&
@@ -36,9 +43,13 @@ bool valid_payload(ResidentWeightKey key,
                elements <= std::numeric_limits<std::uint64_t>::max() / 2 &&
                primary.size() == elements * 2;
     }
-    return key.group_size != 0 && key.cols % key.group_size == 0 &&
-           key.cols % 2 == 0 && primary.size() == elements / 2 &&
-           secondary.size() == elements / key.group_size;
+    if (key.representation == WeightRepresentation::mxfp4) {
+        return primary.size() == elements / 2 &&
+               secondary.size() == elements / key.group_size;
+    }
+    return key.representation == WeightRepresentation::w8a16 &&
+           primary.size() == elements &&
+           secondary.size() == elements / key.group_size * 2;
 }
 
 struct KeyLess {
@@ -138,6 +149,31 @@ ResidentWeightTable::ResidentWeightTable(
     : impl_(std::make_unique<Impl>(capacity, memory, runtime, stream)) {}
 
 ResidentWeightTable::~ResidentWeightTable() = default;
+
+Result<std::optional<ResidentAcquisition>> ResidentWeightTable::find(
+    ResidentWeightKey key) {
+    if (!impl_->memory || !impl_->runtime || !valid_key(key) ||
+        !impl_->compatible(key)) {
+        return Result<std::optional<ResidentAcquisition>>::failure(
+            ErrorCode::invalid_extent);
+    }
+    const auto found = impl_->entries.find(key);
+    if (found == impl_->entries.end()) {
+        return Result<std::optional<ResidentAcquisition>>::success(
+            std::nullopt);
+    }
+    ++impl_->runtime->weight_cache_hits;
+    if (impl_->access_set_active) {
+        impl_->protected_keys.insert(key);
+    }
+    impl_->touch(key);
+    return Result<std::optional<ResidentAcquisition>>::success(
+        ResidentAcquisition{
+            ResidentDisposition::hit,
+            found->second->primary.get(),
+            found->second->secondary.get(),
+            0});
+}
 
 Result<ResidentAcquisition> ResidentWeightTable::acquire(
     ResidentWeightKey key, std::span<const std::byte> primary,

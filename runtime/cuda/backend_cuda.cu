@@ -8,6 +8,7 @@
 #include "moe_layer.cuh"
 #include "resident_weights.cuh"
 #include "situ.cuh"
+#include "w8a16.cuh"
 
 #include <cublasLt.h>
 #include <cuda_bf16.h>
@@ -270,20 +271,29 @@ public:
         std::size_t weight_bytes = weight.size_bytes();
         if (options_.dense_precision == DensePrecision::bf16_rounded) {
             bf16_input.reserve(input.size());
-            bf16_weight.reserve(weight.size());
             for (const auto value : input) {
                 bf16_input.push_back(__float2bfloat16_rn(value));
             }
-            for (const auto value : weight) {
-                bf16_weight.push_back(__float2bfloat16_rn(value));
-            }
             host_input = bf16_input.data();
-            host_weight = bf16_weight.data();
             input_type = CUDA_R_16BF;
             weight_type = CUDA_R_16BF;
             input_bytes = bf16_input.size() * sizeof(__nv_bfloat16);
-            weight_bytes = bf16_weight.size() * sizeof(__nv_bfloat16);
+            weight_bytes = weight.size() * sizeof(__nv_bfloat16);
         }
+
+        const auto prepare_bf16_weight = [&]() {
+            if (options_.dense_precision != DensePrecision::bf16_rounded ||
+                !bf16_weight.empty()) {
+                return;
+            }
+            bf16_weight.reserve(weight.size());
+            for (const auto value : weight) {
+                bf16_weight.push_back(__float2bfloat16_rn(value));
+            }
+            host_weight = bf16_weight.data();
+            ++runtime_stats_.dense_bf16_host_conversion_calls;
+            runtime_stats_.dense_bf16_host_conversion_bytes += weight_bytes;
+        };
 
         const auto output_bytes = rows * sizeof(float);
         bool has_resident_weight = false;
@@ -294,23 +304,41 @@ public:
                 options_.dense_precision == DensePrecision::fp32
                     ? cuda::WeightRepresentation::dense_fp32
                     : cuda::WeightRepresentation::dense_bf16;
-            const auto host_bytes = std::span(
-                static_cast<const std::byte*>(host_weight), weight_bytes);
-            const auto acquisition = resident_weights_->acquire(
-                {weight_view.tensor_id, representation, rows, cols, 0},
-                host_bytes, {});
-            if (!acquisition) {
+            const cuda::ResidentWeightKey resident_key{
+                weight_view.tensor_id, representation, rows, cols, 0};
+            const auto existing = resident_weights_->find(resident_key);
+            if (!existing) {
                 record(phase, ProfileOperation::dense_matvec, precision, layer,
                        operation_start, logical_weight_bytes, 0, 0, false);
                 return Result<std::vector<float>>::failure(
-                    acquisition.error(), acquisition.message());
+                    existing.error(), existing.message());
             }
-            has_resident_weight =
-                acquisition.value().disposition !=
-                cuda::ResidentDisposition::bypass;
-            resident_weight = acquisition.value().primary;
-            weight_transfer_bytes = acquisition.value().uploaded_bytes;
-            if (!has_resident_weight) weight_transfer_bytes = weight_bytes;
+            if (existing.value()) {
+                has_resident_weight = true;
+                resident_weight = existing.value()->primary;
+                weight_transfer_bytes = 0;
+            } else {
+                prepare_bf16_weight();
+                const auto host_bytes = std::span(
+                    static_cast<const std::byte*>(host_weight), weight_bytes);
+                const auto acquisition = resident_weights_->acquire(
+                    resident_key, host_bytes, {});
+                if (!acquisition) {
+                    record(phase, ProfileOperation::dense_matvec, precision,
+                           layer, operation_start, logical_weight_bytes, 0, 0,
+                           false);
+                    return Result<std::vector<float>>::failure(
+                        acquisition.error(), acquisition.message());
+                }
+                has_resident_weight =
+                    acquisition.value().disposition !=
+                    cuda::ResidentDisposition::bypass;
+                resident_weight = acquisition.value().primary;
+                weight_transfer_bytes = acquisition.value().uploaded_bytes;
+                if (!has_resident_weight) weight_transfer_bytes = weight_bytes;
+            }
+        } else {
+            prepare_bf16_weight();
         }
         cuda::DeviceAllocation local_input(&memory_stats_, &runtime_stats_);
         cuda::DeviceAllocation local_weight(&memory_stats_, &runtime_stats_);
@@ -1553,6 +1581,285 @@ public:
         return raw_bf16_situ_mlp_expert_major_impl(
             token_hidden, token_count, plan, expert_views, &shared_view,
             situ_beta, situ_linear, layer, phase, activation);
+    }
+
+    Result<std::vector<float>> w8a16_silu_mlp_expert_major_with_shared(
+        std::span<const float> token_hidden, std::size_t token_count,
+        const ExpertMajorPackedPlan& plan,
+        std::span<const W8A16MlpView> expert_views,
+        RawBf16MlpView shared_view, std::uint32_t layer,
+        ProfilePhase phase) override {
+        const auto multiply_fits = [](std::size_t left, std::size_t right) {
+            return right == 0 ||
+                   left <= std::numeric_limits<std::size_t>::max() / right;
+        };
+        const auto valid_weight = [&](const W8A16WeightView& weight) {
+            return weight.tensor_id != 0 && weight.rows != 0 &&
+                   weight.cols != 0 && weight.group_size == 128 &&
+                   weight.cols % weight.group_size == 0 &&
+                   multiply_fits(weight.rows, weight.cols) &&
+                   weight.values.size() == weight.rows * weight.cols &&
+                   weight.scales.size() ==
+                       weight.rows * (weight.cols / weight.group_size) * 2;
+        };
+        if (options_.kind != BackendKind::cuda_custom ||
+            options_.cuda_allocation != CudaAllocationMode::reused ||
+            options_.cuda_weights != CudaWeightMode::resident ||
+            options_.cuda_transfer != CudaTransferMode::synchronous ||
+            options_.cuda_expert_major_device_accumulate == false ||
+            options_.cuda_bf16_output != CudaBf16OutputMode::fp32 ||
+            resident_weights_ == nullptr || token_count == 0 ||
+            plan.hidden_size == 0 || plan.groups.empty() ||
+            plan.groups.size() != expert_views.size() ||
+            plan.assignment_count == 0 || plan.assignment_count > 65535 ||
+            !multiply_fits(token_count, plan.hidden_size) ||
+            token_hidden.size() != token_count * plan.hidden_size) {
+            return Result<std::vector<float>>::failure(
+                ErrorCode::invalid_extent);
+        }
+        const auto intermediate = expert_views.front().gate.rows;
+        const auto output_width = expert_views.front().down.rows;
+        if (intermediate == 0 || output_width == 0 ||
+            !multiply_fits(plan.assignment_count, plan.hidden_size) ||
+            !multiply_fits(plan.assignment_count, intermediate) ||
+            !multiply_fits(plan.assignment_count, output_width) ||
+            !multiply_fits(token_count, output_width) ||
+            shared_view.gate.cols != plan.hidden_size ||
+            shared_view.up.cols != plan.hidden_size ||
+            shared_view.gate.rows != shared_view.up.rows ||
+            shared_view.down.cols != shared_view.gate.rows ||
+            shared_view.down.rows != output_width) {
+            return Result<std::vector<float>>::failure(
+                ErrorCode::invalid_extent);
+        }
+
+        std::unordered_set<std::uint64_t> tensor_ids;
+        std::vector<cuda::ResidentWeightKey> protected_keys;
+        protected_keys.reserve(expert_views.size() * 3);
+        for (const auto& expert : expert_views) {
+            if (!valid_weight(expert.gate) || !valid_weight(expert.up) ||
+                !valid_weight(expert.down) ||
+                expert.gate.cols != plan.hidden_size ||
+                expert.up.cols != plan.hidden_size ||
+                expert.gate.rows != intermediate ||
+                expert.up.rows != intermediate ||
+                expert.down.cols != intermediate ||
+                expert.down.rows != output_width) {
+                return Result<std::vector<float>>::failure(
+                    ErrorCode::invalid_extent);
+            }
+            for (const auto* weight : {&expert.gate, &expert.up,
+                                       &expert.down}) {
+                if (!tensor_ids.insert(weight->tensor_id).second) {
+                    return Result<std::vector<float>>::failure(
+                        ErrorCode::invalid_extent);
+                }
+                protected_keys.push_back({
+                    weight->tensor_id, cuda::WeightRepresentation::w8a16,
+                    weight->rows, weight->cols, weight->group_size});
+            }
+        }
+        resident_weights_->begin_access_set(
+            ++w8a16_access_cycle_, protected_keys);
+
+        std::vector<std::array<cuda::W8A16DeviceMatrix, 3>>
+            resident(expert_views.size());
+        std::uint64_t weight_transfer_bytes = 0;
+        for (std::size_t expert_index = 0;
+             expert_index < expert_views.size(); ++expert_index) {
+            const std::array weights{
+                expert_views[expert_index].gate,
+                expert_views[expert_index].up,
+                expert_views[expert_index].down};
+            for (std::size_t projection = 0; projection < weights.size();
+                 ++projection) {
+                const auto& weight = weights[projection];
+                const auto acquired = resident_weights_->acquire(
+                    {weight.tensor_id, cuda::WeightRepresentation::w8a16,
+                     weight.rows, weight.cols, weight.group_size},
+                    std::as_bytes(weight.values), weight.scales);
+                if (!acquired || acquired.value().disposition ==
+                                     cuda::ResidentDisposition::bypass) {
+                    return Result<std::vector<float>>::failure(
+                        acquired ? ErrorCode::backend_unavailable
+                                 : acquired.error(),
+                        acquired ? "W8A16 resident budget exhausted"
+                                 : acquired.message());
+                }
+                resident[expert_index][projection] = {
+                    static_cast<const std::int8_t*>(
+                        acquired.value().primary),
+                    static_cast<const __nv_bfloat16*>(
+                        acquired.value().secondary)};
+                weight_transfer_bytes += acquired.value().uploaded_bytes;
+            }
+        }
+
+        std::vector<__nv_bfloat16> inputs;
+        inputs.reserve(plan.assignment_count * plan.hidden_size);
+        std::vector<cuda::W8A16DeviceMatrix> descriptors(
+            plan.assignment_count * 3);
+        std::vector<std::uint64_t> offsets;
+        std::vector<std::uint32_t> token_indices;
+        std::vector<float> contributions;
+        offsets.reserve(plan.assignment_count);
+        token_indices.reserve(plan.assignment_count);
+        contributions.reserve(plan.assignment_count);
+        std::size_t assignment_index = 0;
+        for (std::size_t group_index = 0;
+             group_index < plan.groups.size(); ++group_index) {
+            for (const auto& assignment :
+                 plan.groups[group_index].assignments) {
+                if (assignment.token_index >= token_count ||
+                    assignment.token_index >
+                        std::numeric_limits<std::uint32_t>::max() ||
+                    !std::isfinite(assignment.contribution)) {
+                    return Result<std::vector<float>>::failure(
+                        ErrorCode::invalid_extent);
+                }
+                const auto source = token_hidden.subspan(
+                    assignment.token_index * plan.hidden_size,
+                    plan.hidden_size);
+                for (const auto value : source) {
+                    inputs.push_back(__float2bfloat16_rn(value));
+                }
+                descriptors[assignment_index] = resident[group_index][0];
+                descriptors[plan.assignment_count + assignment_index] =
+                    resident[group_index][1];
+                descriptors[plan.assignment_count * 2 + assignment_index] =
+                    resident[group_index][2];
+                offsets.push_back(
+                    static_cast<std::uint64_t>(assignment_index *
+                                               output_width));
+                token_indices.push_back(static_cast<std::uint32_t>(
+                    assignment.token_index));
+                contributions.push_back(assignment.contribution);
+                ++assignment_index;
+            }
+        }
+        if (assignment_index != plan.assignment_count ||
+            inputs.size() != plan.assignment_count * plan.hidden_size) {
+            return Result<std::vector<float>>::failure(
+                ErrorCode::invalid_extent);
+        }
+
+        const auto input_bytes = inputs.size() * sizeof(__nv_bfloat16);
+        const auto descriptor_bytes =
+            descriptors.size() * sizeof(cuda::W8A16DeviceMatrix);
+        const auto intermediate_bytes = plan.assignment_count * intermediate *
+                                        sizeof(__nv_bfloat16);
+        const auto expert_output_bytes = plan.assignment_count * output_width *
+                                         sizeof(float);
+        const auto mixed_bytes = token_count * output_width * sizeof(float);
+        const auto metadata_bytes =
+            offsets.size() * (sizeof(std::uint64_t) + sizeof(std::uint32_t) +
+                              sizeof(float));
+        if (ffn_input_scratch_.reserve(input_bytes) != cudaSuccess ||
+            mxfp4_descriptor_scratch_.reserve(descriptor_bytes) != cudaSuccess ||
+            ffn_activation_scratch_.reserve(intermediate_bytes) != cudaSuccess ||
+            ffn_output_scratch_.reserve(expert_output_bytes) != cudaSuccess ||
+            ffn_expert_major_accumulation_scratch_.reserve(mixed_bytes) !=
+                cudaSuccess ||
+            ffn_expert_major_offsets_scratch_.reserve(
+                offsets.size() * sizeof(std::uint64_t)) != cudaSuccess ||
+            ffn_expert_major_tokens_scratch_.reserve(
+                token_indices.size() * sizeof(std::uint32_t)) != cudaSuccess ||
+            ffn_expert_major_contributions_scratch_.reserve(
+                contributions.size() * sizeof(float)) != cudaSuccess) {
+            return Result<std::vector<float>>::failure(
+                ErrorCode::backend_unavailable,
+                "W8A16 expert-major scratch allocation failed");
+        }
+        auto* device_input = static_cast<__nv_bfloat16*>(
+            ffn_input_scratch_.get());
+        auto* device_descriptors = static_cast<cuda::W8A16DeviceMatrix*>(
+            mxfp4_descriptor_scratch_.get());
+        auto* device_activated = static_cast<__nv_bfloat16*>(
+            ffn_activation_scratch_.get());
+        auto* device_expert_output = static_cast<float*>(
+            ffn_output_scratch_.get());
+        auto* device_mixed = static_cast<float*>(
+            ffn_expert_major_accumulation_scratch_.get());
+        auto* device_offsets = static_cast<std::uint64_t*>(
+            ffn_expert_major_offsets_scratch_.get());
+        auto* device_tokens = static_cast<std::uint32_t*>(
+            ffn_expert_major_tokens_scratch_.get());
+        auto* device_contributions = static_cast<float*>(
+            ffn_expert_major_contributions_scratch_.get());
+        if (cudaMemcpyAsync(device_input, inputs.data(), input_bytes,
+                            cudaMemcpyHostToDevice, stream_) != cudaSuccess ||
+            cudaMemcpyAsync(device_descriptors, descriptors.data(),
+                            descriptor_bytes, cudaMemcpyHostToDevice,
+                            stream_) != cudaSuccess ||
+            cudaMemcpyAsync(device_offsets, offsets.data(),
+                            offsets.size() * sizeof(std::uint64_t),
+                            cudaMemcpyHostToDevice, stream_) != cudaSuccess ||
+            cudaMemcpyAsync(device_tokens, token_indices.data(),
+                            token_indices.size() * sizeof(std::uint32_t),
+                            cudaMemcpyHostToDevice, stream_) != cudaSuccess ||
+            cudaMemcpyAsync(device_contributions, contributions.data(),
+                            contributions.size() * sizeof(float),
+                            cudaMemcpyHostToDevice, stream_) != cudaSuccess ||
+            cudaMemsetAsync(device_mixed, 0, mixed_bytes, stream_) !=
+                cudaSuccess) {
+            return Result<std::vector<float>>::failure(
+                ErrorCode::backend_unavailable,
+                "W8A16 expert-major upload failed");
+        }
+        if (cuda::launch_w8a16_gate_up(
+                device_input, device_descriptors,
+                device_descriptors + plan.assignment_count,
+                device_activated, intermediate, plan.hidden_size,
+                plan.assignment_count, stream_) != cudaSuccess ||
+            cuda::launch_w8a16_down(
+                device_activated,
+                device_descriptors + plan.assignment_count * 2,
+                device_expert_output, output_width, intermediate,
+                plan.assignment_count, stream_) != cudaSuccess ||
+            cuda::launch_ragged_expert_mix(
+                device_expert_output, device_offsets, device_tokens,
+                device_contributions, device_mixed, plan.assignment_count,
+                token_count, output_width, stream_) != cudaSuccess) {
+            return Result<std::vector<float>>::failure(
+                ErrorCode::backend_unavailable,
+                "W8A16 expert-major kernel launch failed");
+        }
+
+        const std::array<RawBf16MlpView, 1> shared_views{shared_view};
+        float* device_shared = nullptr;
+        std::size_t device_shared_count = 0;
+        const auto shared = raw_bf16_situ_mlp_grid_impl(
+            token_hidden, token_count, shared_views, 1.0F, std::nullopt,
+            layer, phase, {}, MlpActivation::silu, &device_shared,
+            &device_shared_count);
+        if (!shared || device_shared == nullptr ||
+            device_shared_count < token_count * output_width ||
+            cuda::launch_vector_add(
+                device_mixed, device_shared, device_mixed,
+                token_count * output_width, stream_) != cudaSuccess) {
+            return Result<std::vector<float>>::failure(
+                shared ? ErrorCode::backend_unavailable : shared.error(),
+                shared ? "W8A16 shared expert accumulation failed"
+                       : shared.message());
+        }
+        std::vector<float> output(token_count * output_width);
+        if (cudaMemcpyAsync(output.data(), device_mixed, mixed_bytes,
+                            cudaMemcpyDeviceToHost, stream_) != cudaSuccess ||
+            cudaStreamSynchronize(stream_) != cudaSuccess) {
+            return Result<std::vector<float>>::failure(
+                ErrorCode::backend_unavailable,
+                "W8A16 output copy failed");
+        }
+        ++runtime_stats_.stream_synchronization_count;
+        runtime_stats_.weight_h2d_bytes += weight_transfer_bytes;
+        runtime_stats_.activation_h2d_bytes +=
+            input_bytes + descriptor_bytes + metadata_bytes;
+        runtime_stats_.device_to_host_bytes += mixed_bytes;
+        ++runtime_stats_.w8a16_calls;
+        runtime_stats_.w8a16_assignments += plan.assignment_count;
+        runtime_stats_.w8a16_kernel_launches += 3;
+        runtime_stats_.w8a16_descriptor_h2d_bytes += descriptor_bytes;
+        return Result<std::vector<float>>::success(std::move(output));
     }
 
 private:
@@ -5079,6 +5386,7 @@ private:
     std::unique_ptr<cuda::ResidentWeightTable> resident_weights_;
     std::unique_ptr<cuda::AsyncMxfp4Pipeline> async_pipeline_;
     std::optional<PreparedMxfp4Metadata> prepared_mxfp4_;
+    std::uint64_t w8a16_access_cycle_{};
 };
 
 Result<std::unique_ptr<ComputeBackend>> cuda_failure(

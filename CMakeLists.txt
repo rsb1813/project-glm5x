@@ -33,6 +33,7 @@ add_library(k3x_runtime
     runtime/src/glm5x_bundle.cpp
     runtime/src/glm5x_runtime_index.cpp
     runtime/src/glm5x_activation.cpp
+    runtime/src/w8a16.cpp
 )
 if(K3X_ENABLE_CUDA)
     enable_language(CUDA)
@@ -46,6 +47,7 @@ if(K3X_ENABLE_CUDA)
         runtime/cuda/pinned_memory.cu
         runtime/cuda/resident_weights.cu
         runtime/cuda/situ.cu
+        runtime/cuda/w8a16.cu
     )
     target_link_libraries(k3x_runtime PUBLIC CUDA::cudart CUDA::cublasLt)
     set_target_properties(k3x_runtime PROPERTIES
@@ -143,6 +145,12 @@ else()
     set_target_properties(test_cuda_mxfp4 PROPERTIES CUDA_ARCHITECTURES "120-real")
     add_test(NAME cuda_mxfp4 COMMAND test_cuda_mxfp4)
 
+    add_executable(test_cuda_w8a16 tests/cuda/test_cuda_w8a16.cu)
+    target_link_libraries(test_cuda_w8a16 PRIVATE k3x_runtime)
+    target_include_directories(test_cuda_w8a16 PRIVATE runtime/cuda)
+    set_target_properties(test_cuda_w8a16 PROPERTIES CUDA_ARCHITECTURES "120-real")
+    add_test(NAME cuda_w8a16 COMMAND test_cuda_w8a16)
+
     add_executable(test_cuda_expert_grid tests/cuda/test_cuda_expert_grid.cu)
     target_link_libraries(test_cuda_expert_grid PRIVATE k3x_runtime)
     target_include_directories(test_cuda_expert_grid PRIVATE runtime/cuda)
@@ -224,6 +232,10 @@ target_link_libraries(test_glm5x_bf16_bundle PRIVATE k3x_runtime)
 
 add_executable(test_glm5x_runtime_index tests/cpp/test_glm5x_runtime_index.cpp)
 target_link_libraries(test_glm5x_runtime_index PRIVATE k3x_runtime)
+
+add_executable(test_w8a16 tests/cpp/test_w8a16.cpp)
+target_link_libraries(test_w8a16 PRIVATE k3x_runtime)
+add_test(NAME w8a16 COMMAND test_w8a16)
 
 add_executable(test_io_completion tests/cpp/test_io_completion.cpp)
 target_include_directories(test_io_completion PRIVATE runtime/src)

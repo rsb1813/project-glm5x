@@ -61,12 +61,32 @@ int main(int argc, char** argv) {
                   << loaded.message() << '\n';
         return 4;
     }
+    const auto prefix =
+        "model.layers." + std::to_string(*layer) + ".mlp.experts." +
+        std::to_string(*expert) + ".gate_proj.weight";
+    const auto gate_id = k3x::fnv1a64(prefix.c_str());
+    if (!index.value().contains_tensor(gate_id) ||
+        index.value().contains_tensor(0)) {
+        return 5;
+    }
+    auto gate = index.value().read_tensor_with_metadata(gate_id);
+    if (!gate) {
+        std::cerr << k3x::error_code_name(gate.error()) << ": "
+                  << gate.message() << '\n';
+        return 5;
+    }
     const auto counters = index.value().counters();
     std::cout << "{\"artifact_count\":" << index.value().artifact_count()
               << ",\"tensor_count\":" << index.value().tensor_count()
               << ",\"payload_bytes\":" << loaded.value().payload_bytes
               << ",\"reader_read_calls\":" << counters.calls
               << ",\"reader_completed_bytes\":" << counters.completed_bytes
+              << ",\"gate_dtype\":" << gate.value().record.dtype
+              << ",\"gate_rank\":" << static_cast<unsigned>(gate.value().record.rank)
+              << ",\"gate_dimensions\":["
+              << gate.value().record.dimensions[0] << ','
+              << gate.value().record.dimensions[1] << ']'
+              << ",\"gate_payload_bytes\":" << gate.value().payload.size()
               << ",\"role_sha256\":[";
     for (std::size_t role = 0; role < loaded.value().roles.size(); ++role) {
         if (role) std::cout << ',';
@@ -75,4 +95,3 @@ int main(int argc, char** argv) {
     std::cout << "]}\n";
     return 0;
 }
-

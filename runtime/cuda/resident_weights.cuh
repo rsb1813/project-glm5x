@@ -10,11 +10,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace k3x::cuda {
 
-enum class WeightRepresentation { dense_fp32, dense_bf16, mxfp4 };
+enum class WeightRepresentation { dense_fp32, dense_bf16, mxfp4, w8a16 };
 
 struct ResidentWeightKey {
     std::uint64_t tensor_id;
@@ -45,6 +46,8 @@ public:
     Result<ResidentAcquisition> acquire(
         ResidentWeightKey key, std::span<const std::byte> primary,
         std::span<const std::byte> secondary);
+    Result<std::optional<ResidentAcquisition>> find(
+        ResidentWeightKey key);
     void begin_access_set(
         std::uint64_t forward_cycle,
         std::span<const ResidentWeightKey> protected_keys);
