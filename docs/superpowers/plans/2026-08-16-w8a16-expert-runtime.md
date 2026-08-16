@@ -34,5 +34,5 @@ quality and warm latency on the official GLM-5.2 layer-10 RTX 5080 gate.
   and latency materially improves over B-0008.
 - [ ] If accepted, add fingerprinted `.pw8` sidecar manufacturing and then run
   a final-logit/greedy-token gate before any full 78-layer artifact build.
-- [ ] Run applicable CTest/Pytest, update benchmark evidence and continuity
+- [x] Run applicable CTest/Pytest, update benchmark evidence and continuity
   documents, commit semantically, push, and update `PROJECT_STATE.md` last.
