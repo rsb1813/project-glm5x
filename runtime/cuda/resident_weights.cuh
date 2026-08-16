@@ -15,7 +15,7 @@
 
 namespace k3x::cuda {
 
-enum class WeightRepresentation { dense_fp32, dense_bf16, mxfp4 };
+enum class WeightRepresentation { dense_fp32, dense_bf16, mxfp4, w8a16 };
 
 struct ResidentWeightKey {
     std::uint64_t tensor_id;

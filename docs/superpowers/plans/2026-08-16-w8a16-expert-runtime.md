@@ -15,18 +15,18 @@ quality and warm latency on the official GLM-5.2 layer-10 RTX 5080 gate.
 ## Task 2: Resident CUDA kernel
 
 - [x] Add a RED CUDA test for one small gate/up/down expert versus host decode.
-- [ ] Add the W8 resident representation and fused gate/up plus down kernels.
+- [x] Add the W8 resident representation and fused gate/up plus down kernels.
 - [x] Preserve BF16 activation/intermediate/output rounding and validate kernel
   parity within the quantized-reference envelope.
 - [x] Run focused CUDA tests and commit the kernel.
 
 ## Task 3: Official expert-major integration
 
-- [ ] Add opt-in W8A16-G128 routed experts to the existing `.gxi` learned MoE
+- [x] Add opt-in W8A16-G128 routed experts to the existing `.gxi` learned MoE
   and decoder-layer benchmark while keeping the shared expert/trunk BF16.
-- [ ] Preserve natural Top-8 IDs and contributions and report W8 bytes,
+- [x] Preserve natural Top-8 IDs and contributions and report W8 bytes,
   resident bytes, H2D bytes, kernel launches, quality, and warm latency.
-- [ ] Run the official two-token and one-token layer-10 gates.
+- [x] Run the official two-token and one-token layer-10 gates.
 
 ## Task 4: Decision gate and publication
 

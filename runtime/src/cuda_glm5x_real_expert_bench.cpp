@@ -6,6 +6,7 @@
 #include "k3x/glm5x_activation.hpp"
 #include "k3x/glm5x_runtime_index.hpp"
 #include "k3x/routing_policy.hpp"
+#include "k3x/w8a16.hpp"
 
 #include <algorithm>
 #include <array>
@@ -153,7 +154,8 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
     if (result.artifact_dir.empty() == result.runtime_index.empty() ||
         result.precision == "" ||
         result.output == "") return std::nullopt;
-    if (result.precision != "fp32" && result.precision != "bf16-rounded") {
+    if (result.precision != "fp32" && result.precision != "bf16-rounded" &&
+        result.precision != "w8a16-g128") {
         return std::nullopt;
     }
     if (result.output != "fp32" && result.output != "bf16") {
@@ -167,7 +169,8 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
         result.input_mode != "learned-decoder-layer") {
         return std::nullopt;
     }
-    if (result.precision != "bf16-rounded" && result.output != "fp32") {
+    if (result.precision != "bf16-rounded" &&
+        result.precision != "w8a16-g128" && result.output != "fp32") {
         return std::nullopt;
     }
     if (!result.expected_bf16.empty() && result.input_bf16.empty()) {
@@ -179,6 +182,13 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
          !result.device_accumulate || result.output != "fp32")) {
         return std::nullopt;
     }
+    if (result.precision == "w8a16-g128" &&
+        ((result.input_mode != "learned-moe-layer" &&
+          result.input_mode != "learned-decoder-layer") ||
+         !result.device_accumulate || !result.fuse_shared ||
+         result.output != "fp32")) {
+        return std::nullopt;
+    }
     return result;
 }
 
@@ -188,6 +198,7 @@ struct RealExpertFixture {
     std::array<std::vector<float>, 3> weights;
     k3x::DenseMlpView dense{};
     k3x::RawBf16MlpView raw{};
+    std::array<k3x::W8A16PackedWeight, 3> w8a16;
 };
 
 struct NamedTensorPayload {
@@ -667,6 +678,7 @@ k3x::Result<DecoderAttentionForward> run_decoder_attention(
             k3x::ErrorCode::backend_unavailable,
             "GLM MLA projection failed");
     }
+
     std::vector<float> kv_nope(token_count * kKvRank);
     for (std::size_t token = 0; token < token_count; ++token) {
         const auto source = token * (kKvRank + kRopeDim);
@@ -822,6 +834,21 @@ float maximum_absolute_value(std::span<const float> values) {
     return result;
 }
 
+float relative_l2_difference(
+    std::span<const float> left, std::span<const float> right) {
+    if (left.size() != right.size() || left.empty()) return INFINITY;
+    double difference = 0.0;
+    double reference = 0.0;
+    for (std::size_t index = 0; index < left.size(); ++index) {
+        const auto delta = static_cast<double>(left[index]) - right[index];
+        difference += delta * delta;
+        reference += static_cast<double>(right[index]) * right[index];
+    }
+    return reference == 0.0
+        ? (difference == 0.0 ? 0.0F : INFINITY)
+        : static_cast<float>(std::sqrt(difference / reference));
+}
+
 std::vector<std::filesystem::path> artifact_paths(
     const std::filesystem::path& directory) {
     std::vector<std::filesystem::path> result;
@@ -846,7 +873,7 @@ int main(int argc, char** argv) {
         std::cerr << "usage: (--artifact-dir DIR | --runtime-index FILE) "
                      "--layer N --expert N "
                      "[--experts N] [--tokens N] [--warmup N] [--iterations N] "
-                     "[--workspace-bytes N] [--resident-bytes N] [--precision fp32|bf16-rounded] "
+                     "[--workspace-bytes N] [--resident-bytes N] [--precision fp32|bf16-rounded|w8a16-g128] "
                      "[--output fp32|bf16] [--input-mode common|sparse-packed|expert-major|learned-expert-major|learned-moe-layer|learned-decoder-layer] "
                      "[--device-accumulate 0|1] "
                      "[--fuse-shared 0|1] "
@@ -943,8 +970,10 @@ int main(int argc, char** argv) {
         return 7;
     }
     if (learned_route_mode &&
-        (arguments->precision != "bf16-rounded" || arguments->tokens == 0)) {
-        std::cerr << "learned GLM modes require --precision bf16-rounded\n";
+        ((arguments->precision != "bf16-rounded" &&
+          arguments->precision != "w8a16-g128") ||
+         arguments->tokens == 0)) {
+        std::cerr << "learned GLM modes require BF16 or W8A16 precision\n";
         return 7;
     }
     const auto logical_token_count = arguments->tokens;
@@ -953,11 +982,15 @@ int main(int argc, char** argv) {
     std::vector<float> input(input_value_count);
     for (std::size_t index = 0; index < input.size(); ++index) {
         input[index] = static_cast<float>(static_cast<int>(index % 29) - 14) * 0.01F;
-        if (arguments->precision == "bf16-rounded") input[index] = round_to_bf16(input[index]);
+        if (arguments->precision == "bf16-rounded" ||
+            arguments->precision == "w8a16-g128") {
+            input[index] = round_to_bf16(input[index]);
+        }
     }
     if (!arguments->input_bf16.empty()) {
-        if (arguments->precision != "bf16-rounded") {
-            std::cerr << "--input-bf16 requires --precision bf16-rounded\n";
+        if (arguments->precision != "bf16-rounded" &&
+            arguments->precision != "w8a16-g128") {
+            std::cerr << "--input-bf16 requires BF16-compatible precision\n";
             return 7;
         }
         const auto activation = k3x::load_glm5x_bf16_activation(
@@ -993,11 +1026,14 @@ int main(int argc, char** argv) {
     }
     k3x::BackendOptions options;
     options.kind = k3x::BackendKind::cuda_custom;
-    options.dense_precision = arguments->precision == "bf16-rounded"
+    options.dense_precision =
+        (arguments->precision == "bf16-rounded" ||
+         arguments->precision == "w8a16-g128")
         ? k3x::DensePrecision::bf16_rounded : k3x::DensePrecision::fp32;
     options.cuda_allocation = k3x::CudaAllocationMode::reused;
     options.cuda_weights = k3x::CudaWeightMode::resident;
-    const auto use_grid = arguments->precision == "bf16-rounded";
+    const auto use_grid = arguments->precision == "bf16-rounded" ||
+                          arguments->precision == "w8a16-g128";
     options.cuda_batching = use_grid
         ? k3x::CudaBatchingMode::resident_grid : k3x::CudaBatchingMode::scalar;
     options.cuda_boundary = k3x::CudaBoundaryMode::ffn_block;
@@ -1129,6 +1165,23 @@ int main(int argc, char** argv) {
             {up_id, fixture.payload.roles[1], kIntermediateSize, kHiddenSize},
             {down_id, fixture.payload.roles[2], kHiddenSize, kIntermediateSize},
         };
+        if (arguments->precision == "w8a16-g128") {
+            const std::array shapes{
+                std::array<std::size_t, 2>{kIntermediateSize, kHiddenSize},
+                std::array<std::size_t, 2>{kIntermediateSize, kHiddenSize},
+                std::array<std::size_t, 2>{kHiddenSize, kIntermediateSize},
+            };
+            for (std::size_t index = 0; index < fixture.w8a16.size(); ++index) {
+                auto packed = k3x::pack_w8a16_bf16(
+                    fixture.payload.roles[index], shapes[index][0],
+                    shapes[index][1], 128);
+                if (!packed) {
+                    std::cerr << "W8A16 expert packing failed\n";
+                    return 7;
+                }
+                fixture.w8a16[index] = std::move(packed.value());
+            }
+        }
         if (needs_float_view) {
             fixture.dense = {
                 {gate_id, fixture.weights[0], kIntermediateSize, kHiddenSize},
@@ -1219,9 +1272,11 @@ int main(int argc, char** argv) {
         return 7;
     }
     if (learned_route_mode &&
-        (arguments->precision != "bf16-rounded" || arguments->tokens == 0 ||
+        ((arguments->precision != "bf16-rounded" &&
+          arguments->precision != "w8a16-g128") ||
+         arguments->tokens == 0 ||
          fixtures.size() < 2)) {
-        std::cerr << "learned GLM modes require BF16 precision and at least "
+        std::cerr << "learned GLM modes require BF16-compatible precision and at least "
                      "two selected experts\n";
         return 7;
     }
@@ -1229,6 +1284,23 @@ int main(int argc, char** argv) {
     raw_views.reserve(fixtures.size());
     for (const auto& fixture : fixtures) {
         raw_views.push_back(fixture.raw);
+    }
+    std::vector<k3x::W8A16MlpView> w8a16_views;
+    if (arguments->precision == "w8a16-g128") {
+        w8a16_views.reserve(fixtures.size());
+        for (const auto& fixture : fixtures) {
+            const auto view = [](const k3x::W8A16PackedWeight& weight,
+                                 std::uint64_t tensor_id) {
+                return k3x::W8A16WeightView{
+                    tensor_id, weight.values, weight.scales, weight.rows,
+                    weight.cols, weight.group_size};
+            };
+            w8a16_views.push_back({
+                view(fixture.w8a16[0], fixture.raw.gate.tensor_id),
+                view(fixture.w8a16[1], fixture.raw.up.tensor_id),
+                view(fixture.w8a16[2], fixture.raw.down.tensor_id),
+            });
+        }
     }
     std::optional<k3x::ExpertMajorPackedPlan> expert_major_plan;
     std::vector<k3x::RawBf16MlpView> expert_major_views;
@@ -1264,6 +1336,8 @@ int main(int argc, char** argv) {
         }
         expert_major_plan = std::move(built.value());
         expert_major_views.reserve(expert_major_plan->groups.size());
+        std::vector<k3x::W8A16MlpView> ordered_w8a16_views;
+        ordered_w8a16_views.reserve(expert_major_plan->groups.size());
         for (const auto& group : expert_major_plan->groups) {
             const auto fixture = std::find_if(
                 fixtures.begin(), fixtures.end(),
@@ -1272,6 +1346,14 @@ int main(int argc, char** argv) {
                 });
             if (fixture == fixtures.end()) return 8;
             expert_major_views.push_back(fixture->raw);
+            if (arguments->precision == "w8a16-g128") {
+                const auto index = static_cast<std::size_t>(
+                    std::distance(fixtures.begin(), fixture));
+                ordered_w8a16_views.push_back(w8a16_views[index]);
+            }
+        }
+        if (arguments->precision == "w8a16-g128") {
+            w8a16_views = std::move(ordered_w8a16_views);
         }
     }
     std::vector<float> packed_input;
@@ -1354,6 +1436,12 @@ int main(int argc, char** argv) {
         (std::span<const float> current_input,
          const k3x::ExpertMajorPackedPlan& current_plan)
         -> k3x::Result<std::vector<float>> {
+        if (arguments->precision == "w8a16-g128") {
+            return cuda.value()->w8a16_silu_mlp_expert_major_with_shared(
+                current_input, arguments->tokens, current_plan,
+                w8a16_views, shared_fixture.raw, arguments->layer,
+                k3x::ProfilePhase::decode);
+        }
         if (learned_moe_layer || learned_decoder_layer) {
             if (arguments->fuse_shared) {
                 return cuda.value()->raw_bf16_situ_mlp_expert_major_with_shared(
@@ -1499,6 +1587,7 @@ int main(int argc, char** argv) {
     const auto stats_after = cuda.value()->runtime_stats();
     const auto cpu_abs = maximum_absolute_difference(actual, cpu_reference);
     const auto cpu_scale = std::max(maximum_absolute_value(cpu_reference), 1.0e-6F);
+    const auto cpu_relative_l2 = relative_l2_difference(actual, cpu_reference);
     std::optional<float> cpu_expected_abs;
     std::optional<float> cpu_expected_rel;
     std::optional<float> expected_abs;
@@ -1509,7 +1598,8 @@ int main(int argc, char** argv) {
             maximum_absolute_value(*expected_output), 1.0e-6F);
         cpu_expected_rel = *cpu_expected_abs / cpu_expected_scale;
         auto expected_actual = actual;
-        if (arguments->precision == "bf16-rounded") {
+        if (arguments->precision == "bf16-rounded" ||
+            arguments->precision == "w8a16-g128") {
             for (auto& value : expected_actual) value = round_to_bf16(value);
         }
         expected_abs = maximum_absolute_difference(
@@ -1560,9 +1650,19 @@ int main(int argc, char** argv) {
         }
         std::cout << ']';
     };
+    std::uint64_t w8a16_payload_bytes = 0;
+    for (const auto& fixture : fixtures) {
+        for (const auto& weight : fixture.w8a16) {
+            w8a16_payload_bytes += weight.values.size() + weight.scales.size();
+        }
+    }
     std::cout << std::setprecision(12)
               << "{\"artifact_kind\":\""
-              << ((expert_major || learned_route_mode)
+              << (arguments->precision == "w8a16-g128"
+                      ? (learned_decoder_layer
+                             ? "glm5.2_real_w8a16_decoder_layer"
+                             : "glm5.2_real_w8a16_learned_moe_layer")
+                      : ((expert_major || learned_route_mode)
                       ? (learned_decoder_layer
                              ? "glm5.2_real_bf16_decoder_layer"
                              : (learned_moe_layer
@@ -1570,7 +1670,7 @@ int main(int argc, char** argv) {
                                     : (learned_expert_major
                                            ? "glm5.2_real_bf16_learned_expert_major"
                                            : "glm5.2_real_bf16_expert_major")))
-                      : "glm5.2_real_bf16_expert")
+                      : "glm5.2_real_bf16_expert"))
               << "\""
               << ",\"layer_id\":" << arguments->layer
               << ",\"expert_id\":" << expert_ids.front()
@@ -1607,6 +1707,7 @@ int main(int argc, char** argv) {
               << ",\"resident_budget_bytes\":"
               << arguments->resident_bytes
               << ",\"host_payload_bytes\":" << host_payload_bytes
+              << ",\"w8a16_payload_bytes\":" << w8a16_payload_bytes
               << ",\"router_payload_bytes\":" << router_payload_bytes
               << ",\"shared_payload_bytes\":" << shared_payload_bytes
               << ",\"decoder_trunk_payload_bytes\":"
@@ -1622,6 +1723,7 @@ int main(int argc, char** argv) {
               << ",\"latency_nanoseconds_median\":" << median(samples)
               << ",\"gpu_cpu_max_absolute_error\":" << cpu_abs
               << ",\"gpu_cpu_max_relative_error\":" << cpu_abs / cpu_scale
+              << ",\"gpu_cpu_relative_l2_error\":" << cpu_relative_l2
               << ",\"cpu_expected_max_absolute_error\":";
     if (cpu_expected_abs) {
         std::cout << *cpu_expected_abs;
@@ -1660,6 +1762,13 @@ int main(int argc, char** argv) {
               << stats_after.resident_grid_kernel_launches
               << ",\"resident_grid_descriptor_h2d_bytes\":"
               << stats_after.resident_grid_descriptor_h2d_bytes
+              << ",\"w8a16_calls\":" << stats_after.w8a16_calls
+              << ",\"w8a16_assignments\":"
+              << stats_after.w8a16_assignments
+              << ",\"w8a16_kernel_launches\":"
+              << stats_after.w8a16_kernel_launches
+              << ",\"w8a16_descriptor_h2d_bytes\":"
+              << stats_after.w8a16_descriptor_h2d_bytes
               << ",\"warmup\":" << arguments->warmup
               << ",\"iterations\":" << arguments->iterations << "}\n";
     return 0;

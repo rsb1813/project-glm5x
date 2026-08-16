@@ -43,8 +43,13 @@ bool valid_payload(ResidentWeightKey key,
                elements <= std::numeric_limits<std::uint64_t>::max() / 2 &&
                primary.size() == elements * 2;
     }
-    return primary.size() == elements / 2 &&
-           secondary.size() == elements / key.group_size;
+    if (key.representation == WeightRepresentation::mxfp4) {
+        return primary.size() == elements / 2 &&
+               secondary.size() == elements / key.group_size;
+    }
+    return key.representation == WeightRepresentation::w8a16 &&
+           primary.size() == elements &&
+           secondary.size() == elements / key.group_size * 2;
 }
 
 struct KeyLess {
