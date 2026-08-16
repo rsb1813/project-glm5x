@@ -118,6 +118,6 @@
 - [x] Re-run the exact official layer-10 decoder gate and record B-0008 without calling it full-model TPS.
 - [x] Compare NVFP4 residual, FP8, mixed BF16 rescue, and groupwise W8/W6 quality on the official layer-10 input.
 - [x] Select W8A16-G128 after its BF16-scale probe passed the bounded one-percent layer-L2 gate.
-- [ ] Implement the fixed W8A16-G128 host pack/decode contract.
+- [x] Implement the fixed W8A16-G128 host pack/decode contract.
 - [ ] Implement and measure the resident W8A16 expert-major CUDA path on RTX 5080.
 - [ ] Require exact natural routes, at most one-percent layer L2, zero warm routed H2D, and a BF16 fallback before sidecar manufacturing.

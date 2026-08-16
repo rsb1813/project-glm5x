@@ -33,6 +33,7 @@ add_library(k3x_runtime
     runtime/src/glm5x_bundle.cpp
     runtime/src/glm5x_runtime_index.cpp
     runtime/src/glm5x_activation.cpp
+    runtime/src/w8a16.cpp
 )
 if(K3X_ENABLE_CUDA)
     enable_language(CUDA)
@@ -224,6 +225,10 @@ target_link_libraries(test_glm5x_bf16_bundle PRIVATE k3x_runtime)
 
 add_executable(test_glm5x_runtime_index tests/cpp/test_glm5x_runtime_index.cpp)
 target_link_libraries(test_glm5x_runtime_index PRIVATE k3x_runtime)
+
+add_executable(test_w8a16 tests/cpp/test_w8a16.cpp)
+target_link_libraries(test_w8a16 PRIVATE k3x_runtime)
+add_test(NAME w8a16 COMMAND test_w8a16)
 
 add_executable(test_io_completion tests/cpp/test_io_completion.cpp)
 target_include_directories(test_io_completion PRIVATE runtime/src)

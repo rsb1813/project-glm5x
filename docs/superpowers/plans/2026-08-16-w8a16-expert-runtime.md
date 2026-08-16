@@ -7,10 +7,10 @@ quality and warm latency on the official GLM-5.2 layer-10 RTX 5080 gate.
 
 ## Task 1: Packed host contract
 
-- [ ] Add a RED unit contract for BF16-to-W8A16 packing, BF16 scale rounding,
+- [x] Add a RED unit contract for BF16-to-W8A16 packing, BF16 scale rounding,
   deterministic bytes, shape rejection, and reference decode error.
-- [ ] Implement the smallest fixed G128 host pack/decode API.
-- [ ] Run focused host tests and commit the contract.
+- [x] Implement the smallest fixed G128 host pack/decode API.
+- [x] Run focused host tests and commit the contract.
 
 ## Task 2: Resident CUDA kernel
 
