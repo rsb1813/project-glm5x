@@ -47,6 +47,7 @@ if(K3X_ENABLE_CUDA)
         runtime/cuda/pinned_memory.cu
         runtime/cuda/resident_weights.cu
         runtime/cuda/situ.cu
+        runtime/cuda/w8a16.cu
     )
     target_link_libraries(k3x_runtime PUBLIC CUDA::cudart CUDA::cublasLt)
     set_target_properties(k3x_runtime PROPERTIES
@@ -143,6 +144,12 @@ else()
     target_include_directories(test_cuda_mxfp4 PRIVATE runtime/cuda)
     set_target_properties(test_cuda_mxfp4 PROPERTIES CUDA_ARCHITECTURES "120-real")
     add_test(NAME cuda_mxfp4 COMMAND test_cuda_mxfp4)
+
+    add_executable(test_cuda_w8a16 tests/cuda/test_cuda_w8a16.cu)
+    target_link_libraries(test_cuda_w8a16 PRIVATE k3x_runtime)
+    target_include_directories(test_cuda_w8a16 PRIVATE runtime/cuda)
+    set_target_properties(test_cuda_w8a16 PROPERTIES CUDA_ARCHITECTURES "120-real")
+    add_test(NAME cuda_w8a16 COMMAND test_cuda_w8a16)
 
     add_executable(test_cuda_expert_grid tests/cuda/test_cuda_expert_grid.cu)
     target_link_libraries(test_cuda_expert_grid PRIVATE k3x_runtime)
