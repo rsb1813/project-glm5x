@@ -22,7 +22,7 @@ glm5x-export-moe-activation = "glm5x_ref.activation_export:main"
 
 [project.optional-dependencies]
 dev = [
-  "cmake==4.4.2",
+  "cmake==4.4.3",
   "ninja==1.13.0",
   "pytest==9.1.1",
 ]
