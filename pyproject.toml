@@ -9,7 +9,7 @@ description = "A GLM-5.x-specific out-of-core inference engine"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
-  "google-crc32c==1.8.0",
+  "google-crc32c==1.9.0",
   "numpy==2.5.2",
   "psutil==7.2.2",
   "safetensors==0.8.0",
